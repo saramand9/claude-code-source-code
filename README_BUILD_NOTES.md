@@ -24,7 +24,8 @@
 
 2. **混合**：处理 Bun 编译期能力
 
-   - **mock/stub/降级**：将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
+   - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`，但运行时实现为保守外部版，不等同于官方完整 ContextCollapse。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -66,7 +67,7 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...) -> false` | mock/stub/降级 | 没有恢复 Anthropic 内部 feature gate，只是按外部构建关闭 gated 代码。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`，其它内部 gate 仍按外部构建关闭。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
 | `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools；server 创建时 fail-fast。 |
@@ -79,6 +80,8 @@
 | `openspec/templates/verification-report.html` | 尝试修复/真实适配 | 实现验证与后置清理拆分、字段规范化、筛选和搜索。 |
 | `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | 混合 | 构建时 external 保留；新增统一可选 native loader，缺失时走 fallback 或返回明确不可用状态。 |
 | `scripts/test-build-safety.mjs` | 尝试修复/真实适配 | 新增可重复的深度回归测试，覆盖 stub manifest、fail-fast、native fallback、deep link 和 CLI smoke。 |
+| `src/services/contextCollapse/*` | 混合 | 替换原 `.d.ts` 占位，提供可加载的保守外部运行时；不做真实摘要、投影删除或 ctx-agent 调度。 |
+| `src/tools/CtxInspectTool/CtxInspectTool.ts` | 混合 | 补齐工具加载路径和只读检查输出；默认隐藏，仅显式设置 collapse 环境变量时启用。 |
 
 ## 尝试修复/真实适配
 
@@ -95,7 +98,7 @@
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 统一替换为 `false`，等价于关闭内部 feature gate。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - `@ant/claude-for-chrome-mcp` 在构建副本中生成为空 browser tools；server 创建时会 fail-fast。
 - 一批 feature-gated 内部模块会在 `build-src/` 中生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`，例如：
@@ -108,8 +111,12 @@
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
-  - `services/contextCollapse`
   - `services/compact/*`
+- `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
+  - 不生成摘要。
+  - 不把历史消息投影成 `<collapsed id="...">` 占位。
+  - 不启动或调度官方 ctx-agent。
+  - 默认不接管 AutoCompact/ReactiveCompact，避免假启用后压制真实可用的压缩路径。
 - 下列 native 包仍作为 external 保留；当前通过 `src/utils/nativeOptional.ts` 统一包装缺失错误，触发对应路径时会 fallback、返回不可用状态或记录明确 debug 信息：
   - `audio-capture-napi`
   - `image-processor-napi`
@@ -133,22 +140,22 @@ import { feature } from 'bun:bundle'
 
 ```text
 feature('...') -> false
+feature('CONTEXT_COLLAPSE') -> true
 ```
 
-这能让外部主路径继续构建，但也意味着所有 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE` 只是被保留进 bundle，运行时仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制；其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
 构建成功不代表完整复原官方 Claude Code。本分支的核心风险是：部分代码只是让 import、bundle 或主路径运行成功，真实功能并不存在或不完整。
 
-1. `feature(...) -> false` 是最大风险
+1. feature gate 替换仍是最大风险
 
-   这会关闭大量内部或实验功能，例如：
+   除当前选择性保留的 `CONTEXT_COLLAPSE` 外，这仍会关闭大量内部或实验功能，例如：
 
    ```text
    KAIROS
    BG_SESSIONS
-   CONTEXT_COLLAPSE
    CACHED_MICROCOMPACT
    HISTORY_SNIP
    VOICE_MODE
@@ -162,7 +169,8 @@ feature('...') -> false
    可能影响：
 
    - 后台任务、KAIROS、主动模式、部分远程/桥接能力不可用。
-   - 上下文压缩、历史裁剪等高级长上下文能力缺失。
+   - 历史裁剪、cached microcompact 等高级长上下文能力仍缺失。
+   - `CONTEXT_COLLAPSE` 虽已可加载，但不是官方完整实现。
    - Bash/权限 classifier 自动判断能力关闭，权限体验可能和官方版不同。
    - 有些命令、工具或 UI 分支会直接消失，而不是被真实实现。
 
@@ -219,7 +227,7 @@ feature('...') -> false
 ### 本轮 mock/stub/降级说明
 
 - 新增的若干 `.d.ts` 只解决 TypeScript 编译期缺失声明，不代表对应内部模块已经完整实现。
-- `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭。
+- 当时 `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭；后续已对 `CONTEXT_COLLAPSE` 做选择性保留，见下一节。
 - 当前构建仍会生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`；这些 stub 是明确失败边界，不是功能恢复。
 - `build-src/stub-manifest.json` 当前显示：15 个 missing modules、0 个 missing exports、14 个生成 stub。
 
@@ -235,7 +243,57 @@ npm run test:build-safety
 
 - `npm run check` 通过，执行内容为 `tsc --noEmit`，只做 TypeScript 静态检查，不生成产物。
 - `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`，产物大小约 27.1MB。
-- `npm run test:build-safety` 通过，当前为 14/14 项。
+- `npm run test:build-safety` 通过，当时为 14/14 项；ContextCollapse 后续专项补测后为 17/17 项。
+
+## 2026-06-16 ContextCollapse 外部版修复记录
+
+本轮根据两篇关于 Claude Code Context 机制的分析文章，优先修复“上下文压缩功能被构建期整体关闭、运行到相关路径会靠 stub 或缺失模块失败”的问题。参考链接：
+
+- https://blog.csdn.net/xx_nm98/article/details/161715321
+- https://blog.csdn.net/wayne_lee_lwc/article/details/160633533
+
+### 本轮技术方案
+
+- 不伪造官方完整 ContextCollapse。
+- 构建层选择性保留 `CONTEXT_COLLAPSE`，其它 feature gate 仍默认关闭。
+- 运行时补齐 `src/services/contextCollapse/index.ts`、`operations.ts`、`persist.ts`，替换原来的 `.d.ts` 占位。
+- 工具层补齐 `CtxInspectTool`，避免 `tools.ts` 在 `CONTEXT_COLLAPSE` 被保留后加载缺失工具。
+- `query.ts` 的 prompt-too-long 恢复分支改为 runtime 真启用时才接管，避免默认路径重复吐出 413 错误或压制 AutoCompact。
+
+### 本轮尝试修复/真实适配
+
+- `scripts/build.mjs` 支持 `DEFAULT_PRESERVED_FEATURES` 和 `CLAUDE_CODE_PRESERVE_FEATURES`，当前默认保留 `CONTEXT_COLLAPSE`。
+- `persist.restoreFromEntries()` 可以恢复 transcript 中已有的 collapse commit/snapshot 元数据。
+- `getStats()`、`subscribe()`、`resetContextCollapse()`、`initContextCollapse()` 等运行时 API 可加载可调用。
+- `CtxInspectTool` 可输出当前运行时状态，用于诊断 collapse 是否被请求、是否有恢复状态。
+- `scripts/test-build-safety.mjs` 新增 3 项 ContextCollapse 专项测试。
+
+### 本轮 mock/stub/降级说明
+
+- `ContextCollapse` 当前是 **external-conservative** 实现，不是官方完整实现。
+- `projectView()` 保持 no-op，不会删除消息或注入真实 `<collapsed>` 摘要占位。
+- `recoverFromOverflow()` 不伪造提交，`committed` 固定为 0。
+- 默认 `isContextCollapseEnabled()` 为 `false`，只有显式环境变量加已恢复状态才返回 `true`，避免错误关闭 AutoCompact。
+- `CtxInspectTool` 默认隐藏；显式设置 `CLAUDE_CONTEXT_COLLAPSE=1` 或 `CLAUDE_CODE_CONTEXT_COLLAPSE=1` 后才启用。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+node dist\cli.js --version
+node dist\cli.js --help
+$env:CLAUDE_CONTEXT_COLLAPSE='1'; node dist\cli.js --version
+node --check dist\cli.js
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`，产物大小约 27.1MB。
+- `npm run test:build-safety` 通过，当前为 17/17 项。
+- 默认启动和显式 `CLAUDE_CONTEXT_COLLAPSE=1` 启动均通过版本烟测。
 
 ## 构建和启动
 
@@ -276,9 +334,12 @@ node dist\cli.js --help
 node dist\cli.js doctor --help
 node dist\cli.js -p "<prompt>" --max-turns 1 --model <model>
 npm run test:build-safety
+$env:CLAUDE_CONTEXT_COLLAPSE='1'; node dist\cli.js --version
+node --check dist\cli.js
 build-src/stub-manifest.json 生成
 fail-fast stub 默认导出和命名导出行为
 fail-fast stub 调用、构造、取属性和数值转换行为
+ContextCollapse 默认关闭、显式 opt-in、恢复状态和 CtxInspectTool 加载
 modifiers-napi 缺失 fallback
 image-processor-napi 缺失时 sharp fallback
 audio-capture-napi 缺失时语音依赖检查 fallback
@@ -291,11 +352,14 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 14 项深度检查：
+`npm run test:build-safety` 当前覆盖 17 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
 - lazy tool export loader 对 default-only fail-fast stub 的回退行为。
+- `CONTEXT_COLLAPSE` 在构建副本中被保留，但 prompt-too-long 兜底仍受 runtime gate 控制。
+- ContextCollapse 外部运行时默认关闭、projection no-op、恢复元数据、显式 opt-in 和 prompt-too-long withholding 行为。
+- `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
 - `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
 - `nativeOptional` 对缺失 native 包的统一错误包装。
@@ -310,3 +374,5 @@ url-handler-napi 缺失由 nativeOptional 包装
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取和非交互任务。
 
 不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、VerifyPlanExecution、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。
+
+ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代 Snip、真实 ctx-agent、摘要提交或官方投影恢复逻辑。

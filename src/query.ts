@@ -1196,6 +1196,7 @@ async function* queryLoop(
         if (
           feature('CONTEXT_COLLAPSE') &&
           contextCollapse &&
+          contextCollapse.isContextCollapseEnabled() &&
           state.transition?.reason !== 'collapse_drain_retry'
         ) {
           const drained = contextCollapse.recoverFromOverflow(
@@ -1280,7 +1281,11 @@ async function* queryLoop(
         yield lastMessage
         void executeStopFailureHooks(lastMessage, toolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
-      } else if (feature('CONTEXT_COLLAPSE') && isWithheld413) {
+      } else if (
+        feature('CONTEXT_COLLAPSE') &&
+        contextCollapse?.isContextCollapseEnabled() &&
+        isWithheld413
+      ) {
         // reactiveCompact compiled out but contextCollapse withheld and
         // couldn't recover (staged queue empty/stale). Surface. Same
         // early-return rationale — don't fall through to stop hooks.

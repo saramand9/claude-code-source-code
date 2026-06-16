@@ -8,7 +8,8 @@
  *
  * What this script does:
  *   1. Copy src/ → build-src/ (original untouched)
- *   2. Replace `feature('X')` → `false`  (compile-time → runtime)
+ *   2. Replace `feature('X')` → `true` for selected restored features,
+ *      otherwise `false`  (compile-time → runtime)
  *   3. Replace `MACRO.VERSION` etc → string literals
  *   4. Replace `import from 'bun:bundle'` → stub
  *   5. Create stubs for missing feature-gated modules
@@ -30,6 +31,14 @@ const BUILD = join(ROOT, 'build-src')
 const ENTRY = join(BUILD, 'entry.ts')
 const STUB_MANIFEST = join(BUILD, 'stub-manifest.json')
 const stubManifest = []
+const DEFAULT_PRESERVED_FEATURES = ['CONTEXT_COLLAPSE']
+const preservedFeatures = new Set([
+  ...DEFAULT_PRESERVED_FEATURES,
+  ...(process.env.CLAUDE_CODE_PRESERVE_FEATURES ?? '')
+    .split(/[,\s]+/)
+    .map(name => name.trim())
+    .filter(Boolean),
+])
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,6 +60,10 @@ function recordStub(entry) {
   const key = JSON.stringify(entry)
   if (stubManifest.some(item => JSON.stringify(item) === key)) return
   stubManifest.push(entry)
+}
+
+function transformFeatureCall(_match, featureName) {
+  return preservedFeatures.has(featureName) ? 'true' : 'false'
 }
 
 async function writeStubManifest() {
@@ -112,9 +125,12 @@ for await (const file of walk(join(BUILD, 'src'))) {
   let src = await readFile(file, 'utf8')
   let changed = false
 
-  // 2a. feature('X') → false
+  // 2a. feature('X') → literal boolean
   if (/\bfeature\s*\(\s*['"][A-Z0-9_]+['"]\s*,?\s*\)/.test(src)) {
-    src = src.replace(/\bfeature\s*\(\s*['"][A-Z0-9_]+['"]\s*,?\s*\)/g, 'false')
+    src = src.replace(
+      /\bfeature\s*\(\s*['"]([A-Z0-9_]+)['"]\s*,?\s*\)/g,
+      transformFeatureCall,
+    )
     changed = true
   }
 
@@ -128,7 +144,7 @@ for await (const file of walk(join(BUILD, 'src'))) {
 
   // 2c. Remove bun:bundle import (feature() is already replaced)
   if (src.includes("from 'bun:bundle'") || src.includes('from "bun:bundle"')) {
-    src = src.replace(/import\s*\{\s*feature\s*\}\s*from\s*['"]bun:bundle['"];?\n?/g, '// feature() replaced with false at build time\n')
+    src = src.replace(/import\s*\{\s*feature\s*\}\s*from\s*['"]bun:bundle['"];?\n?/g, '// feature() replaced with literal booleans at build time\n')
     changed = true
   }
 

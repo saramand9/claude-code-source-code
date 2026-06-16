@@ -184,6 +184,137 @@ console.log('tool loader fallback OK');`,
   assert.equal(output, 'tool loader fallback OK')
 })
 
+await test('context collapse build gate is preserved but runtime-gated', async () => {
+  const querySource = await readFile(join(BUILD, 'src/query.ts'), 'utf8')
+  const toolsSource = await readFile(join(BUILD, 'src/tools.ts'), 'utf8')
+  assert.match(
+    querySource,
+    /const contextCollapse = true\s+\?\s+\(require\('\.\/services\/contextCollapse\/index\.js'\)/,
+    'CONTEXT_COLLAPSE should stay bundled',
+  )
+  assert.match(
+    toolsSource,
+    /const CtxInspectTool = true\s+\?\s+loadToolExport/,
+    'CtxInspectTool should stay bundled',
+  )
+  assert.match(
+    querySource,
+    /contextCollapse\?\.isContextCollapseEnabled\(\) &&\s+isWithheld413/,
+    'prompt-too-long fallback must remain runtime-gated',
+  )
+  assert.match(
+    querySource,
+    /const reactiveCompact = false\s+\?\s+\(require\('\.\/services\/compact\/reactiveCompact\.js'\)/,
+    'unrestored feature gates should still be compiled out',
+  )
+})
+
+await test('context collapse runtime is loadable and conservative', async () => {
+  const output = await buildAndRunSnippet(
+    'context-collapse-runtime-test',
+    `delete process.env.CLAUDE_CONTEXT_COLLAPSE;
+delete process.env.CLAUDE_CODE_CONTEXT_COLLAPSE;
+const contextCollapse = await import('./src/services/contextCollapse/index.ts');
+const operations = await import('./src/services/contextCollapse/operations.ts');
+const persist = await import('./src/services/contextCollapse/persist.ts');
+
+contextCollapse.resetContextCollapse();
+if (contextCollapse.isContextCollapseEnabled()) throw new Error('enabled by default');
+let stats = contextCollapse.getStats();
+if (stats.runtimeRequested || stats.hasRestoredState || stats.collapsedSpans !== 0 || stats.stagedSpans !== 0) {
+  throw new Error('bad default stats: ' + JSON.stringify(stats));
+}
+
+let notified = 0;
+const unsubscribe = contextCollapse.subscribe(() => { notified += 1; });
+contextCollapse.resetContextCollapse();
+unsubscribe();
+if (notified !== 1) throw new Error('subscribe/reset did not notify once: ' + notified);
+
+const messages = [];
+if (operations.projectView(messages) !== messages) throw new Error('projectView should preserve array identity');
+const applied = await contextCollapse.applyCollapsesIfNeeded(messages, {}, 'repl_main_thread');
+if (applied.messages !== messages) throw new Error('applyCollapsesIfNeeded should preserve messages');
+const recovered = contextCollapse.recoverFromOverflow(messages, 'repl_main_thread');
+if (recovered.committed !== 0 || recovered.messages !== messages) throw new Error('recoverFromOverflow should not fake commits');
+
+const promptTooLong = {
+  type: 'assistant',
+  isApiErrorMessage: true,
+  message: { content: [{ type: 'text', text: 'Prompt is too long' }] },
+};
+const detector = message => message.message.content[0].text.startsWith('Prompt is too long');
+if (contextCollapse.isWithheldPromptTooLong(promptTooLong, detector, 'repl_main_thread')) {
+  throw new Error('disabled runtime should not withhold prompt-too-long');
+}
+
+persist.restoreFromEntries([
+  {
+    type: 'marble-origami-commit',
+    sessionId: '00000000-0000-0000-0000-000000000001',
+    collapseId: '0000000000000001',
+    summaryUuid: '00000000-0000-0000-0000-000000000002',
+    summaryContent: '<collapsed id="0000000000000001">summary</collapsed>',
+    summary: 'summary',
+    firstArchivedUuid: '00000000-0000-0000-0000-000000000003',
+    lastArchivedUuid: '00000000-0000-0000-0000-000000000004',
+  },
+], {
+  type: 'marble-origami-snapshot',
+  sessionId: '00000000-0000-0000-0000-000000000001',
+  staged: [{
+    startUuid: '00000000-0000-0000-0000-000000000005',
+    endUuid: '00000000-0000-0000-0000-000000000006',
+    summary: 'staged',
+    risk: 1,
+    stagedAt: 1,
+  }],
+  armed: false,
+  lastSpawnTokens: 0,
+});
+stats = contextCollapse.getStats();
+if (!stats.hasRestoredState || stats.collapsedSpans !== 1 || stats.stagedSpans !== 1) {
+  throw new Error('restore did not update stats: ' + JSON.stringify(stats));
+}
+if (contextCollapse.isContextCollapseEnabled()) throw new Error('restored state should still require explicit runtime opt-in');
+process.env.CLAUDE_CONTEXT_COLLAPSE = '1';
+if (!contextCollapse.isContextCollapseEnabled()) throw new Error('runtime opt-in with restored state should enable');
+if (!contextCollapse.isWithheldPromptTooLong(promptTooLong, detector, 'repl_main_thread')) {
+  throw new Error('enabled runtime should withhold prompt-too-long for recovery');
+}
+contextCollapse.resetContextCollapse();
+delete process.env.CLAUDE_CONTEXT_COLLAPSE;
+console.log('context collapse runtime OK');`,
+  )
+  assert.equal(output, 'context collapse runtime OK')
+})
+
+await test('CtxInspectTool is loadable and opt-in', async () => {
+  const output = await buildAndRunSnippet(
+    'ctx-inspect-tool-test',
+    `delete process.env.CLAUDE_CONTEXT_COLLAPSE;
+const { CtxInspectTool } = await import('./src/tools/CtxInspectTool/CtxInspectTool.ts');
+if (CtxInspectTool.name !== 'CtxInspect') throw new Error('bad tool name');
+if (CtxInspectTool.isEnabled()) throw new Error('tool should be disabled unless runtime is requested');
+if (!CtxInspectTool.isReadOnly({}) || !CtxInspectTool.isConcurrencySafe({})) {
+  throw new Error('tool should be read-only and concurrency-safe');
+}
+process.env.CLAUDE_CONTEXT_COLLAPSE = '1';
+if (!CtxInspectTool.isEnabled()) throw new Error('tool should enable on explicit runtime request');
+const result = await CtxInspectTool.call({});
+if (!result.data.runtimeRequested || result.data.enabled) {
+  throw new Error('unexpected default inspection result: ' + JSON.stringify(result.data));
+}
+const block = CtxInspectTool.mapToolResultToToolResultBlockParam(result.data, 'toolu_test');
+if (block.type !== 'tool_result' || !block.content.includes('external-conservative')) {
+  throw new Error('bad tool result block');
+}
+delete process.env.CLAUDE_CONTEXT_COLLAPSE;
+console.log('ctx inspect tool OK');`,
+  )
+  assert.equal(output, 'ctx inspect tool OK')
+})
+
 await test('generated build has no undefined export shims', async () => {
   const offenders = []
   for await (const file of walkFiles(BUILD)) {
