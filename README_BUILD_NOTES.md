@@ -8,55 +8,78 @@
 
 本次修改的目标是提供一个可复现的 Node/esbuild 构建路径，让当前源码能生成可启动的 `dist/cli.js`，并明确记录缺失功能的处理边界。
 
+## 标注口径
+
+- **尝试修复/真实适配**：为当前仓库补上可运行构建路径、运行依赖、参数兼容或实际业务逻辑。目标是让现有功能真实工作。
+- **mock/stub/降级**：为缺失的内部模块、Bun-only 能力或 native 能力提供占位实现。目标是让构建或非相关路径继续运行，不代表功能完整恢复。
+- **混合**：同一块改动里既有真实适配，也有明确降级。
+
 ## 修改了什么
 
-1. 构建入口改为 Node/esbuild
+1. **尝试修复/真实适配**：构建入口改为 Node/esbuild
 
    - `package.json` 的 `build` 改为直接执行 `node scripts/build.mjs`。
    - `scripts/build.mjs` 复制 `src/` 到 `build-src/` 后再做转换，避免直接修改原始源码。
    - 构建输出为 `dist/cli.js`。
 
-2. 处理 Bun 编译期能力
+2. **混合**：处理 Bun 编译期能力
 
-   - 将 `feature('...')` 在构建副本中替换为 `false`。
-   - 将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
-   - 移除或替换 `bun:bundle` 相关导入。
+   - **mock/stub/降级**：将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
+   - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
+   - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
-3. 增加缺失模块的构建期 stub 机制
+3. **混合**：增加缺失模块的构建期 stub 机制
 
-   - `scripts/build.mjs` 使用 esbuild JS API。
-   - 构建失败时解析缺失模块和缺失导出。
-   - 对 feature-gated 的相对路径模块生成空 stub。
-   - 对缺失的命名导出补 `undefined` 导出，保证 bundle 能继续。
+   - **尝试修复/真实适配**：`scripts/build.mjs` 使用 esbuild JS API，并解析缺失模块/缺失导出。
+   - **mock/stub/降级**：对 feature-gated 的相对路径模块生成空 stub。
+   - **mock/stub/降级**：对缺失的命名导出补 `undefined` 导出，保证 bundle 能继续。
 
-4. 补充运行依赖和 TypeScript 配置
+4. **尝试修复/真实适配**：补充运行依赖和 TypeScript 配置
 
    - `package.json` / `package-lock.json` 补充 CLI 运行和打包需要的 npm 依赖。
    - `tsconfig.json` 增加 Node/Bun 类型、DOM lib、`src/*` 路径映射和更适合当前源码布局的 `rootDir`。
 
-5. 增加 `bun:ffi` stub
+5. **mock/stub/降级**：增加 `bun:ffi` stub
 
    - 新增 `stubs/bun-ffi.ts`。
    - 当前实现仅提供空对象和空 `dlopen()` 返回值，用于非 Bun 环境下通过构建。
 
-6. 修复 CLI 启动参数兼容问题
+6. **尝试修复/真实适配**：修复 CLI 启动参数兼容问题
 
    - 修复 `src/main.tsx` 中 Commander 15 不接受 `-d2e, --debug-to-stderr` 这种短参数写法导致的启动崩溃。
    - 当前隐藏参数改为 `--debug-to-stderr`。
 
-7. 改造 source preparation 脚本
+7. **尝试修复/真实适配**：改造 source preparation 脚本
 
    - `scripts/prepare-src.mjs` 改为输出到 `build-src/prepared`。
    - 不再直接修改 `src/` 或根目录 `stubs/`。
    - 支持 `--out <dir>` 指定输出目录。
 
-8. 新增验证报告模板
+8. **尝试修复/真实适配**：新增验证报告模板
 
    - 新增 `openspec/templates/verification-report.html`。
    - 将数据验证逻辑 `validateRows()` 和数据后置清理 `postProcessRows()` 拆开。
    - 后置处理负责规范化 `id`、`caseName`、`status`、`dimension`、`detail` 等字段。
 
-## 哪些是真实现
+## 逐项分类
+
+| 文件或功能 | 标注 | 说明 |
+| --- | --- | --- |
+| `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
+| `scripts/build.mjs` 的 `feature(...) -> false` | mock/stub/降级 | 没有恢复 Anthropic 内部 feature gate，只是按外部构建关闭 gated 代码。 |
+| `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
+| `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成空模块或 `undefined` 导出，只保证 bundle 继续，不恢复内部功能。 |
+| `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools 和 no-op server。 |
+| `color-diff-napi` alias 到 `src/native-ts/color-diff` | 尝试修复/真实适配 | 使用已有 TS port 替代 native 包；其中 `BAT_THEME` 支持仍是降级。 |
+| `src/native-ts/file-index` | 尝试修复/真实适配 | 使用已有 TS fuzzy index 替代 Rust NAPI 搜索模块。 |
+| `src/native-ts/yoga-layout` | 尝试修复/真实适配 | 使用已有 TS flex layout 实现覆盖 Ink 实际使用的布局子集。 |
+| `stubs/bun-ffi.ts` | mock/stub/降级 | 空 FFI 占位，不提供真实 `dlopen` 或 native symbol 调用。 |
+| `src/main.tsx` Commander 参数修改 | 尝试修复/真实适配 | 修复启动时参数定义不兼容导致的崩溃。 |
+| `scripts/prepare-src.mjs` 隔离输出 | 尝试修复/真实适配 | 避免准备阶段直接修改 `src/` 和根目录 `stubs/`。 |
+| `openspec/templates/verification-report.html` | 尝试修复/真实适配 | 实现验证与后置清理拆分、字段规范化、筛选和搜索。 |
+| `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | mock/stub/降级 | 构建时 external 保留；触发对应运行路径时仍依赖真实 native 包或可能失败。 |
+
+## 尝试修复/真实适配
 
 这些部分是当前分支实际可用的实现或构建适配：
 
@@ -67,7 +90,7 @@
 - 已存在的纯 TypeScript native 替代实现会被构建使用，例如 `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout`。
 - 验证报告模板的数据校验、过滤、搜索和后置清理逻辑。
 
-## 哪些是 stub 或降级
+## mock/stub/降级
 
 这些部分不是完整官方实现：
 
