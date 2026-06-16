@@ -5,6 +5,8 @@
 > Extracted from npm package `@anthropic-ai/claude-code` version **2.1.88**.
 > The published package ships a single bundled `cli.js` (~12MB). The `src/` directory in this repo contains the **unbundled TypeScript source** extracted from the npm tarball.
 
+> Current branch build notes: see [README_BUILD_NOTES.md](README_BUILD_NOTES.md) for the Node/esbuild build adaptation, generated stub boundary, and verification summary.
+
 **Language**: **English** | [中文](README_CN.md) | [한국어](README_KR.md) | [日本語](README_JA.md)
 
 ---
