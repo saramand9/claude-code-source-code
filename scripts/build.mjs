@@ -190,7 +190,7 @@ const MODULE_NAME = ${JSON.stringify(moduleName)}
 
 function __unavailableFeatureExport(exportName) {
   const label = exportName ? MODULE_NAME + '#' + exportName : MODULE_NAME
-  const fail = () => {
+  function fail() {
     throw new Error('Feature-gated module unavailable in this source build: ' + label)
   }
   return new Proxy(fail, {
@@ -285,7 +285,7 @@ async function addNamedExport(modulePath, exportName) {
     ? ''
     : `\nfunction __unavailableFeatureExport(exportName) {
   const label = ${JSON.stringify(toRepoPath(targetPath))} + '#' + exportName
-  const fail = () => {
+  function fail() {
     throw new Error('Feature-gated export unavailable in this source build: ' + label)
   }
   return new Proxy(fail, {

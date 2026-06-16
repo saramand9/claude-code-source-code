@@ -31,8 +31,8 @@
 3. **混合**：增加缺失模块的构建期 stub 机制
 
    - **尝试修复/真实适配**：`scripts/build.mjs` 使用 esbuild JS API，并解析缺失模块/缺失导出。
-   - **mock/stub/降级**：对 feature-gated 的相对路径模块生成空 stub。
-   - **mock/stub/降级**：对缺失的命名导出补 `undefined` 导出，保证 bundle 能继续。
+   - **mock/stub/降级**：对 feature-gated 的相对路径模块生成 fail-fast stub。
+   - **mock/stub/降级**：对缺失的命名导出补 fail-fast 导出，保证 bundle 能继续，但运行到对应路径时明确报错。
 
 4. **尝试修复/真实适配**：补充运行依赖和 TypeScript 配置
 
@@ -78,6 +78,7 @@
 | `scripts/prepare-src.mjs` 隔离输出 | 尝试修复/真实适配 | 避免准备阶段直接修改 `src/` 和根目录 `stubs/`。 |
 | `openspec/templates/verification-report.html` | 尝试修复/真实适配 | 实现验证与后置清理拆分、字段规范化、筛选和搜索。 |
 | `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | 混合 | 构建时 external 保留；新增统一可选 native loader，缺失时走 fallback 或返回明确不可用状态。 |
+| `scripts/test-build-safety.mjs` | 尝试修复/真实适配 | 新增可重复的深度回归测试，覆盖 stub manifest、fail-fast、native fallback、deep link 和 CLI smoke。 |
 
 ## 尝试修复/真实适配
 
@@ -205,6 +206,7 @@ feature('...') -> false
 ```powershell
 npm install
 npm run build
+npm run test:build-safety
 npm start -- --version
 ```
 
@@ -236,8 +238,10 @@ npm start -- --version
 node dist\cli.js --help
 node dist\cli.js doctor --help
 node dist\cli.js -p "<prompt>" --max-turns 1 --model <model>
+npm run test:build-safety
 build-src/stub-manifest.json 生成
 fail-fast stub 默认导出和命名导出行为
+fail-fast stub 调用、构造、取属性和数值转换行为
 modifiers-napi 缺失 fallback
 image-processor-napi 缺失时 sharp fallback
 audio-capture-napi 缺失时语音依赖检查 fallback
@@ -249,6 +253,17 @@ url-handler-napi 缺失由 nativeOptional 包装
 ```text
 2.1.88 (Claude Code)
 ```
+
+`npm run test:build-safety` 当前覆盖 13 项深度检查：
+
+- 构建输出、`build-src/stub-manifest.json` 和四类 stub 记录。
+- 默认导出和缺失命名导出的 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
+- 构建副本中不再存在 `export const X = undefined` 静默导出。
+- `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
+- `nativeOptional` 对缺失 native 包的统一错误包装。
+- `modifiers-napi`、`image-processor-napi`、`audio-capture-napi`、`url-handler-napi` 相关 fallback 或保护路径。
+- deep link 合法输入、非法 repo、控制字符和超长输入。
+- `dist/cli.js --version`、`--help`、`doctor --help` 和 `node --check`。
 
 还通过配置好的 Anthropic-compatible 代理完成过真实 `-p` 任务和一组纯推理 smoke test。该代理配置没有写入仓库。
 

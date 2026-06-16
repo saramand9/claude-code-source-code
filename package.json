@@ -8,6 +8,7 @@
     "prepare-src": "node scripts/prepare-src.mjs",
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
+    "test:build-safety": "node scripts/test-build-safety.mjs",
     "start": "node dist/cli.js"
   },
   "engines": {
