@@ -19,7 +19,7 @@
  */
 
 import { readdir, readFile, writeFile, mkdir, cp, rm, stat } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join, dirname, relative } from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -28,6 +28,8 @@ const ROOT = join(__dirname, '..')
 const VERSION = '2.1.88'
 const BUILD = join(ROOT, 'build-src')
 const ENTRY = join(BUILD, 'entry.ts')
+const STUB_MANIFEST = join(BUILD, 'stub-manifest.json')
+const stubManifest = []
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,6 +42,33 @@ async function* walk(dir) {
 }
 
 async function exists(p) { try { await stat(p); return true } catch { return false } }
+
+function toRepoPath(p) {
+  return relative(ROOT, p).replace(/\\/g, '/')
+}
+
+function recordStub(entry) {
+  const key = JSON.stringify(entry)
+  if (stubManifest.some(item => JSON.stringify(item) === key)) return
+  stubManifest.push(entry)
+}
+
+async function writeStubManifest() {
+  await writeFile(
+    STUB_MANIFEST,
+    `${JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        reason:
+          'Best-effort Node/esbuild build. These entries are unavailable feature-gated, private, or native-adjacent modules.',
+        entries: stubManifest,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+}
 
 async function ensureEsbuild() {
   try { execSync('npx esbuild --version', { stdio: 'pipe' }) }
@@ -131,11 +160,17 @@ await writeFile(
   `// Auto-generated stub for private @ant/claude-for-chrome-mcp package
 export const BROWSER_TOOLS = []
 export function createClaudeForChromeMcpServer() {
-  return { connect: async () => {} }
+  throw new Error('Private package unavailable in this source build: @ant/claude-for-chrome-mcp')
 }
 `,
   'utf8',
 )
+recordStub({
+  kind: 'private-package-stub',
+  module: '@ant/claude-for-chrome-mcp',
+  path: 'build-src/stubs/claude-for-chrome-mcp.js',
+  behavior: 'fail-fast when createClaudeForChromeMcpServer is called',
+})
 console.log('✅ Phase 3: Created entry wrapper')
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -149,20 +184,67 @@ const OUT_DIR = join(ROOT, 'dist')
 await mkdir(OUT_DIR, { recursive: true })
 const OUT_FILE = join(OUT_DIR, 'cli.js')
 
-async function writeStub(targetPath) {
+function failFastStubSource(moduleName) {
+  return `// Auto-generated fail-fast stub for a missing feature-gated module.
+const MODULE_NAME = ${JSON.stringify(moduleName)}
+
+function __unavailableFeatureExport(exportName) {
+  const label = exportName ? MODULE_NAME + '#' + exportName : MODULE_NAME
+  const fail = () => {
+    throw new Error('Feature-gated module unavailable in this source build: ' + label)
+  }
+  return new Proxy(fail, {
+    apply: fail,
+    construct: fail,
+    get(_target, prop) {
+      if (prop === 'then') return undefined
+      if (prop === Symbol.toPrimitive) return fail
+      if (prop === 'toString') return () => '[unavailable feature-gated export: ' + label + ']'
+      fail()
+    },
+    set: fail,
+  })
+}
+
+export default __unavailableFeatureExport('default')
+export const __stub = true
+export const __stubModuleName = MODULE_NAME
+export { __unavailableFeatureExport }
+`
+}
+
+async function writeStub(targetPath, meta) {
   await mkdir(dirname(targetPath), { recursive: true }).catch(() => {})
   if (await exists(targetPath)) return false
+  const moduleName = toRepoPath(targetPath)
 
   if (/\.(txt|md)$/.test(targetPath)) {
     await writeFile(targetPath, '', 'utf8')
+    recordStub({
+      kind: 'empty-asset-stub',
+      path: toRepoPath(targetPath),
+      importer: meta?.importer,
+      specifier: meta?.specifier,
+      behavior: 'empty text asset',
+    })
   } else if (/\.json$/.test(targetPath)) {
     await writeFile(targetPath, '{}', 'utf8')
+    recordStub({
+      kind: 'empty-asset-stub',
+      path: toRepoPath(targetPath),
+      importer: meta?.importer,
+      specifier: meta?.specifier,
+      behavior: 'empty JSON object',
+    })
   } else {
-    await writeFile(
-      targetPath,
-      `// Auto-generated stub for missing feature-gated module\nexport default function stub() {}\nexport const __stub = true\n`,
-      'utf8',
-    )
+    await writeFile(targetPath, failFastStubSource(moduleName), 'utf8')
+    recordStub({
+      kind: 'feature-gated-module-stub',
+      path: toRepoPath(targetPath),
+      importer: meta?.importer,
+      specifier: meta?.specifier,
+      behavior: 'throws when default or generated exports are used',
+    })
   }
   return true
 }
@@ -199,7 +281,37 @@ async function addNamedExport(modulePath, exportName) {
   const exportRe = new RegExp(`\\bexport\\s+(?:const|let|var|function|class)\\s+${exportName}\\b`)
   if (exportRe.test(src)) return false
 
-  await writeFile(targetPath, `${src}\nexport const ${exportName} = undefined\n`, 'utf8')
+  const helper = src.includes('function __unavailableFeatureExport')
+    ? ''
+    : `\nfunction __unavailableFeatureExport(exportName) {
+  const label = ${JSON.stringify(toRepoPath(targetPath))} + '#' + exportName
+  const fail = () => {
+    throw new Error('Feature-gated export unavailable in this source build: ' + label)
+  }
+  return new Proxy(fail, {
+    apply: fail,
+    construct: fail,
+    get(_target, prop) {
+      if (prop === 'then') return undefined
+      if (prop === Symbol.toPrimitive) return fail
+      if (prop === 'toString') return () => '[unavailable feature-gated export: ' + label + ']'
+      fail()
+    },
+    set: fail,
+  })
+}\n`
+
+  await writeFile(
+    targetPath,
+    `${src}${helper}\nexport const ${exportName} = __unavailableFeatureExport(${JSON.stringify(exportName)})\n`,
+    'utf8',
+  )
+  recordStub({
+    kind: 'missing-export-fail-fast',
+    path: toRepoPath(targetPath),
+    exportName,
+    behavior: 'throws when called, constructed, coerced, or dereferenced',
+  })
   return true
 }
 
@@ -285,7 +397,14 @@ for (let round = 1; round <= MAX_ROUNDS; round++) {
     const relativeTarget = targetPath.startsWith(BUILD) ? targetPath : null
     if (!relativeTarget) continue
 
-    if (await writeStub(relativeTarget)) stubCount++
+    if (
+      await writeStub(relativeTarget, {
+        importer: importer.replace(/\\/g, '/'),
+        specifier,
+      })
+    ) {
+      stubCount++
+    }
   }
 
   let exportCount = 0
@@ -303,9 +422,11 @@ for (let round = 1; round <= MAX_ROUNDS; round++) {
 }
 
 if (succeeded) {
+  await writeStubManifest()
   const size = (await stat(OUT_FILE)).size
   console.log(`\n✅ Build succeeded: ${OUT_FILE}`)
   console.log(`   Size: ${(size / 1024 / 1024).toFixed(1)}MB`)
+  console.log(`   Stub manifest: ${STUB_MANIFEST}`)
   console.log(`\n   Usage:  node ${OUT_FILE} --version`)
   console.log(`           node ${OUT_FILE} -p "Hello"`)
 } else {

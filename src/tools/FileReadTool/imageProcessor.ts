@@ -1,5 +1,9 @@
 import type { Buffer } from 'buffer'
 import { isInBundledMode } from '../../utils/bundledMode.js'
+import {
+  getOptionalNativeModuleMessage,
+  importOptionalNativeModule,
+} from '../../utils/nativeOptional.js'
 
 export type SharpInstance = {
   metadata(): Promise<{ width: number; height: number; format: string }>
@@ -43,15 +47,21 @@ export async function getImageProcessor(): Promise<SharpFunction> {
     // Try to load the native image processor first
     try {
       // Use the native image processor module
-      const imageProcessor = await import('image-processor-napi')
+      const imageProcessor = await importOptionalNativeModule<{
+        sharp?: SharpFunction
+        default?: SharpFunction
+      }>('image-processor-napi', 'image processing')
       const sharp = imageProcessor.sharp || imageProcessor.default
+      if (!sharp) {
+        throw new Error('image-processor-napi did not expose sharp')
+      }
       imageProcessorModule = { default: sharp }
       return sharp
-    } catch {
+    } catch (error) {
       // Fall back to sharp if native module is not available
       // biome-ignore lint/suspicious/noConsole: intentional warning
       console.warn(
-        'Native image processor not available, falling back to sharp',
+        `${getOptionalNativeModuleMessage(error)} Falling back to sharp.`,
       )
     }
   }

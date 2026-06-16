@@ -68,8 +68,8 @@
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
 | `scripts/build.mjs` 的 `feature(...) -> false` | mock/stub/降级 | 没有恢复 Anthropic 内部 feature gate，只是按外部构建关闭 gated 代码。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
-| `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成空模块或 `undefined` 导出，只保证 bundle 继续，不恢复内部功能。 |
-| `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools 和 no-op server。 |
+| `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
+| `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools；server 创建时 fail-fast。 |
 | `color-diff-napi` alias 到 `src/native-ts/color-diff` | 尝试修复/真实适配 | 使用已有 TS port 替代 native 包；其中 `BAT_THEME` 支持仍是降级。 |
 | `src/native-ts/file-index` | 尝试修复/真实适配 | 使用已有 TS fuzzy index 替代 Rust NAPI 搜索模块。 |
 | `src/native-ts/yoga-layout` | 尝试修复/真实适配 | 使用已有 TS flex layout 实现覆盖 Ink 实际使用的布局子集。 |
@@ -77,7 +77,7 @@
 | `src/main.tsx` Commander 参数修改 | 尝试修复/真实适配 | 修复启动时参数定义不兼容导致的崩溃。 |
 | `scripts/prepare-src.mjs` 隔离输出 | 尝试修复/真实适配 | 避免准备阶段直接修改 `src/` 和根目录 `stubs/`。 |
 | `openspec/templates/verification-report.html` | 尝试修复/真实适配 | 实现验证与后置清理拆分、字段规范化、筛选和搜索。 |
-| `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | mock/stub/降级 | 构建时 external 保留；触发对应运行路径时仍依赖真实 native 包或可能失败。 |
+| `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | 混合 | 构建时 external 保留；新增统一可选 native loader，缺失时走 fallback 或返回明确不可用状态。 |
 
 ## 尝试修复/真实适配
 
@@ -96,8 +96,8 @@
 
 - `feature('...')` 统一替换为 `false`，等价于关闭内部 feature gate。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
-- `@ant/claude-for-chrome-mcp` 在构建副本中生成为空 browser tools 和 no-op server。
-- 一批 feature-gated 内部模块会在 `build-src/` 中生成空 stub，例如：
+- `@ant/claude-for-chrome-mcp` 在构建副本中生成为空 browser tools；server 创建时会 fail-fast。
+- 一批 feature-gated 内部模块会在 `build-src/` 中生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`，例如：
   - `assistant/AssistantSessionChooser`
   - `commands/agents-platform`
   - `entrypoints/sdk/*Types`
@@ -109,7 +109,7 @@
   - `tools/SuggestBackgroundPRTool`
   - `services/contextCollapse`
   - `services/compact/*`
-- 下列 native 包仅作为 external 保留，触发对应路径时仍可能需要真实 native 依赖：
+- 下列 native 包仍作为 external 保留；当前通过 `src/utils/nativeOptional.ts` 统一包装缺失错误，触发对应路径时会 fallback、返回不可用状态或记录明确 debug 信息：
   - `audio-capture-napi`
   - `image-processor-napi`
   - `modifiers-napi`
@@ -165,16 +165,17 @@ feature('...') -> false
    - Bash/权限 classifier 自动判断能力关闭，权限体验可能和官方版不同。
    - 有些命令、工具或 UI 分支会直接消失，而不是被真实实现。
 
-2. 空模块 stub 会把问题推迟到运行时
+2. Stub 不再静默伪装成功，但仍不是功能恢复
 
-   `build-src/` 中生成的 stub 可以让 esbuild 成功，但对应功能没有真实实现。常见失败形态包括：
+   `build-src/` 中生成的 stub 可以让 esbuild 成功，但对应功能没有真实实现。当前已改为 fail-fast，并生成 `build-src/stub-manifest.json` 记录所有生成项。
 
-   - 功能静默缺失。
-   - 返回空列表或空对象。
-   - 运行到相关路径时报 `undefined is not a function`。
+   这解决了“空函数/undefined 静默通过”的问题，但没有恢复内部能力。常见失败形态变为：
+
+   - 运行到相关路径时报明确的 `Feature-gated module unavailable...`。
+   - 缺失命名导出被调用、构造、解引用或数值转换时报明确错误。
    - SDK generated runtime/type 路径对 SDK 消费者不可靠。
 
-3. Native external 依赖不是已修复
+3. Native external 依赖有保护，但不是完整重写
 
    下列 native 包只是保留为 external，并没有被重写：
 
@@ -186,7 +187,14 @@ feature('...') -> false
    *.node
    ```
 
-   触发语音、图片处理、修饰键检测、deep link 等路径时，仍可能因为缺少真实 native 包而失败。
+   当前缓解：
+
+   - `image-processor-napi`：缺失时图片处理走 `sharp` fallback；macOS 剪贴板 native 图片读取失败时回退到脚本路径。
+   - `modifiers-napi`：缺失时修饰键状态返回 `false`，避免交互路径崩溃。
+   - `audio-capture-napi`：缺失时语音依赖检查返回不可用或走 SoX/arecord fallback，不再让 import 错误冒泡。
+   - `url-handler-napi`：缺失时 URL scheme launch 返回 `null` 并记录 debug。
+
+   仍然没有恢复这些 native 包本身的性能和平台能力。
 
 4. TypeScript native 替代实现不是官方 1:1
 
@@ -228,6 +236,12 @@ npm start -- --version
 node dist\cli.js --help
 node dist\cli.js doctor --help
 node dist\cli.js -p "<prompt>" --max-turns 1 --model <model>
+build-src/stub-manifest.json 生成
+fail-fast stub 默认导出和命名导出行为
+modifiers-napi 缺失 fallback
+image-processor-napi 缺失时 sharp fallback
+audio-capture-napi 缺失时语音依赖检查 fallback
+url-handler-napi 缺失由 nativeOptional 包装
 ```
 
 版本输出：

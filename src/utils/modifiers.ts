@@ -1,3 +1,9 @@
+import { logForDebugging } from './debug.js'
+import {
+  getOptionalNativeModuleMessage,
+  requireOptionalNativeModule,
+} from './nativeOptional.js'
+
 export type ModifierKey = 'shift' | 'command' | 'control' | 'option'
 
 let prewarmed = false
@@ -13,11 +19,13 @@ export function prewarmModifiers(): void {
   prewarmed = true
   // Load module in background
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { prewarm } = require('modifiers-napi') as { prewarm: () => void }
+    const { prewarm } = requireOptionalNativeModule<{ prewarm: () => void }>(
+      'modifiers-napi',
+      'modifier-key prewarm',
+    )
     prewarm()
-  } catch {
-    // Ignore errors during prewarm
+  } catch (error) {
+    logForDebugging(`[native] ${getOptionalNativeModuleMessage(error)}`)
   }
 }
 
@@ -29,8 +37,15 @@ export function isModifierPressed(modifier: ModifierKey): boolean {
     return false
   }
   // Dynamic import to avoid loading native module at top level
-  const { isModifierPressed: nativeIsModifierPressed } =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('modifiers-napi') as { isModifierPressed: (m: string) => boolean }
-  return nativeIsModifierPressed(modifier)
+  try {
+    const { isModifierPressed: nativeIsModifierPressed } =
+      requireOptionalNativeModule<{ isModifierPressed: (m: string) => boolean }>(
+        'modifiers-napi',
+        'modifier-key state detection',
+      )
+    return nativeIsModifierPressed(modifier)
+  } catch (error) {
+    logForDebugging(`[native] ${getOptionalNativeModuleMessage(error)}`)
+    return false
+  }
 }

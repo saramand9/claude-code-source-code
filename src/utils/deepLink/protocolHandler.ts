@@ -19,6 +19,10 @@ import {
 } from '../githubRepoPathMapping.js'
 import { jsonStringify } from '../slowOperations.js'
 import { readLastFetchTime } from './banner.js'
+import {
+  getOptionalNativeModuleMessage,
+  importOptionalNativeModule,
+} from '../nativeOptional.js'
 import { parseDeepLink } from './parseDeepLink.js'
 import { MACOS_BUNDLE_ID } from './registerProtocol.js'
 import { launchInTerminal } from './terminalLauncher.js'
@@ -92,13 +96,16 @@ export async function handleUrlSchemeLaunch(): Promise<number | null> {
   }
 
   try {
-    const { waitForUrlEvent } = await import('url-handler-napi')
+    const { waitForUrlEvent } = await importOptionalNativeModule<{
+      waitForUrlEvent: (timeoutMs: number) => string | null
+    }>('url-handler-napi', 'macOS URL scheme launch')
     const url = waitForUrlEvent(5000)
     if (!url) {
       return null
     }
     return await handleDeepLinkUri(url)
-  } catch {
+  } catch (error) {
+    logForDebugging(`[native] ${getOptionalNativeModuleMessage(error)}`)
     // NAPI module not available, or handleDeepLinkUri rejected — not a URL launch
     return null
   }

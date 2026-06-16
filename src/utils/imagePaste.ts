@@ -18,6 +18,7 @@ import {
   maybeResizeAndDownsampleImageBuffer,
 } from './imageResizer.js'
 import { logError } from './log.js'
+import { importOptionalNativeModule } from './nativeOptional.js'
 
 // Native NSPasteboard reader. GrowthBook gate tengu_collage_kaleidoscope is
 // a kill switch (default on). Falls through to osascript when off.
@@ -105,7 +106,21 @@ export async function hasImageInClipboard(): Promise<boolean> {
     // when the module/export is missing. Catch a throw too: it would surface
     // as an unhandled rejection in useClipboardImageHint's setTimeout.
     try {
-      const { getNativeModule } = await import('image-processor-napi')
+      const { getNativeModule } = await importOptionalNativeModule<{
+        getNativeModule?: () => {
+          hasClipboardImage?: () => boolean
+          readClipboardImage?: (
+            maxWidth: number,
+            maxHeight: number,
+          ) => {
+            png: Buffer
+            width: number
+            height: number
+            originalWidth: number
+            originalHeight: number
+          } | null
+        }
+      }>('image-processor-napi', 'native clipboard image detection')
       const hasImage = getNativeModule()?.hasClipboardImage
       if (hasImage) {
         return hasImage()
@@ -134,7 +149,20 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_collage_kaleidoscope', true)
   ) {
     try {
-      const { getNativeModule } = await import('image-processor-napi')
+      const { getNativeModule } = await importOptionalNativeModule<{
+        getNativeModule?: () => {
+          readClipboardImage?: (
+            maxWidth: number,
+            maxHeight: number,
+          ) => {
+            png: Buffer
+            width: number
+            height: number
+            originalWidth: number
+            originalHeight: number
+          } | null
+        }
+      }>('image-processor-napi', 'native clipboard image read')
       const readClipboard = getNativeModule()?.readClipboardImage
       if (!readClipboard) {
         throw new Error('native clipboard reader unavailable')
