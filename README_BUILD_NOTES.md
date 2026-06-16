@@ -116,6 +116,82 @@
   - `url-handler-napi`
   - `*.node`
 
+## Bun 相关背景
+
+Bun 是一个 JavaScript/TypeScript 运行时和工具链，能力范围大致覆盖 Node.js 运行时、包管理器、打包器和测试器。Claude Code 官方发布流程依赖 Bun 的一些编译期能力，例如：
+
+```ts
+feature('KAIROS')
+MACRO.VERSION
+import { feature } from 'bun:bundle'
+```
+
+这些不是普通 Node.js 能直接执行或理解的运行时代码。官方 Bun 构建会在打包阶段判断 feature gate，并做 dead-code elimination。例如内部构建可能保留某个功能，外部发布构建则把它折叠为 `false` 并删除对应分支。
+
+本分支没有恢复 Anthropic 内部 Bun 构建环境，也没有恢复内部 feature 配置。因此当前处理方式是：
+
+```text
+feature('...') -> false
+```
+
+这能让外部主路径继续构建，但也意味着所有 gated 内部能力默认关闭。
+
+## 实际风险说明
+
+构建成功不代表完整复原官方 Claude Code。本分支的核心风险是：部分代码只是让 import、bundle 或主路径运行成功，真实功能并不存在或不完整。
+
+1. `feature(...) -> false` 是最大风险
+
+   这会关闭大量内部或实验功能，例如：
+
+   ```text
+   KAIROS
+   BG_SESSIONS
+   CONTEXT_COLLAPSE
+   CACHED_MICROCOMPACT
+   HISTORY_SNIP
+   VOICE_MODE
+   BASH_CLASSIFIER
+   TRANSCRIPT_CLASSIFIER
+   WORKFLOW_SCRIPTS
+   CHICAGO_MCP
+   BRIDGE_MODE
+   ```
+
+   可能影响：
+
+   - 后台任务、KAIROS、主动模式、部分远程/桥接能力不可用。
+   - 上下文压缩、历史裁剪等高级长上下文能力缺失。
+   - Bash/权限 classifier 自动判断能力关闭，权限体验可能和官方版不同。
+   - 有些命令、工具或 UI 分支会直接消失，而不是被真实实现。
+
+2. 空模块 stub 会把问题推迟到运行时
+
+   `build-src/` 中生成的 stub 可以让 esbuild 成功，但对应功能没有真实实现。常见失败形态包括：
+
+   - 功能静默缺失。
+   - 返回空列表或空对象。
+   - 运行到相关路径时报 `undefined is not a function`。
+   - SDK generated runtime/type 路径对 SDK 消费者不可靠。
+
+3. Native external 依赖不是已修复
+
+   下列 native 包只是保留为 external，并没有被重写：
+
+   ```text
+   audio-capture-napi
+   image-processor-napi
+   modifiers-napi
+   url-handler-napi
+   *.node
+   ```
+
+   触发语音、图片处理、修饰键检测、deep link 等路径时，仍可能因为缺少真实 native 包而失败。
+
+4. TypeScript native 替代实现不是官方 1:1
+
+   `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout` 是实际可运行的 TypeScript 替代实现，但与官方 native/Rust/C++ 模块仍可能存在性能和边界行为差异。
+
 ## 构建和启动
 
 ```powershell
