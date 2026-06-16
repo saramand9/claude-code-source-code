@@ -7,6 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "strict": false,
     "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,
@@ -14,14 +15,14 @@
     "sourceMap": true,
     "jsx": "react-jsx",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
       "bun:bundle": ["stubs/bun-bundle.ts"],
       "src/*": ["src/*"]
     },
-    "types": ["node"],
-    "lib": ["ES2022", "DOM"],
+    "types": ["node", "bun"],
+    "lib": ["ESNext", "DOM"],
     "allowImportingTsExtensions": false,
     "noEmit": false
   },
@@ -31,6 +32,7 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "stubs/macros.ts"
   ]
 }

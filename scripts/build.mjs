@@ -66,7 +66,7 @@ let transformCount = 0
 
 // MACRO replacements
 const MACROS = {
-  'MACRO.VERSION': `'${VERSION}'`,
+  'MACRO.VERSION_CHANGELOG': `''`,
   'MACRO.BUILD_TIME': `''`,
   'MACRO.FEEDBACK_CHANNEL': `'https://github.com/anthropics/claude-code/issues'`,
   'MACRO.ISSUES_EXPLAINER': `'https://github.com/anthropics/claude-code/issues/new/choose'`,
@@ -74,7 +74,7 @@ const MACROS = {
   'MACRO.ISSUES_EXPLAINER_URL': `'https://github.com/anthropics/claude-code/issues/new/choose'`,
   'MACRO.NATIVE_PACKAGE_URL': `'@anthropic-ai/claude-code'`,
   'MACRO.PACKAGE_URL': `'@anthropic-ai/claude-code'`,
-  'MACRO.VERSION_CHANGELOG': `''`,
+  'MACRO.VERSION': `'${VERSION}'`,
 }
 
 for await (const file of walk(join(BUILD, 'src'))) {
@@ -84,13 +84,13 @@ for await (const file of walk(join(BUILD, 'src'))) {
   let changed = false
 
   // 2a. feature('X') → false
-  if (/\bfeature\s*\(\s*['"][A-Z_]+['"]\s*\)/.test(src)) {
-    src = src.replace(/\bfeature\s*\(\s*['"][A-Z_]+['"]\s*\)/g, 'false')
+  if (/\bfeature\s*\(\s*['"][A-Z0-9_]+['"]\s*,?\s*\)/.test(src)) {
+    src = src.replace(/\bfeature\s*\(\s*['"][A-Z0-9_]+['"]\s*,?\s*\)/g, 'false')
     changed = true
   }
 
   // 2b. MACRO.X → literals
-  for (const [k, v] of Object.entries(MACROS)) {
+  for (const [k, v] of Object.entries(MACROS).sort((a, b) => b[0].length - a[0].length)) {
     if (src.includes(k)) {
       src = src.replaceAll(k, v)
       changed = true
@@ -125,6 +125,17 @@ await writeFile(ENTRY, `#!/usr/bin/env node
 // Copyright (c) Anthropic PBC. All rights reserved.
 import './src/entrypoints/cli.tsx'
 `, 'utf8')
+await mkdir(join(BUILD, 'stubs'), { recursive: true })
+await writeFile(
+  join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
+  `// Auto-generated stub for private @ant/claude-for-chrome-mcp package
+export const BROWSER_TOOLS = []
+export function createClaudeForChromeMcpServer() {
+  return { connect: async () => {} }
+}
+`,
+  'utf8',
+)
 console.log('✅ Phase 3: Created entry wrapper')
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -132,10 +143,65 @@ console.log('✅ Phase 3: Created entry wrapper')
 // ══════════════════════════════════════════════════════════════════════════════
 
 await ensureEsbuild()
+const esbuild = await import('esbuild')
 
 const OUT_DIR = join(ROOT, 'dist')
 await mkdir(OUT_DIR, { recursive: true })
 const OUT_FILE = join(OUT_DIR, 'cli.js')
+
+async function writeStub(targetPath) {
+  await mkdir(dirname(targetPath), { recursive: true }).catch(() => {})
+  if (await exists(targetPath)) return false
+
+  if (/\.(txt|md)$/.test(targetPath)) {
+    await writeFile(targetPath, '', 'utf8')
+  } else if (/\.json$/.test(targetPath)) {
+    await writeFile(targetPath, '{}', 'utf8')
+  } else {
+    await writeFile(
+      targetPath,
+      `// Auto-generated stub for missing feature-gated module\nexport default function stub() {}\nexport const __stub = true\n`,
+      'utf8',
+    )
+  }
+  return true
+}
+
+function missingModulesFromErrors(errors) {
+  const missing = []
+  for (const error of errors ?? []) {
+    const match = /Could not resolve "([^"]+)"/.exec(error.text ?? '')
+    if (!match || !error.location?.file) continue
+    missing.push({ specifier: match[1], importer: error.location.file })
+  }
+  return missing
+}
+
+function missingExportsFromErrors(errors) {
+  const missing = []
+  for (const error of errors ?? []) {
+    const match = /No matching export in "([^"]+)" for import "([^"]+)"/.exec(
+      error.text ?? '',
+    )
+    if (!match) continue
+    missing.push({ modulePath: match[1], exportName: match[2] })
+  }
+  return missing
+}
+
+async function addNamedExport(modulePath, exportName) {
+  const targetPath = modulePath.startsWith(BUILD)
+    ? modulePath
+    : join(ROOT, modulePath)
+  if (!targetPath.startsWith(BUILD) || !(await exists(targetPath))) return false
+
+  const src = await readFile(targetPath, 'utf8')
+  const exportRe = new RegExp(`\\bexport\\s+(?:const|let|var|function|class)\\s+${exportName}\\b`)
+  if (exportRe.test(src)) return false
+
+  await writeFile(targetPath, `${src}\nexport const ${exportName} = undefined\n`, 'utf8')
+  return true
+}
 
 // Run up to 5 rounds of: esbuild → collect missing → create stubs → retry
 const MAX_ROUNDS = 5
@@ -144,88 +210,96 @@ let succeeded = false
 for (let round = 1; round <= MAX_ROUNDS; round++) {
   console.log(`\n🔨 Phase 4 round ${round}/${MAX_ROUNDS}: Bundling...`)
 
-  let esbuildOutput = ''
+  let esbuildErrors = []
   try {
-    esbuildOutput = execSync([
-      'npx esbuild',
-      `"${ENTRY}"`,
-      '--bundle',
-      '--platform=node',
-      '--target=node18',
-      '--format=esm',
-      `--outfile="${OUT_FILE}"`,
-      `--banner:js=$'#!/usr/bin/env node\\n// Claude Code v${VERSION} (built from source)\\n// Copyright (c) Anthropic PBC. All rights reserved.\\n'`,
-      '--packages=external',
-      '--external:bun:*',
-      '--allow-overwrite',
-      '--log-level=error',
-      '--log-limit=0',
-      '--sourcemap',
-    ].join(' '), {
-      cwd: ROOT,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
-    }).stderr?.toString() || ''
+    await esbuild.build({
+      entryPoints: [ENTRY],
+      bundle: true,
+      platform: 'node',
+      target: 'node18',
+      format: 'esm',
+      outfile: OUT_FILE,
+      banner: {
+        js: `import { createRequire as __createRequire } from "node:module";\nconst require = __createRequire(import.meta.url);\n// Claude Code v${VERSION} (built from source)\n// Copyright (c) Anthropic PBC. All rights reserved.\n`,
+      },
+      alias: {
+        src: join(BUILD, 'src'),
+        '@ant/claude-for-chrome-mcp': join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
+        'color-diff-napi': join(BUILD, 'src', 'native-ts', 'color-diff', 'index.ts'),
+        'vscode-jsonrpc/node.js': 'vscode-jsonrpc/node',
+      },
+      external: [
+        'bun:*',
+        '*.node',
+        'audio-capture-napi',
+        'image-processor-napi',
+        'modifiers-napi',
+        'url-handler-napi',
+      ],
+      loader: {
+        '.md': 'text',
+        '.txt': 'text',
+      },
+      allowOverwrite: true,
+      logLevel: 'silent',
+      logLimit: 0,
+      sourcemap: true,
+    })
     succeeded = true
     break
   } catch (e) {
-    esbuildOutput = (e.stderr?.toString() || '') + (e.stdout?.toString() || '')
+    esbuildErrors = e.errors ?? []
   }
 
   // Parse missing modules
-  const missingRe = /Could not resolve "([^"]+)"/g
-  const missing = new Set()
-  let m
-  while ((m = missingRe.exec(esbuildOutput)) !== null) {
-    const mod = m[1]
-    if (!mod.startsWith('node:') && !mod.startsWith('bun:') && !mod.startsWith('/')) {
-      missing.add(mod)
-    }
-  }
+  const missing = missingModulesFromErrors(esbuildErrors).filter(
+    ({ specifier }) =>
+      !specifier.startsWith('node:') &&
+      !specifier.startsWith('bun:') &&
+      !specifier.startsWith('/'),
+  )
+  const missingExports = missingExportsFromErrors(esbuildErrors)
 
-  if (missing.size === 0) {
+  if (missing.length === 0 && missingExports.length === 0) {
     // No more missing modules but still errors — check what
-    const errLines = esbuildOutput.split('\n').filter(l => l.includes('ERROR')).slice(0, 5)
     console.log('❌ Unrecoverable errors:')
-    errLines.forEach(l => console.log('   ' + l))
+    esbuildErrors.slice(0, 20).forEach(error => {
+      const loc = error.location
+        ? `${error.location.file}:${error.location.line}:${error.location.column}`
+        : 'unknown'
+      console.log(`   ${loc}: ${error.text}`)
+    })
     break
   }
 
-  console.log(`   Found ${missing.size} missing modules, creating stubs...`)
+  console.log(
+    `   Found ${missing.length} missing modules and ${missingExports.length} missing exports, updating stubs...`,
+  )
 
-  // Create stubs
   let stubCount = 0
-  for (const mod of missing) {
-    // Resolve relative path from the file that imports it — but since we
-    // don't have that info easily, create stubs at multiple likely locations
-    const cleanMod = mod.replace(/^\.\//, '')
+  for (const { specifier, importer } of missing) {
+    if (!specifier.startsWith('.')) continue
 
-    // Text assets → empty file
-    if (/\.(txt|md|json)$/.test(cleanMod)) {
-      const p = join(BUILD, 'src', cleanMod)
-      await mkdir(dirname(p), { recursive: true }).catch(() => {})
-      if (!await exists(p)) {
-        await writeFile(p, cleanMod.endsWith('.json') ? '{}' : '', 'utf8')
-        stubCount++
-      }
-      continue
-    }
+    const importerPath = join(ROOT, importer)
+    const targetPath = join(dirname(importerPath), specifier)
+    const relativeTarget = targetPath.startsWith(BUILD) ? targetPath : null
+    if (!relativeTarget) continue
 
-    // JS/TS modules → export empty
-    if (/\.[tj]sx?$/.test(cleanMod)) {
-      for (const base of [join(BUILD, 'src'), join(BUILD, 'src', 'src')]) {
-        const p = join(base, cleanMod)
-        await mkdir(dirname(p), { recursive: true }).catch(() => {})
-        if (!await exists(p)) {
-          const name = cleanMod.split('/').pop().replace(/\.[tj]sx?$/, '')
-          const safeName = name.replace(/[^a-zA-Z0-9_$]/g, '_') || 'stub'
-          await writeFile(p, `// Auto-generated stub\nexport default function ${safeName}() {}\nexport const ${safeName} = () => {}\n`, 'utf8')
-          stubCount++
-        }
-      }
-    }
+    if (await writeStub(relativeTarget)) stubCount++
   }
-  console.log(`   Created ${stubCount} stubs`)
+
+  let exportCount = 0
+  for (const { modulePath, exportName } of missingExports) {
+    if (await addNamedExport(modulePath, exportName)) exportCount++
+  }
+  console.log(`   Created ${stubCount} stubs, added ${exportCount} exports`)
+  if (stubCount === 0 && exportCount === 0) {
+    console.log('   No stub changes were possible. Remaining missing modules:')
+    missing.slice(0, 30).forEach(({ specifier, importer }) => {
+      console.log(`   - ${specifier} imported by ${importer}`)
+    })
+    break
+  }
 }
 
 if (succeeded) {

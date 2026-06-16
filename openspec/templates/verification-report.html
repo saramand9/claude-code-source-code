@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenSpec 验证报告 — 汇总表</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --critical: #f87171;
+      --warning: #fbbf24;
+      --suggestion: #38bdf8;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 8px; }
+    .hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 20px;
+      max-width: 56rem;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    label { font-size: 0.8rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+    select, input[type="search"] {
+      min-width: 12rem;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    input[type="search"] { min-width: 16rem; flex: 1; }
+    .count {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-left: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: #0c1222;
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .pill.critical { background: rgba(248,113,113,0.15); color: var(--critical); }
+    .pill.warning { background: rgba(251,191,36,0.15); color: var(--warning); }
+    .pill.suggestion { background: rgba(56,189,248,0.15); color: var(--suggestion); }
+    .pill.ok { background: rgba(74,222,128,0.15); color: var(--ok); }
+    .empty {
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+    details {
+      margin-top: 24px;
+      max-width: 56rem;
+    }
+    details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      margin-top: 8px;
+      padding: 10px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <h1>验证报告 · 汇总表</h1>
+  <p class="hint">
+    从验证流程导出 JSON 数组（字段：<code>id</code> 编号、<code>caseName</code> 用例名、<code>status</code> 状态、<code>dimension</code> 维度、<code>detail</code> 说明），粘贴到下方数据源并点击「应用数据」。支持按状态筛选，以及按编号或用例名关键字搜索。
+  </p>
+
+  <div class="toolbar">
+    <label>
+      状态
+      <select id="filter-status" aria-label="按状态筛选">
+        <option value="">全部</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="WARNING">WARNING</option>
+        <option value="SUGGESTION">SUGGESTION</option>
+        <option value="OK">OK</option>
+      </select>
+    </label>
+    <label style="flex: 1; min-width: 200px;">
+      搜索（编号 / 用例名）
+      <input type="search" id="filter-search" placeholder="例如：REQ-3、Scenario、登录" autocomplete="off" />
+    </label>
+    <span class="count" id="row-count"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 5rem;">编号</th>
+        <th style="width: 22%;">用例名</th>
+        <th style="width: 7rem;">状态</th>
+        <th style="width: 9rem;">维度</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" class="empty" hidden>没有匹配的行，请调整筛选或搜索条件。</div>
+
+  <details>
+    <summary>数据源（JSON）</summary>
+    <textarea id="data-source" spellcheck="false"></textarea>
+    <p style="margin-top:8px;">
+      <button type="button" id="apply-data" style="padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;">应用数据</button>
+    </p>
+  </details>
+
+  <script type="application/json" id="default-data">
+[
+  {
+    "id": "1",
+    "caseName": "Scenario: 用户登录成功",
+    "status": "OK",
+    "dimension": "Correctness",
+    "detail": "实现与规范一致。"
+  },
+  {
+    "id": "REQ-2",
+    "caseName": "Requirement: 会话持久化",
+    "status": "WARNING",
+    "dimension": "Correctness",
+    "detail": "场景覆盖可能不足：未找到针对断线重连的测试。"
+  },
+  {
+    "id": "T-04",
+    "caseName": "tasks.md — 实现 OAuth 回调",
+    "status": "CRITICAL",
+    "dimension": "Completeness",
+    "detail": "任务仍为未完成复选框。"
+  },
+  {
+    "id": "5",
+    "caseName": "design.md — 缓存策略",
+    "status": "SUGGESTION",
+    "dimension": "Coherence",
+    "detail": "实现使用内存缓存，与设计中的 Redis 描述不一致（若为刻意简化可忽略）。"
+  }
+]
+  </script>
+
+  <script>
+(function () {
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('empty');
+  const statusSel = document.getElementById('filter-status');
+  const searchIn = document.getElementById('filter-search');
+  const rowCount = document.getElementById('row-count');
+  const dataSource = document.getElementById('data-source');
+  const defaultEl = document.getElementById('default-data');
+  const applyBtn = document.getElementById('apply-data');
+
+  /** @type {Array<{id:string,caseName:string,status:string,dimension:string,detail:string}>} */
+  let rows = [];
+
+  function normalizeStatus(s) {
+    const u = String(s || '').toUpperCase();
+    if (['CRITICAL', 'WARNING', 'SUGGESTION', 'OK'].includes(u)) return u;
+    return 'SUGGESTION';
+  }
+
+  function pillClass(status) {
+    const m = { CRITICAL: 'critical', WARNING: 'warning', SUGGESTION: 'suggestion', OK: 'ok' };
+    return m[status] || 'suggestion';
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function loadDefault() {
+    try {
+      const parsed = JSON.parse(defaultEl.textContent.trim());
+      validateRows(parsed);
+      rows = postProcessRows(parsed);
+      dataSource.value = JSON.stringify(rows, null, 2);
+    } catch (e) {
+      rows = [];
+      dataSource.value = '[]';
+    }
+  }
+
+  function getFiltered() {
+    const st = statusSel.value;
+    const q = searchIn.value.trim().toLowerCase();
+    return rows.filter((r) => {
+      const status = normalizeStatus(r.status);
+      if (st && status !== st) return false;
+      if (!q) return true;
+      const id = String(r.id ?? '');
+      const name = String(r.caseName ?? '');
+      return id.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+    });
+  }
+
+  function render() {
+    const list = getFiltered();
+    rowCount.textContent = `显示 ${list.length} / ${rows.length} 条`;
+    empty.hidden = list.length > 0;
+    tbody.innerHTML = list
+      .map((r) => {
+        const status = normalizeStatus(r.status);
+        const pc = pillClass(status);
+        return `<tr data-status="${escapeHtml(status)}">
+          <td>${escapeHtml(String(r.id ?? ''))}</td>
+          <td>${escapeHtml(String(r.caseName ?? ''))}</td>
+          <td><span class="pill ${pc}">${escapeHtml(status)}</span></td>
+          <td>${escapeHtml(String(r.dimension ?? ''))}</td>
+          <td>${escapeHtml(String(r.detail ?? ''))}</td>
+        </tr>`;
+      })
+      .join('');
+  }
+
+  function validateRows(value) {
+    if (!Array.isArray(value)) {
+      throw new Error('根节点须为数组');
+    }
+    value.forEach((item, i) => {
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error(`第 ${i + 1} 行须为对象`);
+      }
+    });
+  }
+
+  function postProcessRows(value) {
+    return value.map((x, i) => ({
+      id: x.id != null ? String(x.id) : String(i + 1),
+      caseName: x.caseName != null ? String(x.caseName) : String(x.name ?? x.title ?? ''),
+      status: normalizeStatus(x.status),
+      dimension: x.dimension != null ? String(x.dimension) : '',
+      detail: x.detail != null ? String(x.detail) : String(x.summary ?? ''),
+    }));
+  }
+
+  function applyData() {
+    try {
+      const parsed = JSON.parse(dataSource.value);
+      validateRows(parsed);
+      rows = postProcessRows(parsed);
+      render();
+    } catch (e) {
+      alert('JSON 解析失败：' + (e && e.message ? e.message : String(e)));
+    }
+  }
+
+  statusSel.addEventListener('change', render);
+  searchIn.addEventListener('input', render);
+  applyBtn.addEventListener('click', applyData);
+
+  loadDefault();
+  render();
+})();
+  </script>
+</body>
+</html>
