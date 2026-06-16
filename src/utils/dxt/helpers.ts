@@ -1,4 +1,4 @@
-import type { McpbManifest } from '@anthropic-ai/mcpb'
+import type { McpbManifestAny as McpbManifest } from '@anthropic-ai/mcpb'
 import { errorMessage } from '../errors.js'
 import { jsonParse } from '../slowOperations.js'
 
@@ -13,14 +13,16 @@ import { jsonParse } from '../slowOperations.js'
 export async function validateManifest(
   manifestJson: unknown,
 ): Promise<McpbManifest> {
-  const { McpbManifestSchema } = await import('@anthropic-ai/mcpb')
+  const { vAny } = await import('@anthropic-ai/mcpb')
+  const { McpbManifestSchema } = vAny
   const parseResult = McpbManifestSchema.safeParse(manifestJson)
 
   if (!parseResult.success) {
     const errors = parseResult.error.flatten()
     const errorMessages = [
       ...Object.entries(errors.fieldErrors).map(
-        ([field, errs]) => `${field}: ${errs?.join(', ')}`,
+        ([field, errs]) =>
+          `${field}: ${Array.isArray(errs) ? errs.join(', ') : ''}`,
       ),
       ...(errors.formErrors || []),
     ]

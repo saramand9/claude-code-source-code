@@ -1,3 +1,4 @@
+import type { UUID } from 'crypto'
 import type {
   SDKAssistantMessage,
   SDKCompactBoundaryMessage,
@@ -31,8 +32,8 @@ import { createUserMessage } from '../utils/messages.js'
 function convertAssistantMessage(msg: SDKAssistantMessage): AssistantMessage {
   return {
     type: 'assistant',
-    message: msg.message,
-    uuid: msg.uuid,
+    message: msg.message as AssistantMessage['message'],
+    uuid: msg.uuid as UUID,
     requestId: undefined,
     timestamp: new Date().toISOString(),
     error: msg.error,
@@ -45,6 +46,8 @@ function convertAssistantMessage(msg: SDKAssistantMessage): AssistantMessage {
 function convertStreamEvent(msg: SDKPartialAssistantMessage): StreamEvent {
   return {
     type: 'stream_event',
+    uuid: msg.uuid as UUID,
+    timestamp: new Date().toISOString(),
     event: msg.event,
   }
 }
@@ -63,7 +66,7 @@ function convertResultMessage(msg: SDKResultMessage): SystemMessage {
     subtype: 'informational',
     content,
     level: isError ? 'warning' : 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as UUID,
     timestamp: new Date().toISOString(),
   }
 }
@@ -77,7 +80,7 @@ function convertInitMessage(msg: SDKSystemMessage): SystemMessage {
     subtype: 'informational',
     content: `Remote session initialized (model: ${msg.model})`,
     level: 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as UUID,
     timestamp: new Date().toISOString(),
   }
 }
@@ -98,7 +101,7 @@ function convertStatusMessage(msg: SDKStatusMessage): SystemMessage | null {
         ? 'Compacting conversation…'
         : `Status: ${msg.status}`,
     level: 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as UUID,
     timestamp: new Date().toISOString(),
   }
 }
@@ -116,7 +119,7 @@ function convertToolProgressMessage(
     subtype: 'informational',
     content: `Tool ${msg.tool_name} running for ${msg.elapsed_time_seconds}s…`,
     level: 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as UUID,
     timestamp: new Date().toISOString(),
     toolUseID: msg.tool_use_id,
   }
@@ -133,7 +136,7 @@ function convertCompactBoundaryMessage(
     subtype: 'compact_boundary',
     content: 'Conversation compacted',
     level: 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as UUID,
     timestamp: new Date().toISOString(),
     compactMetadata: fromSDKCompactMetadata(msg.compact_metadata),
   }

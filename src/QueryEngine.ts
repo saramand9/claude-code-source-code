@@ -107,6 +107,22 @@ import {
   normalizeMessage,
 } from './utils/queryHelpers.js'
 
+type SnipCompactModule = {
+  snipCompactIfNeeded(
+    store: Message[],
+    options: { force: boolean },
+  ): { messages: Message[]; executed: boolean }
+}
+
+type SnipProjectionModule = {
+  isSnipBoundaryMessage(message: Message): boolean
+}
+
+type McpClientSummary = {
+  name: string
+  type: string
+}
+
 // Dead code elimination: conditional import for coordinator mode
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getCoordinatorUserContext: (
@@ -119,11 +135,13 @@ const getCoordinatorUserContext: (
 
 // Dead code elimination: conditional import for snip compaction
 /* eslint-disable @typescript-eslint/no-require-imports */
+const snipCompactModulePath: string = './services/compact/snipCompact.js'
+const snipProjectionModulePath: string = './services/compact/snipProjection.js'
 const snipModule = feature('HISTORY_SNIP')
-  ? (require('./services/compact/snipCompact.js') as typeof import('./services/compact/snipCompact.js'))
+  ? (require(snipCompactModulePath) as SnipCompactModule)
   : null
 const snipProjection = feature('HISTORY_SNIP')
-  ? (require('./services/compact/snipProjection.js') as typeof import('./services/compact/snipProjection.js'))
+  ? (require(snipProjectionModulePath) as SnipProjectionModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -299,10 +317,14 @@ export class QueryEngine {
       customSystemPrompt: customPrompt,
     })
     headlessProfilerCheckpoint('after_getSystemPrompt')
+    const mcpClientSummaries: McpClientSummary[] = mcpClients.map(client => ({
+      name: String(client.name ?? ''),
+      type: String(client.type ?? ''),
+    }))
     const userContext = {
       ...baseUserContext,
       ...getCoordinatorUserContext(
-        mcpClients,
+        mcpClientSummaries,
         isScratchpadEnabled() ? getScratchpadDir() : undefined,
       ),
     }
@@ -539,7 +561,7 @@ export class QueryEngine {
 
     yield buildSystemInitMessage({
       tools,
-      mcpClients,
+      mcpClients: mcpClientSummaries,
       model: mainLoopModel,
       permissionMode: initialAppState.toolPermissionContext
         .mode as PermissionMode, // TODO: avoid the cast

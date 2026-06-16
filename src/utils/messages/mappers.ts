@@ -26,7 +26,7 @@ import { getPlan } from '../plans.js'
 export function toInternalMessages(
   messages: readonly DeepImmutable<SDKMessage>[],
 ): Message[] {
-  return messages.flatMap(message => {
+  return messages.flatMap((message): Message[] => {
     switch (message.type) {
       case 'assistant':
         return [
@@ -61,7 +61,7 @@ export function toInternalMessages(
               compactMetadata: fromSDKCompactMetadata(
                 compactMsg.compact_metadata,
               ),
-              uuid: message.uuid,
+              uuid: message.uuid as UUID,
               timestamp: new Date().toISOString(),
             },
           ]
@@ -80,7 +80,7 @@ export function toSDKCompactMetadata(
 ): SDKCompactMetadata {
   const seg = meta.preservedSegment
   return {
-    trigger: meta.trigger,
+    trigger: meta.trigger === 'auto' ? 'auto' : 'manual',
     pre_tokens: meta.preTokens,
     ...(seg && {
       preserved_segment: {

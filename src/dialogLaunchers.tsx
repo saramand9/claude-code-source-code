@@ -7,7 +7,6 @@
  * perf/extract-interactive-helpers and perf/launch-repl.
  */
 import React from 'react';
-import type { AssistantSession } from './assistant/sessionDiscovery.js';
 import type { StatsStore } from './context/stats.js';
 import type { Root } from './ink.js';
 import { renderAndRun, showSetupDialog } from './interactiveHelpers.js';
@@ -21,6 +20,40 @@ import type { ValidationError } from './utils/settings/validation.js';
 // Type-only access to ResumeConversation's Props via the module type.
 // No runtime cost - erased at compile time.
 type ResumeConversationProps = React.ComponentProps<typeof import('./screens/ResumeConversation.js').ResumeConversation>;
+type AssistantSession = {
+  id?: string;
+  [key: string]: unknown;
+};
+type SnapshotUpdateDialogModule = {
+  SnapshotUpdateDialog: React.ComponentType<{
+    agentType: string;
+    scope: AgentMemoryScope;
+    snapshotTimestamp: string;
+    onComplete: (result: 'merge' | 'keep' | 'replace') => void;
+    onCancel: () => void;
+  }>;
+};
+type AssistantSessionChooserModule = {
+  AssistantSessionChooser: React.ComponentType<{
+    sessions: AssistantSession[];
+    onSelect: (id: string) => void;
+    onCancel: () => void;
+  }>;
+};
+type AssistantInstallModule = {
+  NewInstallWizard: React.ComponentType<{
+    defaultDir: string;
+    onInstalled: (dir: string) => void;
+    onCancel: () => void;
+    onError: (message: string) => void;
+  }>;
+  computeDefaultInstallDir(): Promise<string>;
+};
+const snapshotUpdateDialogModulePath: string =
+  './components/agents/SnapshotUpdateDialog.js';
+const assistantSessionChooserModulePath: string =
+  './assistant/AssistantSessionChooser.js';
+const assistantInstallModulePath: string = './commands/assistant/assistant.js';
 
 /**
  * Site ~3173: SnapshotUpdateDialog (agent memory snapshot update prompt).
@@ -33,7 +66,7 @@ export async function launchSnapshotUpdateDialog(root: Root, props: {
 }): Promise<'merge' | 'keep' | 'replace'> {
   const {
     SnapshotUpdateDialog
-  } = await import('./components/agents/SnapshotUpdateDialog.js');
+  } = await import(snapshotUpdateDialogModulePath) as unknown as SnapshotUpdateDialogModule;
   return showSetupDialog<'merge' | 'keep' | 'replace'>(root, done => <SnapshotUpdateDialog agentType={props.agentType} scope={props.scope} snapshotTimestamp={props.snapshotTimestamp} onComplete={done} onCancel={() => done('keep')} />);
 }
 
@@ -60,7 +93,7 @@ export async function launchAssistantSessionChooser(root: Root, props: {
 }): Promise<string | null> {
   const {
     AssistantSessionChooser
-  } = await import('./assistant/AssistantSessionChooser.js');
+  } = await import(assistantSessionChooserModulePath) as unknown as AssistantSessionChooserModule;
   return showSetupDialog<string | null>(root, done => <AssistantSessionChooser sessions={props.sessions} onSelect={id => done(id)} onCancel={() => done(null)} />);
 }
 
@@ -74,7 +107,7 @@ export async function launchAssistantInstallWizard(root: Root): Promise<string |
   const {
     NewInstallWizard,
     computeDefaultInstallDir
-  } = await import('./commands/assistant/assistant.js');
+  } = await import(assistantInstallModulePath) as unknown as AssistantInstallModule;
   const defaultDir = await computeDefaultInstallDir();
   let rejectWithError: (reason: Error) => void;
   const errorPromise = new Promise<never>((_, reject) => {

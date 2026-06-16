@@ -17,7 +17,7 @@ import type { QueryChainTracking } from 'src/Tool.js'
 import { isConnectorTextBlock } from 'src/types/connectorText.js'
 import type { AssistantMessage } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import type { EffortLevel } from 'src/utils/effort.js'
+import type { EffortValue } from 'src/utils/effort.js'
 import { logError } from 'src/utils/log.js'
 import { getAPIProviderForStatsig } from 'src/utils/model/providers.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
@@ -189,7 +189,7 @@ export function logAPIQuery({
   querySource: string
   queryTracking?: QueryChainTracking
   thinkingType?: 'adaptive' | 'enabled' | 'disabled'
-  effortValue?: EffortLevel | null
+  effortValue?: EffortValue | null
   fastMode?: boolean
   previousRequestId?: string | null
 }): void {

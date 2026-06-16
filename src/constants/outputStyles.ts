@@ -138,7 +138,7 @@ export const getAllOutputStyles = memoize(async function getAllOutputStyles(
   cwd: string,
 ): Promise<{ [styleName: string]: OutputStyleConfig | null }> {
   const customStyles = await getOutputStyleDirStyles(cwd)
-  const pluginStyles = await loadPluginOutputStyles()
+  const pluginStyles = (await loadPluginOutputStyles()) as OutputStyleConfig[]
 
   // Start with built-in modes
   const allStyles = {
@@ -182,7 +182,7 @@ export async function getOutputStyleConfig(): Promise<OutputStyleConfig | null> 
   const allStyles = await getAllOutputStyles(getCwd())
 
   // Check for forced plugin output styles
-  const forcedStyles = Object.values(allStyles).filter(
+  const forcedStyles = (Object.values(allStyles) as Array<OutputStyleConfig | null>).filter(
     (style): style is OutputStyleConfig =>
       style !== null &&
       style.source === 'plugin' &&

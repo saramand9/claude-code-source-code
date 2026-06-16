@@ -201,6 +201,42 @@ feature('...') -> false
 
    `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout` 是实际可运行的 TypeScript 替代实现，但与官方 native/Rust/C++ 模块仍可能存在性能和边界行为差异。
 
+## 2026-06-16 续修记录
+
+本轮继续围绕 `npm run check`、`npm run build` 和 `npm run test:build-safety` 收口，目标是让当前源码在 Node/esbuild 路径下可重复检查、构建和做安全回归。
+
+### 本轮尝试修复/真实适配
+
+- 修复 TypeScript 静态检查中的长尾类型错误，使 `npm run check` 通过。
+- 补齐一批源码侧缺失但运行期只作为常量或类型边界使用的小模块，例如 `WorkflowTool`、`SendUserFileTool`、`SnipTool` 相关常量。
+- 增加 `src/utils/toolModuleLoader.ts`，统一处理 feature-gated/lazy tool 的 `require(...).NamedExport` 加载。
+- 将 `src/tools.ts` 中的 lazy tool 加载改为 `loadToolExport(...)`，优先读取命名导出；如果生成的 stub 只有 default fail-fast 导出，则回退到 default，避免工具静默变成 `undefined`。
+- 修正 `scripts/test-build-safety.mjs`，让测试 helper 的 alias 与构建脚本保持一致，覆盖 `@ant/claude-for-chrome-mcp`、`color-diff-napi` 和 `vscode-jsonrpc/node.js`。
+- 将 build-safety 的 stub manifest 断言改为按当前实际 manifest 检查，不再硬编码旧的 `>=25` stub 数量。
+- 将 missing named export 的 fail-fast 测试改成“存在时验证”，避免把已经被源码侧修复的缺口当成必须存在的错误。
+- 新增 lazy tool loader 的针对性测试，验证 default-only fail-fast stub 不会在工具加载阶段消失。
+
+### 本轮 mock/stub/降级说明
+
+- 新增的若干 `.d.ts` 只解决 TypeScript 编译期缺失声明，不代表对应内部模块已经完整实现。
+- `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭。
+- 当前构建仍会生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`；这些 stub 是明确失败边界，不是功能恢复。
+- `build-src/stub-manifest.json` 当前显示：15 个 missing modules、0 个 missing exports、14 个生成 stub。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+```
+
+结果：
+
+- `npm run check` 通过，执行内容为 `tsc --noEmit`，只做 TypeScript 静态检查，不生成产物。
+- `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`，产物大小约 27.1MB。
+- `npm run test:build-safety` 通过，当前为 14/14 项。
+
 ## 构建和启动
 
 ```powershell
@@ -233,6 +269,7 @@ node .\dist\cli.js -p "hello" --max-turns 1
 本次修改后已经验证：
 
 ```text
+npm run check
 npm run build
 npm start -- --version
 node dist\cli.js --help
@@ -254,10 +291,11 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 13 项深度检查：
+`npm run test:build-safety` 当前覆盖 14 项深度检查：
 
-- 构建输出、`build-src/stub-manifest.json` 和四类 stub 记录。
-- 默认导出和缺失命名导出的 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
+- 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
+- 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
+- lazy tool export loader 对 default-only fail-fast stub 的回退行为。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
 - `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
 - `nativeOptional` 对缺失 native 包的统一错误包装。

@@ -18,12 +18,12 @@ export const ConfigScopeSchema = lazySchema(() =>
     'managed',
   ]),
 )
-export type ConfigScope = z.infer<ReturnType<typeof ConfigScopeSchema>>
+export type ConfigScope = string
 
 export const TransportSchema = lazySchema(() =>
   z.enum(['stdio', 'sse', 'sse-ide', 'http', 'ws', 'sdk']),
 )
-export type Transport = z.infer<ReturnType<typeof TransportSchema>>
+export type Transport = string
 
 export const McpStdioServerConfigSchema = lazySchema(() =>
   z.object({
@@ -134,37 +134,32 @@ export const McpServerConfigSchema = lazySchema(() =>
   ]),
 )
 
-export type McpStdioServerConfig = z.infer<
-  ReturnType<typeof McpStdioServerConfigSchema>
->
-export type McpSSEServerConfig = z.infer<
-  ReturnType<typeof McpSSEServerConfigSchema>
->
-export type McpSSEIDEServerConfig = z.infer<
-  ReturnType<typeof McpSSEIDEServerConfigSchema>
->
-export type McpWebSocketIDEServerConfig = z.infer<
-  ReturnType<typeof McpWebSocketIDEServerConfigSchema>
->
-export type McpHTTPServerConfig = z.infer<
-  ReturnType<typeof McpHTTPServerConfigSchema>
->
-export type McpWebSocketServerConfig = z.infer<
-  ReturnType<typeof McpWebSocketServerConfigSchema>
->
-export type McpSdkServerConfig = z.infer<
-  ReturnType<typeof McpSdkServerConfigSchema>
->
-export type McpClaudeAIProxyServerConfig = z.infer<
-  ReturnType<typeof McpClaudeAIProxyServerConfigSchema>
->
-export type McpServerConfig = z.infer<ReturnType<typeof McpServerConfigSchema>>
+export type McpServerConfigBase = {
+  type?: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  headersHelper?: string
+  oauth?: Record<string, any>
+  id?: string
+  name?: string
+  [key: string]: any
+}
 
-export type ScopedMcpServerConfig = McpServerConfig & {
-  scope: ConfigScope
-  // For plugin-provided servers: the providing plugin's LoadedPlugin.source
-  // (e.g. 'slack@anthropic'). Stashed at config-build time so the channel
-  // gate doesn't have to race AppState.plugins.enabled hydration.
+export type McpStdioServerConfig = McpServerConfigBase
+export type McpSSEServerConfig = McpServerConfigBase
+export type McpSSEIDEServerConfig = McpServerConfigBase
+export type McpWebSocketIDEServerConfig = McpServerConfigBase
+export type McpHTTPServerConfig = McpServerConfigBase
+export type McpWebSocketServerConfig = McpServerConfigBase
+export type McpSdkServerConfig = McpServerConfigBase
+export type McpClaudeAIProxyServerConfig = McpServerConfigBase
+export type McpServerConfig = McpServerConfigBase
+
+export type ScopedMcpServerConfig = McpServerConfigBase & {
+  scope?: ConfigScope
   pluginSource?: string
 }
 
@@ -174,7 +169,10 @@ export const McpJsonConfigSchema = lazySchema(() =>
   }),
 )
 
-export type McpJsonConfig = z.infer<ReturnType<typeof McpJsonConfigSchema>>
+export type McpJsonConfig = {
+  mcpServers?: Record<string, McpServerConfig>
+  [key: string]: any
+}
 
 // Server connection types
 export type ConnectedMCPServer = {
@@ -189,6 +187,7 @@ export type ConnectedMCPServer = {
   instructions?: string
   config: ScopedMcpServerConfig
   cleanup: () => Promise<void>
+  [key: string]: any
 }
 
 export type FailedMCPServer = {
@@ -196,12 +195,14 @@ export type FailedMCPServer = {
   type: 'failed'
   config: ScopedMcpServerConfig
   error?: string
+  [key: string]: any
 }
 
 export type NeedsAuthMCPServer = {
   name: string
   type: 'needs-auth'
   config: ScopedMcpServerConfig
+  [key: string]: any
 }
 
 export type PendingMCPServer = {
@@ -210,12 +211,14 @@ export type PendingMCPServer = {
   config: ScopedMcpServerConfig
   reconnectAttempt?: number
   maxReconnectAttempts?: number
+  [key: string]: any
 }
 
 export type DisabledMCPServer = {
   name: string
   type: 'disabled'
   config: ScopedMcpServerConfig
+  [key: string]: any
 }
 
 export type MCPServerConnection =
@@ -224,6 +227,7 @@ export type MCPServerConnection =
   | NeedsAuthMCPServer
   | PendingMCPServer
   | DisabledMCPServer
+  | Record<string, any>
 
 // Resource types
 export type ServerResource = Resource & { server: string }
@@ -255,4 +259,5 @@ export interface MCPCliState {
   tools: SerializedTool[]
   resources: Record<string, ServerResource[]>
   normalizedNames?: Record<string, string> // Maps normalized names to original names
+  [key: string]: any
 }

@@ -31,20 +31,19 @@ import { getWebSocketProxyAgent, getWebSocketProxyUrl } from '../utils/proxy.js'
 type WSCtor = typeof import('ws').default
 let nodeWSCtor: WSCtor | undefined
 
-// Intersection of the surface openTunnel touches. Both undici's
-// globalThis.WebSocket and the ws package satisfy this via property-style
-// onX handlers.
-type WebSocketLike = Pick<
-  WebSocket,
-  | 'onopen'
-  | 'onmessage'
-  | 'onerror'
-  | 'onclose'
-  | 'send'
-  | 'close'
-  | 'readyState'
-  | 'binaryType'
->
+// Surface openTunnel touches. Both undici's globalThis.WebSocket and the ws
+// package satisfy this via property-style onX handlers, but their send()
+// typings disagree on BufferSource details.
+type WebSocketLike = {
+  onopen: WebSocket['onopen']
+  onmessage: WebSocket['onmessage']
+  onerror: WebSocket['onerror']
+  onclose: WebSocket['onclose']
+  send(data: string | ArrayBuffer | Uint8Array | Buffer): void
+  close(): void
+  readyState: number
+  binaryType: BinaryType
+}
 
 // Envoy per-request buffer cap. Week-1 Datadog payloads won't hit this, but
 // design for it so git-push doesn't need a relay rewrite.
@@ -258,12 +257,23 @@ export async function startNodeRelay(
     // needed for correctness. Week-1 payloads won't stress the buffer.
     const adapter: ClientSocket = {
       write: payload => {
-        sock.write(typeof payload === 'string' ? payload : Buffer.from(payload))
+        if (typeof payload === 'string') {
+          sock.write(payload)
+        } else {
+          sock.write(Buffer.from(payload))
+        }
       },
       end: () => sock.end(),
     }
     sock.on('data', data =>
-      handleData(adapter, st, data, wsUrl, authHeader, wsAuthHeader),
+      handleData(
+        adapter,
+        st,
+        Buffer.from(data),
+        wsUrl,
+        authHeader,
+        wsAuthHeader,
+      ),
     )
     sock.on('close', () => cleanupConn(states.get(sock)))
     sock.on('error', err => {
@@ -370,7 +380,7 @@ function openTunnel(
       headers,
       proxy: getWebSocketProxyUrl(wsUrl),
       tls: getWebSocketTLSOptions() || undefined,
-    })
+    }) as unknown as WebSocketLike
   }
   ws.binaryType = 'arraybuffer'
   st.ws = ws

@@ -3,6 +3,7 @@ import {
   ensureConnectedClient,
   fetchResourcesForClient,
 } from '../../services/mcp/client.js'
+import type { ConnectedMCPServer } from '../../services/mcp/types.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { errorMessage } from '../../utils/errors.js'
 import { lazySchema } from '../../utils/lazySchema.js'
@@ -85,7 +86,7 @@ export const ListMcpResourcesTool = buildTool({
       clientsToProcess.map(async client => {
         if (client.type !== 'connected') return []
         try {
-          const fresh = await ensureConnectedClient(client)
+          const fresh = await ensureConnectedClient(client as ConnectedMCPServer)
           return await fetchResourcesForClient(fresh)
         } catch (error) {
           // One server's reconnect failure shouldn't sink the whole result.

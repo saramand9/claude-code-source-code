@@ -6,6 +6,7 @@ import { readFileSync } from 'src/utils/fileRead.js'
 import { expandPath } from 'src/utils/path.js'
 import type { PermissionOption } from '../components/permissions/FilePermissionDialog/permissionOptions.js'
 import type {
+  ConnectedMCPServer,
   MCPServerConnection,
   McpSSEIDEServerConfig,
   McpWebSocketIDEServerConfig,
@@ -336,7 +337,7 @@ async function closeTabInIDE(
     }
 
     // Use direct RPC to close the tab
-    await callIdeRpc('close_tab', { tab_name: tabName }, ideClient)
+    await callIdeRpc('close_tab', { tab_name: tabName }, ideClient as ConnectedMCPServer)
   } catch (error) {
     logError(error as Error)
     // Don't throw - this is a cleanup operation

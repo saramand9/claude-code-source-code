@@ -11,6 +11,21 @@ type Props = {
   tokenUsage: number;
   model: string;
 };
+type ContextCollapseStats = {
+  collapsedSpans: number;
+  stagedSpans: number;
+  health: {
+    totalErrors: number;
+    totalEmptySpawns: number;
+    emptySpawnWarningEmitted?: boolean;
+  };
+};
+type ContextCollapseModule = {
+  getStats(): ContextCollapseStats;
+  subscribe(listener: () => void): () => void;
+  isContextCollapseEnabled(): boolean;
+};
+const contextCollapseModulePath: string = '../services/contextCollapse/index.js';
 
 /**
  * Live collapse progress: "x / y summarized". Sub-component so
@@ -25,7 +40,7 @@ function CollapseLabel(t0) {
   } = t0;
   let t1;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t1 = require("../services/contextCollapse/index.js");
+    t1 = require(contextCollapseModulePath);
     $[0] = t1;
   } else {
     t1 = $[0];
@@ -33,7 +48,7 @@ function CollapseLabel(t0) {
   const {
     getStats,
     subscribe
-  } = t1 as typeof import('../services/contextCollapse/index.js');
+  } = t1 as ContextCollapseModule;
   let t2;
   if ($[1] === Symbol.for("react.memo_cache_sentinel")) {
     t2 = () => {
@@ -45,7 +60,7 @@ function CollapseLabel(t0) {
   } else {
     t2 = $[1];
   }
-  const snapshot = useSyncExternalStore(subscribe, t2);
+  const snapshot = useSyncExternalStore(subscribe, t2) as string;
   let t3;
   if ($[2] !== snapshot) {
     t3 = snapshot.split("|").map(Number);
@@ -135,7 +150,7 @@ export function TokenWarning(t0) {
   if (feature("CONTEXT_COLLAPSE")) {
     const {
       isContextCollapseEnabled
-    } = require("../services/contextCollapse/index.js") as typeof import('../services/contextCollapse/index.js');
+    } = require(contextCollapseModulePath) as ContextCollapseModule;
     if (isContextCollapseEnabled()) {
       collapseMode = true;
     }

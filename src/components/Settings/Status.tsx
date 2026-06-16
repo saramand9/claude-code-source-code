@@ -54,7 +54,9 @@ function buildSecondarySection({
 export async function buildDiagnostics(): Promise<Diagnostic[]> {
   return [...(await buildInstallationDiagnostics()), ...(await buildInstallationHealthDiagnostics()), ...(await buildMemoryDiagnostics())];
 }
-function PropertyValue(t0) {
+function PropertyValue(t0: {
+  value: Property['value'];
+}) {
   const $ = _c(8);
   const {
     value
@@ -201,7 +203,9 @@ function _temp2(s_0) {
 function _temp(s) {
   return s.mainLoopModel;
 }
-function Diagnostics(t0) {
+function Diagnostics(t0: {
+  promise: Promise<Diagnostic[]>;
+}) {
   const $ = _c(5);
   const {
     promise

@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
-import type { Permutations } from 'src/types/utils.js'
 import { getSessionId } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import type {
@@ -342,7 +341,7 @@ export function resetCommandQueue(): void {
 
 const NON_EDITABLE_MODES = new Set<PromptInputMode>([
   'task-notification',
-] satisfies Permutations<Exclude<PromptInputMode, EditablePromptInputMode>>)
+] satisfies readonly Exclude<PromptInputMode, EditablePromptInputMode>[])
 
 export function isPromptInputModeEditable(
   mode: PromptInputMode,

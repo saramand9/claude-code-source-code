@@ -17,6 +17,7 @@ import { Box, Text } from '../../ink.js';
 import { getDumpPromptsPath } from '../../services/api/dumpPrompts.js';
 import { findToolByName, type Tools } from '../../Tool.js';
 import type { Message, ProgressMessage } from '../../types/message.js';
+import type { AssistantMessage, NormalizedUserMessage } from '../../types/message.js';
 import type { AgentToolProgress } from '../../types/tools.js';
 import { count } from '../../utils/array.js';
 import { getSearchOrReadFromContent, getSearchReadSummaryText } from '../../utils/collapseReadSearch.js';
@@ -37,7 +38,11 @@ const MAX_PROGRESS_MESSAGES_TO_SHOW = 3;
  * skill_progress).  Other progress types (e.g. bash_progress forwarded from
  * sub-agents) lack this field and must be skipped by UI helpers.
  */
-function hasProgressMessage(data: Progress): data is AgentToolProgress {
+type AgentProgressWithMessage = AgentToolProgress & {
+  message: AssistantMessage | NormalizedUserMessage;
+};
+
+function hasProgressMessage(data: Progress): data is AgentProgressWithMessage {
   if (!('message' in data)) {
     return false;
   }
@@ -99,7 +104,7 @@ type ProcessedMessage = {
  */
 function processProgressMessages(messages: ProgressMessage<Progress>[], tools: Tools, isAgentRunning: boolean): ProcessedMessage[] {
   // Only process for ants
-  if ("external" !== 'ant') {
+  if (("external" as string) !== 'ant') {
     return messages.filter((m): m is ProgressMessage<AgentToolProgress> => hasProgressMessage(m.data) && m.data.message.type !== 'user').map(m => ({
       type: 'original',
       message: m
@@ -379,13 +384,26 @@ export function renderToolResultMessage(data: Output, progressMessagesForMessage
     content: completionMessage,
     usage: {
       ...usage,
-      inference_geo: null,
-      iterations: null,
-      speed: null
+      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+      output_tokens_details: (usage as { output_tokens_details?: { thinking_tokens: number } })
+        .output_tokens_details ?? { thinking_tokens: 0 },
+      server_tool_use: usage.server_tool_use ?? {
+        web_search_requests: 0,
+        web_fetch_requests: 0,
+      },
+      service_tier: usage.service_tier ?? 'standard',
+      cache_creation: usage.cache_creation ?? {
+        ephemeral_1h_input_tokens: 0,
+        ephemeral_5m_input_tokens: 0,
+      },
+      inference_geo: '',
+      iterations: [],
+      speed: 'standard',
     }
   });
   return <Box flexDirection="column">
-      {"external" === 'ant' && <MessageResponse>
+      {("external" as string) === 'ant' && <MessageResponse>
           <Text color="warning">
             [ANT-ONLY] API calls: {getDisplayPath(getDumpPromptsPath(agentId))}
           </Text>
@@ -539,7 +557,9 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<P
   const {
     lookups: subagentLookups,
     inProgressToolUseIDs: collapsedInProgressIDs
-  } = buildSubagentLookups(progressMessages.filter((pm): pm is ProgressMessage<AgentToolProgress> => hasProgressMessage(pm.data)).map(pm => pm.data));
+  } = buildSubagentLookups(progressMessages.filter((pm): pm is ProgressMessage<AgentProgressWithMessage> => hasProgressMessage(pm.data)).map(pm => ({
+    message: pm.data.message
+  })));
   return <MessageResponse>
       <Box flexDirection="column">
         <SubAgentProvider>
@@ -591,7 +611,7 @@ export function renderToolUseRejectedMessage(_input: {
   const firstData = progressMessagesForMessage[0]?.data;
   const agentId = firstData && hasProgressMessage(firstData) ? firstData.agentId : undefined;
   return <>
-      {"external" === 'ant' && agentId && <MessageResponse>
+      {("external" as string) === 'ant' && agentId && <MessageResponse>
           <Text color="warning">
             [ANT-ONLY] API calls: {getDisplayPath(getDumpPromptsPath(agentId))}
           </Text>

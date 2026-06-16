@@ -1260,7 +1260,9 @@ export function getConnectedIdeClient(
   )
 
   // Type guard to ensure we return the correct type
-  return ideClient?.type === 'connected' ? ideClient : undefined
+  return ideClient?.type === 'connected'
+    ? (ideClient as ConnectedMCPServer)
+    : undefined
 }
 
 /**

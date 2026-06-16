@@ -550,15 +550,22 @@ export function buildMissedTaskNotification(missed: CronTask[]): string {
 
   const blocks = missed.map(t => {
     const meta = `[${cronToHuman(t.cron)}, created ${new Date(t.createdAt).toLocaleString()}]`
+    const prompt = String(t.prompt)
     // Use a fence one longer than any backtick run in the prompt so a
     // prompt containing ``` cannot close the fence early and un-wrap the
     // trailing text (CommonMark fence-matching rule).
-    const longestRun = (t.prompt.match(/`+/g) ?? []).reduce(
-      (max, run) => Math.max(max, run.length),
-      0,
-    )
+    let longestRun = 0
+    let currentRun = 0
+    for (const char of prompt) {
+      if (char === '`') {
+        currentRun++
+        longestRun = Math.max(longestRun, currentRun)
+      } else {
+        currentRun = 0
+      }
+    }
     const fence = '`'.repeat(Math.max(3, longestRun + 1))
-    return `${meta}\n${fence}\n${t.prompt}\n${fence}`
+    return `${meta}\n${fence}\n${prompt}\n${fence}`
   })
 
   return `${header}\n\n${blocks.join('\n\n')}`

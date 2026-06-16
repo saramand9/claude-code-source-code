@@ -158,7 +158,7 @@ export async function authLogin({
       await installOAuthTokens(tokens)
 
       const orgResult = await validateForceLoginOrg()
-      if (!orgResult.valid) {
+      if (orgResult.valid === false) {
         process.stderr.write(orgResult.message + '\n')
         process.exit(1)
       }
@@ -208,7 +208,7 @@ export async function authLogin({
     await installOAuthTokens(result)
 
     const orgResult = await validateForceLoginOrg()
-    if (!orgResult.valid) {
+    if (orgResult.valid === false) {
       process.stderr.write(orgResult.message + '\n')
       process.exit(1)
     }

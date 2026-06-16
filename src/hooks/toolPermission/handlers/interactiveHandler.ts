@@ -16,6 +16,7 @@ import {
   shortRequestId,
   truncateForPreview,
 } from '../../../services/mcp/channelPermissions.js'
+import type { ConnectedMCPServer } from '../../../services/mcp/types.js'
 import { executeAsyncClassifierCheck } from '../../../tools/BashTool/bashPermissions.js'
 import { BASH_TOOL_NAME } from '../../../tools/BashTool/toolName.js'
 import {
@@ -321,7 +322,7 @@ function handleInteractivePermission(
     const channelRequestId = shortRequestId(ctx.toolUseID)
     const allowedChannels = getAllowedChannels()
     const channelClients = filterPermissionRelayClients(
-      ctx.toolUseContext.getAppState().mcp.clients,
+      ctx.toolUseContext.getAppState().mcp.clients as ConnectedMCPServer[],
       name => findChannelEntry(name, allowedChannels) !== undefined,
     )
 
@@ -340,7 +341,7 @@ function handleInteractivePermission(
 
       for (const client of channelClients) {
         if (client.type !== 'connected') continue // refine for TS
-        void client.client
+        void (client as ConnectedMCPServer).client
           .notification({
             method: CHANNEL_PERMISSION_REQUEST_METHOD,
             params,

@@ -1772,7 +1772,7 @@ export async function bashToolHasPermission(
     // Clean parse: check semantic-level concerns (zsh builtins, eval, etc.)
     // that tokenize fine but are dangerous by name.
     const sem = checkSemantics(astResult.commands)
-    if (!sem.ok) {
+    if (sem.ok === false) {
       // Same deny-rule enforcement as the too-complex path: a user with
       // `Bash(eval:*)` deny expects `eval "rm"` blocked, not downgraded.
       const earlyExit = checkSemanticsDeny(
@@ -1813,7 +1813,7 @@ export async function bashToolHasPermission(
       'bashToolHasPermission: tree-sitter unavailable, using legacy shell-quote path',
     )
     const parseResult = tryParseShellCommand(input.command)
-    if (!parseResult.success) {
+    if (parseResult.success === false) {
       const decisionReason = {
         type: 'other' as const,
         reason: `Command contains malformed syntax that cannot be parsed: ${parseResult.error}`,

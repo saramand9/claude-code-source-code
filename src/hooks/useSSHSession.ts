@@ -20,8 +20,6 @@ import {
   convertSDKMessage,
   isSessionEndMessage,
 } from '../remote/sdkMessageAdapter.js'
-import type { SSHSession } from '../ssh/createSSHSession.js'
-import type { SSHSessionManager } from '../ssh/SSHSessionManager.js'
 import type { Tool } from '../Tool.js'
 import { findToolByName } from '../Tool.js'
 import type { Message as MessageType } from '../types/message.js'
@@ -29,6 +27,52 @@ import type { PermissionAskDecision } from '../types/permissions.js'
 import { logForDebugging } from '../utils/debug.js'
 import { gracefulShutdown } from '../utils/gracefulShutdown.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
+
+type SSHPermissionRequest = {
+  tool_name: string
+  description?: string
+  permission_suggestions?: PermissionAskDecision['suggestions']
+  blocked_path?: string
+  input: Record<string, unknown>
+  tool_use_id: string
+}
+
+type SSHSessionManager = {
+  connect(): void
+  disconnect(): void
+  sendMessage(content: RemoteMessageContent): Promise<boolean>
+  sendInterrupt(): void
+  respondToPermissionRequest(
+    requestId: string,
+    response: {
+      behavior: 'allow' | 'deny'
+      message?: string
+      updatedInput?: Record<string, unknown>
+    },
+  ): void
+}
+
+type SSHSession = {
+  createManager(callbacks: {
+    onMessage(sdkMessage: Parameters<typeof convertSDKMessage>[0]): void
+    onPermissionRequest(
+      request: SSHPermissionRequest,
+      requestId: string,
+    ): void
+    onConnected(): void
+    onReconnecting(attempt: number, max: number): void
+    onDisconnected(): void
+    onError(error: Error): void
+  }): SSHSessionManager
+  getStderrTail(): string
+  proc: {
+    exitCode: number | null
+    signalCode: string | null
+  }
+  proxy: {
+    stop(): void
+  }
+}
 
 type UseSSHSessionResult = {
   isRemoteMode: boolean
@@ -97,8 +141,13 @@ export function useSSHSession({
           findToolByName(toolsRef.current, request.tool_name) ??
           createToolStub(request.tool_name)
 
+        const syntheticRequest = {
+          subtype: 'can_use_tool' as const,
+          ...request,
+        } as Parameters<typeof createSyntheticAssistantMessage>[0]
+
         const syntheticMessage = createSyntheticAssistantMessage(
-          request,
+          syntheticRequest,
           requestId,
         )
 

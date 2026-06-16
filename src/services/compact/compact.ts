@@ -4,7 +4,9 @@ import uniqBy from 'lodash-es/uniqBy.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const sessionTranscriptModule = feature('KAIROS')
-  ? (require('../sessionTranscript/sessionTranscript.js') as typeof import('../sessionTranscript/sessionTranscript.js'))
+  ? (require('../sessionTranscript/sessionTranscript.js') as {
+      writeSessionTranscriptSegment(messages: unknown[]): unknown
+    })
   : null
 
 import { APIUserAbortError } from '@anthropic-ai/sdk'
@@ -1329,6 +1331,10 @@ async function streamCompactSummary({
 
       while (!next.done) {
         const event = next.value
+        if (!event) {
+          next = await streamIter.next()
+          continue
+        }
 
         if (
           !hasStartedStreaming &&

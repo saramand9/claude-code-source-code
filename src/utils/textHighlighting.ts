@@ -127,15 +127,16 @@ class HighlightSegmenter {
         this.stringPos += token.code.length
         this.tokenIdx++
       } else {
+        const value = (token as { value: string }).value
         const charsNeeded = targetVisiblePos - this.visiblePos
-        const charsAvailable = token.value.length - this.charIdx
+        const charsAvailable = value.length - this.charIdx
         const charsToTake = Math.min(charsNeeded, charsAvailable)
 
         this.stringPos += charsToTake
         this.visiblePos += charsToTake
         this.charIdx += charsToTake
 
-        if (this.charIdx >= token.value.length) {
+        if (this.charIdx >= value.length) {
           this.tokenIdx++
           this.charIdx = 0
         }

@@ -114,10 +114,19 @@ import { normalizeNameForMCP } from './normalization.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
+type FetchMcpSkillsForClient = ((
+  client: MCPServerConnection,
+) => Promise<Command[]>) & {
+  cache: {
+    delete(name: string): void
+  }
+}
+
+const mcpSkillsModulePath: string = '../../skills/mcpSkills.js'
 const fetchMcpSkillsForClient = feature('MCP_SKILLS')
-  ? (
-      require('../../skills/mcpSkills.js') as typeof import('../../skills/mcpSkills.js')
-    ).fetchMcpSkillsForClient
+  ? (require(mcpSkillsModulePath) as {
+      fetchMcpSkillsForClient: FetchMcpSkillsForClient
+    }).fetchMcpSkillsForClient
   : null
 
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
@@ -1859,7 +1868,9 @@ export const fetchToolsForClient = memoizeWithLRU(
               const MAX_SESSION_RETRIES = 1
               for (let attempt = 0; ; attempt++) {
                 try {
-                  const connectedClient = await ensureConnectedClient(client)
+                  const connectedClient = await ensureConnectedClient(
+                    client as ConnectedMCPServer,
+                  )
                   const mcpResult = await callMCPToolWithUrlElicitationRetry({
                     client: connectedClient,
                     clientConnection: client,
@@ -2073,7 +2084,9 @@ export const fetchCommandsForClient = memoizeWithLRU(
           async getPromptForCommand(args: string) {
             const argsArray = args.split(' ')
             try {
-              const connectedClient = await ensureConnectedClient(client)
+              const connectedClient = await ensureConnectedClient(
+                client as ConnectedMCPServer,
+              )
               const result = await connectedClient.client.getPrompt({
                 name: prompt.name,
                 arguments: zipObject(argNames, argsArray),

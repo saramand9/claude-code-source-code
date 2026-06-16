@@ -355,12 +355,19 @@ import { isExtractModeActive } from '../memdir/paths.js'
 
 // Dead code elimination: conditional imports
 /* eslint-disable @typescript-eslint/no-require-imports */
+type ProactiveModule = {
+  isProactiveActive(): boolean
+  isProactivePaused(): boolean
+  activateProactive(source: string): void
+  deactivateProactive(): void
+}
+const proactiveModulePath: string = '../proactive/index.js'
 const coordinatorModeModule = feature('COORDINATOR_MODE')
   ? (require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js'))
   : null
 const proactiveModule =
   feature('PROACTIVE') || feature('KAIROS')
-    ? (require('../proactive/index.js') as typeof import('../proactive/index.js'))
+    ? (require(proactiveModulePath) as ProactiveModule)
     : null
 const cronSchedulerModule = feature('AGENT_TRIGGERS')
   ? (require('../utils/cronScheduler.js') as typeof import('../utils/cronScheduler.js'))
@@ -1802,12 +1809,12 @@ function runHeadlessStreaming(
         type === 'http' ||
         type === 'sdk'
       ) {
-        supportedConfigs[name] = config
+        supportedConfigs[name] = config as McpServerConfigForProcessTransport
       }
     }
     for (const [name, config] of Object.entries(sdkMcpConfigs)) {
       if (config.type === 'sdk' && !(name in supportedConfigs)) {
-        supportedConfigs[name] = config
+        supportedConfigs[name] = config as McpServerConfigForProcessTransport
       }
     }
     const { response, sdkServersChanged } =
@@ -4061,14 +4068,15 @@ function runHeadlessStreaming(
 
       // Check for duplicate user message - skip if already processed
       if (message.uuid) {
+        const messageUuid = message.uuid as UUID
         const sessionId = getSessionId() as UUID
         const existsInSession = await doesMessageExistInSession(
           sessionId,
-          message.uuid,
+          messageUuid,
         )
 
         // Check both historical duplicates (from file) and runtime duplicates (this session)
-        if (existsInSession || receivedMessageUuids.has(message.uuid)) {
+        if (existsInSession || receivedMessageUuids.has(messageUuid)) {
           logForDebugging(`Skipping duplicate user message: ${message.uuid}`)
           // Send acknowledgment for duplicate message if replay mode is enabled
           if (options.replayUserMessages) {
@@ -4080,7 +4088,7 @@ function runHeadlessStreaming(
               message: message.message,
               session_id: sessionId,
               parent_tool_use_id: null,
-              uuid: message.uuid,
+              uuid: messageUuid,
               timestamp: message.timestamp,
               isReplay: true,
             } as SDKUserMessageReplay)
@@ -4089,22 +4097,25 @@ function runHeadlessStreaming(
           // ran but its lifecycle was never closed (interrupted before ack).
           // Runtime dups don't need this — the original enqueue path closes them.
           if (existsInSession) {
-            notifyCommandLifecycle(message.uuid, 'completed')
+            notifyCommandLifecycle(messageUuid, 'completed')
           }
           // Don't enqueue duplicate messages for execution
           continue
         }
 
         // Track this UUID to prevent runtime duplicates
-        trackReceivedMessageUuid(message.uuid)
+        trackReceivedMessageUuid(messageUuid)
       }
 
+      const inboundMessage = message.message as {
+        content: string | Array<ContentBlockParam>
+      }
       enqueue({
         mode: 'prompt' as const,
         // file_attachments rides the protobuf catchall from the web composer.
         // Same-ref no-op when absent (no 'file_attachments' key).
-        value: await resolveAndPrepend(message, message.message.content),
-        uuid: message.uuid,
+        value: await resolveAndPrepend(message, inboundMessage.content),
+        uuid: message.uuid as UUID,
         priority: message.priority,
       })
       // Increment prompt count for attribution tracking and save snapshot

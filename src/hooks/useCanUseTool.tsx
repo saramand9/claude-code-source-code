@@ -25,6 +25,13 @@ import { handleSwarmWorkerPermission } from './toolPermission/handlers/swarmWork
 import { createPermissionContext, createPermissionQueueOps } from './toolPermission/PermissionContext.js';
 import { logPermissionDecision } from './toolPermission/permissionLogging.js';
 export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, unknown>> = (tool: ToolType, input: Input, toolUseContext: ToolUseContext, assistantMessage: AssistantMessage, toolUseID: string, forceDecision?: PermissionDecision<Input>) => Promise<PermissionDecision<Input>>;
+type SpeculativeClassifierResult = NonNullable<ReturnType<typeof peekSpeculativeClassifierCheck>> extends Promise<infer T> ? T : never;
+type ClassifierRaceResult = {
+  type: "result";
+  result: SpeculativeClassifierResult;
+} | {
+  type: "timeout";
+};
 function useCanUseTool(setToolUseConfirmQueue, setToolPermissionContext) {
   const $ = _c(3);
   let t0;
@@ -128,7 +135,7 @@ function useCanUseTool(setToolUseConfirmQueue, setToolPermissionContext) {
                   command: string;
                 }).command);
                 if (speculativePromise) {
-                  const raceResult = await Promise.race([speculativePromise.then(_temp), new Promise(_temp2)]);
+                  const raceResult = await Promise.race([speculativePromise.then(_temp), new Promise<ClassifierRaceResult>(_temp2)]);
                   if (ctx.resolveIfAborted(resolve)) {
                     return;
                   }
@@ -189,12 +196,12 @@ function useCanUseTool(setToolUseConfirmQueue, setToolPermissionContext) {
   }
   return t0;
 }
-function _temp2(res) {
+function _temp2(res: (value: ClassifierRaceResult) => void) {
   return setTimeout(res, 2000, {
     type: "timeout" as const
   });
 }
-function _temp(r) {
+function _temp(r: SpeculativeClassifierResult): ClassifierRaceResult {
   return {
     type: "result" as const,
     result: r

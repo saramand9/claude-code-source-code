@@ -85,7 +85,19 @@ import uniqBy from 'lodash-es/uniqBy.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { formatCommandsWithinBudget } from '../tools/SkillTool/prompt.js'
 import { getContextWindowForModel } from './context.js'
-import type { DiscoverySignal } from '../services/skillSearch/signals.js'
+type DiscoverySignal = string
+type SkillSearchModules = {
+  featureCheck: {
+    isSkillSearchEnabled(): boolean
+  }
+  prefetch: {
+    getTurnZeroSkillDiscovery(
+      input: string,
+      messages: Message[],
+      context: ToolUseContext,
+    ): Promise<Attachment[]>
+  }
+}
 // Conditional require for DCE. All skill-search string literals that would
 // otherwise leak into external builds live inside these modules. The only
 // surfaces in THIS file are: the maybe() call (gated via spread below) and
@@ -95,9 +107,9 @@ import type { DiscoverySignal } from '../services/skillSearch/signals.js'
 const skillSearchModules = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? {
       featureCheck:
-        require('../services/skillSearch/featureCheck.js') as typeof import('../services/skillSearch/featureCheck.js'),
+        require('../services/skillSearch/featureCheck.js') as SkillSearchModules['featureCheck'],
       prefetch:
-        require('../services/skillSearch/prefetch.js') as typeof import('../services/skillSearch/prefetch.js'),
+        require('../services/skillSearch/prefetch.js') as SkillSearchModules['prefetch'],
     }
   : null
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -204,7 +216,9 @@ const BRIEF_TOOL_NAME: string | null =
       ).BRIEF_TOOL_NAME
     : null
 const sessionTranscriptModule = feature('KAIROS')
-  ? (require('../services/sessionTranscript/sessionTranscript.js') as typeof import('../services/sessionTranscript/sessionTranscript.js'))
+  ? (require('../services/sessionTranscript/sessionTranscript.js') as {
+      flushOnDateChange(messages: Message[], currentDate: string): unknown
+    })
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { hasUltrathinkKeyword, isUltrathinkEnabled } from './thinking.js'
@@ -999,7 +1013,7 @@ export async function getAttachments(
     ...userAttachmentResults.flat(),
     ...threadAttachmentResults.flat(),
     ...mainThreadAttachmentResults.flat(),
-  ].filter(a => a !== undefined && a !== null)
+  ].filter((a): a is Attachment => a !== undefined && a !== null)
 }
 
 async function maybe<A>(label: string, f: () => Promise<A[]>): Promise<A[]> {
@@ -2776,7 +2790,7 @@ export function extractAtMentionedFiles(content: string): string[] {
   }
 
   // Extract regular mentions
-  const regularMatchArray = content.match(regularAtMentionRegex) || []
+  const regularMatchArray: string[] = content.match(regularAtMentionRegex) ?? []
   regularMatchArray.forEach(match => {
     const filename = match.slice(match.indexOf('@') + 1)
     // Don't include if it starts with a quote (already handled as quoted)
@@ -3970,7 +3984,10 @@ export function getContextEfficiencyAttachment(
   // isn't in the tool list. Lazy require keeps this file snip-string-free.
   const { isSnipRuntimeEnabled, shouldNudgeForSnips } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('../services/compact/snipCompact.js') as typeof import('../services/compact/snipCompact.js')
+    require('../services/compact/snipCompact.js') as {
+      isSnipRuntimeEnabled(): boolean
+      shouldNudgeForSnips(messages: Message[]): boolean
+    }
   if (!isSnipRuntimeEnabled()) {
     return []
   }

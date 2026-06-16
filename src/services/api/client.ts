@@ -85,6 +85,14 @@ function createStderrLogger(): ClientOptions['logger'] {
   }
 }
 
+type AnthropicBedrockOptions = ClientOptions & {
+  awsRegion?: string
+  skipAuth?: boolean
+  awsAccessKey?: string
+  awsSecretKey?: string
+  awsSessionToken?: string
+}
+
 export async function getAnthropicClient({
   apiKey,
   maxRetries,
@@ -159,7 +167,7 @@ export async function getAnthropicClient({
         ? process.env.ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
         : getAWSRegion()
 
-    const bedrockArgs: ConstructorParameters<typeof AnthropicBedrock>[0] = {
+    const bedrockArgs: AnthropicBedrockOptions = {
       ...ARGS,
       awsRegion,
       ...(isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) && {
@@ -186,7 +194,9 @@ export async function getAnthropicClient({
       }
     }
     // we have always been lying about the return type - this doesn't support batching or models
-    return new AnthropicBedrock(bedrockArgs) as unknown as Anthropic
+    return new AnthropicBedrock(
+      bedrockArgs as ConstructorParameters<typeof AnthropicBedrock>[0],
+    ) as unknown as Anthropic
   }
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
@@ -263,14 +273,15 @@ export async function getAnthropicClient({
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] ||
       process.env['google_application_credentials']
 
+    type VertexArgs = ConstructorParameters<typeof AnthropicVertex>[0]
     const googleAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)
       ? ({
           // Mock GoogleAuth for testing/proxy scenarios
           getClient: () => ({
             getRequestHeaders: () => ({}),
           }),
-        } as unknown as GoogleAuth)
-      : new GoogleAuth({
+        } as unknown as VertexArgs['googleAuth'])
+      : (new GoogleAuth({
           scopes: ['https://www.googleapis.com/auth/cloud-platform'],
           // Only use ANTHROPIC_VERTEX_PROJECT_ID as last resort fallback
           // This prevents the 12-second metadata server timeout when:
@@ -285,7 +296,7 @@ export async function getAnthropicClient({
             : {
                 projectId: process.env.ANTHROPIC_VERTEX_PROJECT_ID,
               }),
-        })
+        }) as unknown as VertexArgs['googleAuth'])
 
     const vertexArgs: ConstructorParameters<typeof AnthropicVertex>[0] = {
       ...ARGS,

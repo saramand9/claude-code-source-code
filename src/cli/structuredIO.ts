@@ -8,7 +8,6 @@ import type { AssistantMessage } from 'src//types/message.js'
 import type {
   HookInput,
   HookJSONOutput,
-  PermissionUpdate,
   SDKMessage,
   SDKUserMessage,
 } from 'src/entrypoints/agentSdkTypes.js'
@@ -45,6 +44,7 @@ import {
   applyPermissionUpdates,
   persistPermissionUpdates,
 } from '../utils/permissions/PermissionUpdate.js'
+import type { PermissionUpdate } from '../utils/permissions/PermissionUpdateSchema.js'
 import {
   notifySessionStateChanged,
   type RequiresActionDetails,
@@ -448,9 +448,12 @@ export class StructuredIO {
       if (message.type === 'assistant' || message.type === 'system') {
         return message
       }
-      if (message.message.role !== 'user') {
+      const userMessage = message as StdinMessage & {
+        message: { role?: string }
+      }
+      if (userMessage.message.role !== 'user') {
         exitWithMessage(
-          `Error: Expected message role 'user', got '${message.message.role}'`,
+          `Error: Expected message role 'user', got '${userMessage.message.role}'`,
         )
       }
       return message
@@ -816,7 +819,8 @@ async function executePermissionRequestHooksForSDK(
         const finalInput = decision.updatedInput || input
 
         // Apply permission updates if provided by hook ("always allow")
-        const permissionUpdates = decision.updatedPermissions ?? []
+        const permissionUpdates =
+          (decision.updatedPermissions ?? []) as PermissionUpdate[]
         if (permissionUpdates.length > 0) {
           persistPermissionUpdates(permissionUpdates)
           const currentAppState = toolUseContext.getAppState()

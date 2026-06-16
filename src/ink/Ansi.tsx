@@ -5,7 +5,7 @@ import Text from './components/Text.js';
 import type { Color } from './styles.js';
 import { type NamedColor, Parser, type Color as TermioColor, type TextStyle } from './termio.js';
 type Props = {
-  children: string;
+  children: React.ReactNode;
   /** When true, force all text to be rendered with dim styling */
   dimColor?: boolean;
 };
@@ -29,7 +29,7 @@ type SpanProps = {
  *
  * Memoized to prevent re-renders when parent changes but children string is the same.
  */
-export const Ansi = React.memo(function Ansi(t0) {
+export const Ansi = React.memo(function Ansi(t0: Props) {
   const $ = _c(12);
   const {
     children,

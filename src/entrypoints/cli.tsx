@@ -1,5 +1,40 @@
 import { feature } from 'bun:bundle';
 
+type DaemonWorkerRegistryModule = {
+  runDaemonWorker(kind?: string): void | Promise<void>;
+};
+
+type DaemonMainModule = {
+  daemonMain(args: string[]): void | Promise<void>;
+};
+
+type BackgroundSessionsModule = {
+  psHandler(args: string[]): void | Promise<void>;
+  logsHandler(sessionId?: string): void | Promise<void>;
+  attachHandler(sessionId?: string): void | Promise<void>;
+  killHandler(sessionId?: string): void | Promise<void>;
+  handleBgFlag(args: string[]): void | Promise<void>;
+};
+
+type TemplateJobsModule = {
+  templatesMain(args: string[]): void | Promise<void>;
+};
+
+type EnvironmentRunnerModule = {
+  environmentRunnerMain(args: string[]): void | Promise<void>;
+};
+
+type SelfHostedRunnerModule = {
+  selfHostedRunnerMain(args: string[]): void | Promise<void>;
+};
+
+const daemonWorkerRegistryModulePath = '../daemon/workerRegistry.js' as string;
+const daemonMainModulePath = '../daemon/main.js' as string;
+const backgroundSessionsModulePath = '../cli/bg.js' as string;
+const templateJobsModulePath = '../cli/handlers/templateJobs.js' as string;
+const environmentRunnerModulePath = '../environment-runner/main.js' as string;
+const selfHostedRunnerModulePath = '../self-hosted-runner/main.js' as string;
+
 // Bugfix for corepack auto-pinning, which adds yarnpkg to peoples' package.jsons
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 process.env.COREPACK_ENABLE_AUTO_PIN = '0';
@@ -100,7 +135,7 @@ async function main(): Promise<void> {
   if (feature('DAEMON') && args[0] === '--daemon-worker') {
     const {
       runDaemonWorker
-    } = await import('../daemon/workerRegistry.js');
+    } = (await import(daemonWorkerRegistryModulePath)) as DaemonWorkerRegistryModule;
     await runDaemonWorker(args[1]);
     return;
   }
@@ -174,7 +209,7 @@ async function main(): Promise<void> {
     initSinks();
     const {
       daemonMain
-    } = await import('../daemon/main.js');
+    } = (await import(daemonMainModulePath)) as DaemonMainModule;
     await daemonMain(args.slice(1));
     return;
   }
@@ -188,7 +223,7 @@ async function main(): Promise<void> {
       enableConfigs
     } = await import('../utils/config.js');
     enableConfigs();
-    const bg = await import('../cli/bg.js');
+    const bg = (await import(backgroundSessionsModulePath)) as BackgroundSessionsModule;
     switch (args[0]) {
       case 'ps':
         await bg.psHandler(args.slice(1));
@@ -213,7 +248,7 @@ async function main(): Promise<void> {
     profileCheckpoint('cli_templates_path');
     const {
       templatesMain
-    } = await import('../cli/handlers/templateJobs.js');
+    } = (await import(templateJobsModulePath)) as TemplateJobsModule;
     await templatesMain(args);
     // process.exit (not return) — mountFleetView's Ink TUI can leave event
     // loop handles that prevent natural exit.
@@ -227,7 +262,7 @@ async function main(): Promise<void> {
     profileCheckpoint('cli_environment_runner_path');
     const {
       environmentRunnerMain
-    } = await import('../environment-runner/main.js');
+    } = (await import(environmentRunnerModulePath)) as EnvironmentRunnerModule;
     await environmentRunnerMain(args.slice(1));
     return;
   }
@@ -239,7 +274,7 @@ async function main(): Promise<void> {
     profileCheckpoint('cli_self_hosted_runner_path');
     const {
       selfHostedRunnerMain
-    } = await import('../self-hosted-runner/main.js');
+    } = (await import(selfHostedRunnerModulePath)) as SelfHostedRunnerModule;
     await selfHostedRunnerMain(args.slice(1));
     return;
   }

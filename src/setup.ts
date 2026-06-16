@@ -53,6 +53,22 @@ import {
   worktreeBranchName,
 } from './utils/worktree.js'
 
+type UdsMessagingModule = {
+  startUdsMessaging(
+    socketPath: string,
+    opts: { isExplicit: boolean },
+  ): Promise<void>
+  getDefaultUdsSocketPath(): string
+}
+
+type ContextCollapseModule = {
+  initContextCollapse(): void
+}
+
+type AttributionHooksModule = {
+  registerAttributionHooks(): void
+}
+
 export async function setup(
   cwd: string,
   permissionMode: PermissionMode,
@@ -93,7 +109,8 @@ export async function setup(
     // and $CLAUDE_CODE_MESSAGING_SOCKET is exported before any hook
     // (SessionStart in particular) can spawn and snapshot process.env.
     if (feature('UDS_INBOX')) {
-      const m = await import('./utils/udsMessaging.js')
+      const udsMessagingModulePath: string = './utils/udsMessaging.js'
+      const m = (await import(udsMessagingModulePath)) as UdsMessagingModule
       await m.startUdsMessaging(
         messagingSocketPath ?? m.getDefaultUdsSocketPath(),
         { isExplicit: messagingSocketPath !== undefined },
@@ -294,9 +311,10 @@ export async function setup(
     initSessionMemory() // Synchronous - registers hook, gate check happens lazily
     if (feature('CONTEXT_COLLAPSE')) {
       /* eslint-disable @typescript-eslint/no-require-imports */
-      ;(
-        require('./services/contextCollapse/index.js') as typeof import('./services/contextCollapse/index.js')
-      ).initContextCollapse()
+      const contextCollapseModulePath: string =
+        './services/contextCollapse/index.js'
+      ;(require(contextCollapseModulePath) as ContextCollapseModule)
+        .initContextCollapse()
       /* eslint-enable @typescript-eslint/no-require-imports */
     }
   }
@@ -352,11 +370,11 @@ export async function setup(
       // Defer to next tick so the git subprocess spawn runs after first render
       // rather than during the setup() microtask window.
       setImmediate(() => {
-        void import('./utils/attributionHooks.js').then(
-          ({ registerAttributionHooks }) => {
+        const attributionHooksModulePath: string = './utils/attributionHooks.js'
+        void import(attributionHooksModulePath).then(m => {
+          const { registerAttributionHooks } = m as AttributionHooksModule
             registerAttributionHooks() // Register attribution tracking hooks (ant-only feature)
-          },
-        )
+        })
       })
     }
     void import('./utils/sessionFileAccessHooks.js').then(m =>

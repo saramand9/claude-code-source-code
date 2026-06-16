@@ -937,14 +937,14 @@ function getPreviousRequestIdFromMessages(
   return undefined
 }
 
-function isMedia(
-  block: BetaContentBlockParam,
-): block is BetaImageBlockParam | BetaRequestDocumentBlock {
+function isMedia(block: { type?: string }): block is
+  | BetaImageBlockParam
+  | BetaRequestDocumentBlock {
   return block.type === 'image' || block.type === 'document'
 }
 
 function isToolResult(
-  block: BetaContentBlockParam,
+  block: { type?: string },
 ): block is BetaToolResultBlockParam {
   return block.type === 'tool_result'
 }
@@ -1188,13 +1188,20 @@ async function* queryModel(
   let cachedMCEnabled = false
   let cacheEditingBetaHeader = ''
   if (feature('CACHED_MICROCOMPACT')) {
+    const cachedMicrocompactModulePath = '../compact/cachedMicrocompact.js'
     const {
       isCachedMicrocompactEnabled,
       isModelSupportedForCacheEditing,
       getCachedMCConfig,
-    } = await import('../compact/cachedMicrocompact.js')
-    const betas = await import('src/constants/betas.js')
-    cacheEditingBetaHeader = betas.CACHE_EDITING_BETA_HEADER
+    } = (await import(cachedMicrocompactModulePath)) as {
+      isCachedMicrocompactEnabled(): boolean
+      isModelSupportedForCacheEditing(model: string): boolean
+      getCachedMCConfig(): { supportedModels: unknown }
+    }
+    const betas = (await import('src/constants/betas.js')) as typeof import('src/constants/betas.js') & {
+      CACHE_EDITING_BETA_HEADER?: string
+    }
+    cacheEditingBetaHeader = betas.CACHE_EDITING_BETA_HEADER ?? ''
     const featureEnabled = isCachedMicrocompactEnabled()
     const modelSupported = isModelSupportedForCacheEditing(options.model)
     cachedMCEnabled = featureEnabled && modelSupported
@@ -1703,8 +1710,8 @@ async function* queryModel(
         enablePromptCaching,
         options.querySource,
         useCachedMC,
-        consumedCacheEdits,
-        consumedPinnedEdits,
+        consumedCacheEdits as CachedMCEditsBlock | null,
+        consumedPinnedEdits as CachedMCPinnedEdits[] | undefined,
         options.skipCacheWrite,
       ),
       system,
@@ -1751,7 +1758,7 @@ async function* queryModel(
         querySource: options.querySource,
         queryTracking: options.queryTracking,
         thinkingType: logThinkingType,
-        effortValue: logEffortValue,
+        effortValue: logEffortValue as EffortValue | undefined,
         fastMode: isFastMode,
         previousRequestId,
       })
@@ -2078,7 +2085,9 @@ async function* queryModel(
                 })
                 throw new Error('Content block is not a connector_text block')
               }
-              contentBlock.connector_text += delta.connector_text
+              contentBlock.connector_text += (delta as {
+                connector_text: string
+              }).connector_text
             } else {
               switch (delta.type) {
                 case 'citations_delta':
@@ -2108,7 +2117,8 @@ async function* queryModel(
                     })
                     throw new Error('Content block input is not a string')
                   }
-                  contentBlock.input += delta.partial_json
+                  contentBlock.input += (delta as { partial_json: string })
+                    .partial_json
                   break
                 case 'text_delta':
                   if (contentBlock.type !== 'text') {
@@ -2122,14 +2132,15 @@ async function* queryModel(
                     })
                     throw new Error('Content block is not a text block')
                   }
-                  contentBlock.text += delta.text
+                  contentBlock.text += (delta as { text: string }).text
                   break
                 case 'signature_delta':
                   if (
                     feature('CONNECTOR_TEXT') &&
                     contentBlock.type === 'connector_text'
                   ) {
-                    contentBlock.signature = delta.signature
+                    contentBlock.signature = (delta as { signature: string })
+                      .signature
                     break
                   }
                   if (contentBlock.type !== 'thinking') {
@@ -2143,7 +2154,8 @@ async function* queryModel(
                     })
                     throw new Error('Content block is not a thinking block')
                   }
-                  contentBlock.signature = delta.signature
+                  contentBlock.signature = (delta as { signature: string })
+                    .signature
                   break
                 case 'thinking_delta':
                   if (contentBlock.type !== 'thinking') {
@@ -2157,7 +2169,8 @@ async function* queryModel(
                     })
                     throw new Error('Content block is not a thinking block')
                   }
-                  contentBlock.thinking += delta.thinking
+                  contentBlock.thinking += (delta as { thinking: string })
+                    .thinking
                   break
               }
             }
@@ -2298,6 +2311,8 @@ async function* queryModel(
 
         yield {
           type: 'stream_event',
+          uuid: randomUUID(),
+          timestamp: new Date().toISOString(),
           event: part,
           ...(part.type === 'message_start' ? { ttftMs } : undefined),
         }
@@ -2820,7 +2835,7 @@ async function* queryModel(
     if (fallbackMessage) {
       const fallbackUsage = fallbackMessage.message.usage
       usage = updateUsage(EMPTY_USAGE, fallbackUsage)
-      stopReason = fallbackMessage.message.stop_reason
+      stopReason = fallbackMessage.message.stop_reason as BetaStopReason
       const fallbackCost = calculateUSDCost(resolvedModel, fallbackUsage)
       costUSD += addToTotalSessionCost(
         fallbackCost,
@@ -2944,6 +2959,9 @@ export function updateUsage(
         ? partUsage.cache_read_input_tokens
         : usage.cache_read_input_tokens,
     output_tokens: partUsage.output_tokens ?? usage.output_tokens,
+    output_tokens_details:
+      (partUsage as BetaUsage).output_tokens_details ??
+      usage.output_tokens_details,
     server_tool_use: {
       web_search_requests:
         partUsage.server_tool_use?.web_search_requests ??
@@ -3002,6 +3020,7 @@ export function accumulateUsage(
     cache_read_input_tokens:
       totalUsage.cache_read_input_tokens + messageUsage.cache_read_input_tokens,
     output_tokens: totalUsage.output_tokens + messageUsage.output_tokens,
+    output_tokens_details: messageUsage.output_tokens_details,
     server_tool_use: {
       web_search_requests:
         totalUsage.server_tool_use.web_search_requests +

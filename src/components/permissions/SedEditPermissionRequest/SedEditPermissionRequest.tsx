@@ -18,7 +18,9 @@ type FileReadResult = {
   oldContent: string;
   fileExists: boolean;
 };
-export function SedEditPermissionRequest(t0) {
+export function SedEditPermissionRequest(
+  t0: SedEditPermissionRequestProps,
+): React.ReactNode {
   const $ = _c(9);
   let props;
   let sedInfo;
@@ -67,7 +69,7 @@ export function SedEditPermissionRequest(t0) {
   }
   return t2;
 }
-function _temp(e) {
+function _temp(e: unknown): FileReadResult {
   if (!isENOENT(e)) {
     throw e;
   }
@@ -76,7 +78,12 @@ function _temp(e) {
     fileExists: false
   };
 }
-function SedEditPermissionRequestInner(t0) {
+function SedEditPermissionRequestInner(
+  t0: PermissionRequestProps & {
+    sedInfo: SedEditInfo;
+    contentPromise: Promise<FileReadResult>;
+  },
+): React.ReactNode {
   const $ = _c(35);
   let contentPromise;
   let props;
@@ -102,7 +109,7 @@ function SedEditPermissionRequestInner(t0) {
   const {
     oldContent,
     fileExists
-  } = use(contentPromise);
+  } = use(contentPromise as Promise<FileReadResult>);
   let t1;
   if ($[4] !== oldContent || $[5] !== sedInfo) {
     t1 = applySedSubstitution(oldContent, sedInfo);

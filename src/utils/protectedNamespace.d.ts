@@ -1,0 +1,1 @@
+export const checkProtectedNamespace: any

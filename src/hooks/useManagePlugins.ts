@@ -8,6 +8,7 @@ import {
 import { reinitializeLspServerManager } from '../services/lsp/manager.js'
 import { useAppState, useSetAppState } from '../state/AppState.js'
 import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
+import type { LoadedPlugin } from '../types/plugin.js'
 import { count } from '../utils/array.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
@@ -21,6 +22,24 @@ import { loadPluginMcpServers } from '../utils/plugins/mcpPluginIntegration.js'
 import { detectAndUninstallDelistedPlugins } from '../utils/plugins/pluginBlocklist.js'
 import { getFlaggedPlugins } from '../utils/plugins/pluginFlagging.js'
 import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
+
+type HookMatcher = {
+  hooks: unknown[]
+}
+
+function countPluginHooks(plugin: { hooksConfig?: unknown }): number {
+  if (!plugin.hooksConfig || typeof plugin.hooksConfig !== 'object') return 0
+
+  return Object.values(plugin.hooksConfig).reduce((sum, matchers) => {
+    if (!Array.isArray(matchers)) return sum
+    return (
+      sum +
+      matchers.reduce((hookSum: number, matcher: HookMatcher) => {
+        return hookSum + matcher.hooks.length
+      }, 0)
+    )
+  }, 0)
+}
 
 /**
  * Hook to manage plugin state and synchronize with AppState.
@@ -185,22 +204,18 @@ export function useManagePlugins({
 
       // Count component types across enabled plugins
       const hook_count = enabled.reduce((sum, p) => {
-        if (!p.hooksConfig) return sum
-        return (
-          sum +
-          Object.values(p.hooksConfig).reduce(
-            (s, matchers) =>
-              s + (matchers?.reduce((h, m) => h + m.hooks.length, 0) ?? 0),
-            0,
-          )
-        )
+        return sum + countPluginHooks(p)
       }, 0)
 
       return {
         enabled_count: enabled.length,
         disabled_count: disabled.length,
-        inline_count: count(enabled, p => p.source.endsWith('@inline')),
-        marketplace_count: count(enabled, p => !p.source.endsWith('@inline')),
+        inline_count: count(enabled as LoadedPlugin[], p =>
+          p.source.endsWith('@inline'),
+        ),
+        marketplace_count: count(enabled as LoadedPlugin[], p =>
+          !p.source.endsWith('@inline'),
+        ),
         error_count: errors.length,
         skill_count: commands.length,
         agent_count: agents.length,

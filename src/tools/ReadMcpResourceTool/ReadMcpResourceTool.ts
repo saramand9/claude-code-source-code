@@ -4,6 +4,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod/v4'
 import { ensureConnectedClient } from '../../services/mcp/client.js'
+import type { ConnectedMCPServer } from '../../services/mcp/types.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import {
@@ -91,7 +92,7 @@ export const ReadMcpResourceTool = buildTool({
       throw new Error(`Server "${serverName}" does not support resources`)
     }
 
-    const connectedClient = await ensureConnectedClient(client)
+    const connectedClient = await ensureConnectedClient(client as ConnectedMCPServer)
     const result = (await connectedClient.client.request(
       {
         method: 'resources/read',

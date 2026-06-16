@@ -89,7 +89,7 @@ export function useClaudeCodeHintRecommendation() {
                 scope: "user",
                 trigger: "hint"
               });
-              if (!result.success) {
+              if (result.success === false) {
                 throw new Error(result.error);
               }
             });

@@ -696,7 +696,7 @@ export function parseAgentFromMarkdown(
       mcpServers = mcpServersRaw
         .map(item => {
           const result = AgentMcpServerSpecSchema().safeParse(item)
-          if (result.success) {
+          if (result.success === true) {
             return result.data
           }
           logForDebugging(
@@ -704,7 +704,7 @@ export function parseAgentFromMarkdown(
           )
           return null
         })
-        .filter((item): item is AgentMcpServerSpec => item !== null)
+        .filter(item => item !== null) as AgentMcpServerSpec[]
     }
 
     // Parse hooks from frontmatter

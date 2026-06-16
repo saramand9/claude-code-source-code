@@ -146,7 +146,7 @@ function ResumeCommand({
     // Check if this conversation is from a different directory
     const crossProjectCheck = checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
     if (crossProjectCheck.isCrossProject) {
-      if (crossProjectCheck.isSameRepoWorktree) {
+      if (crossProjectCheck.isSameRepoWorktree === true) {
         // Same repo worktree - can resume directly
         setResuming(true);
         void onResume(sessionId, fullLog, 'slash_command_picker');

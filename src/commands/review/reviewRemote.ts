@@ -135,7 +135,7 @@ export async function launchRemoteReview(
   // setup, so no_remote_environment isn't a blocker. Server-side quota
   // consume at session creation routes billing: first N zero-rate, then
   // anthropic:cccr org-service-key (overage-only).
-  if (!eligibility.eligible) {
+  if (eligibility.eligible === false) {
     const blockers = eligibility.errors.filter(
       e => e.type !== 'no_remote_environment',
     )

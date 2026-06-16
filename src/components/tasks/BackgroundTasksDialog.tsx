@@ -14,11 +14,8 @@ import type { LocalAgentTaskState } from 'src/tasks/LocalAgentTask/LocalAgentTas
 import { LocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import type { LocalShellTaskState } from 'src/tasks/LocalShellTask/guards.js';
 import { LocalShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
-// Type import is erased at build time — safe even though module is ant-gated.
-import type { LocalWorkflowTaskState } from 'src/tasks/LocalWorkflowTask/LocalWorkflowTask.js';
-import type { MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js';
 import { RemoteAgentTask, type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { type BackgroundTaskState, isBackgroundTask, type TaskState } from 'src/tasks/types.js';
+import { type BackgroundTaskState, isBackgroundTask, type LocalWorkflowTaskState, type MonitorMcpTaskState, type TaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { intersperse } from 'src/utils/array.js';
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js';
@@ -52,6 +49,27 @@ type Props = {
   }) => void;
   toolUseContext: ToolUseContext;
   initialDetailTaskId?: string;
+};
+type WorkflowDetailDialogProps = {
+  workflow: DeepImmutable<LocalWorkflowTaskState>;
+  onDone: Props['onDone'];
+  onKill?: () => void;
+  onSkipAgent?: (agentId: string) => void;
+  onRetryAgent?: (agentId: string) => void;
+  onBack: () => void;
+};
+type MonitorMcpDetailDialogProps = {
+  task: DeepImmutable<MonitorMcpTaskState>;
+  onKill?: () => void;
+  onBack: () => void;
+};
+type WorkflowTaskModule = {
+  killWorkflowTask: (taskId: string, ...args: unknown[]) => void;
+  skipWorkflowAgent: (taskId: string, agentId: string, ...args: unknown[]) => void;
+  retryWorkflowAgent: (taskId: string, agentId: string, ...args: unknown[]) => void;
+};
+type MonitorMcpTaskModule = {
+  killMonitorMcp: (taskId: string, ...args: unknown[]) => void;
 };
 type ListItem = {
   id: string;
@@ -106,17 +124,21 @@ type ListItem = {
 // ~1.3K lines into external builds. Gate with feature() + require so the
 // bundler can dead-code-eliminate the branch.
 /* eslint-disable @typescript-eslint/no-require-imports */
-const WorkflowDetailDialog = feature('WORKFLOW_SCRIPTS') ? (require('./WorkflowDetailDialog.js') as typeof import('./WorkflowDetailDialog.js')).WorkflowDetailDialog : null;
-const workflowTaskModule = feature('WORKFLOW_SCRIPTS') ? require('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js') as typeof import('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js') : null;
+const WorkflowDetailDialog = feature('WORKFLOW_SCRIPTS') ? (require('./WorkflowDetailDialog.js') as {
+  WorkflowDetailDialog: React.ComponentType<WorkflowDetailDialogProps>;
+}).WorkflowDetailDialog : null;
+const workflowTaskModule = feature('WORKFLOW_SCRIPTS') ? require('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js') as WorkflowTaskModule : null;
 const killWorkflowTask = workflowTaskModule?.killWorkflowTask ?? null;
 const skipWorkflowAgent = workflowTaskModule?.skipWorkflowAgent ?? null;
 const retryWorkflowAgent = workflowTaskModule?.retryWorkflowAgent ?? null;
 // Relative path, not `src/...` path-mapping — Bun's DCE can statically
 // resolve + eliminate `./` requires, but path-mapped strings stay opaque
 // and survive as dead literals in the bundle. Matches tasks.ts pattern.
-const monitorMcpModule = feature('MONITOR_TOOL') ? require('../../tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('../../tasks/MonitorMcpTask/MonitorMcpTask.js') : null;
+const monitorMcpModule = feature('MONITOR_TOOL') ? require('../../tasks/MonitorMcpTask/MonitorMcpTask.js') as MonitorMcpTaskModule : null;
 const killMonitorMcp = monitorMcpModule?.killMonitorMcp ?? null;
-const MonitorMcpDetailDialog = feature('MONITOR_TOOL') ? (require('./MonitorMcpDetailDialog.js') as typeof import('./MonitorMcpDetailDialog.js')).MonitorMcpDetailDialog : null;
+const MonitorMcpDetailDialog = feature('MONITOR_TOOL') ? (require('./MonitorMcpDetailDialog.js') as {
+  MonitorMcpDetailDialog: React.ComponentType<MonitorMcpDetailDialogProps>;
+}).MonitorMcpDetailDialog : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Helper to get filtered background tasks (excludes foregrounded local_agent)

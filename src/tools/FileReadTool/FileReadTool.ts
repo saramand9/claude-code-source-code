@@ -781,6 +781,21 @@ type ImageResult = {
   }
 }
 
+type SharpFactory = (input: Buffer) => {
+  resize(
+    width: number,
+    height: number,
+    options: {
+      fit: string
+      withoutEnlargement: boolean
+    },
+  ): {
+    jpeg(options: { quality: number }): {
+      toBuffer(): Promise<Buffer>
+    }
+  }
+}
+
 function createImageResponse(
   buffer: Buffer,
   mediaType: string,
@@ -898,7 +913,7 @@ async function callInner(
         resolvedFilePath,
         parsedRange ?? undefined,
       )
-      if (!extractResult.success) {
+      if (extractResult.success === false) {
         throw new Error(extractResult.error.message)
       }
       logEvent('tengu_pdf_page_extraction', {
@@ -961,7 +976,7 @@ async function callInner(
 
     if (shouldExtractPages) {
       const extractResult = await extractPDFPages(resolvedFilePath)
-      if (extractResult.success) {
+      if (extractResult.success === true) {
         logEvent('tengu_pdf_page_extraction', {
           success: true,
           pageCount: extractResult.data.file.count,
@@ -985,7 +1000,7 @@ async function callInner(
     }
 
     const readResult = await readPDF(resolvedFilePath)
-    if (!readResult.success) {
+    if (readResult.success === false) {
       throw new Error(readResult.error.message)
     }
     const pdfData = readResult.data
@@ -1157,11 +1172,8 @@ export async function readImageWithTokenBudget(
       try {
         const sharpModule = await import('sharp')
         const sharp =
-          (
-            sharpModule as {
-              default?: typeof sharpModule
-            } & typeof sharpModule
-          ).default || sharpModule
+          (sharpModule as { default?: SharpFactory }).default ??
+          (sharpModule as unknown as SharpFactory)
 
         const fallbackBuffer = await sharp(imageBuffer)
           .resize(400, 400, {

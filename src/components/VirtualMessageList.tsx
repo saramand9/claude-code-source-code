@@ -345,7 +345,7 @@ export function VirtualMessageList({
   useImperativeHandle(cursorNavRef, (): MessageActionsNav => {
     const select = (m: NavigableMessage) => setCursor?.({
       uuid: m.uuid,
-      msgType: m.type,
+      msgType: m.type as MessageActionsState['msgType'],
       expanded: false,
       toolName: toolCallOf(m)?.name
     });

@@ -24,25 +24,27 @@ import { YOLO_CLASSIFIER_TOOL_NAME } from './yoloClassifier.js'
 // Ant-only tool names: conditional require so Bun can DCE these in external builds.
 // Gates mirror tools.ts. Keeps the tool name strings out of cli.js.
 /* eslint-disable @typescript-eslint/no-require-imports */
+type ToolNameModule = Record<string, string>
+
 const TERMINAL_CAPTURE_TOOL_NAME = feature('TERMINAL_PANEL')
   ? (
-      require('../../tools/TerminalCaptureTool/prompt.js') as typeof import('../../tools/TerminalCaptureTool/prompt.js')
+      require('../../tools/TerminalCaptureTool/prompt.js') as ToolNameModule
     ).TERMINAL_CAPTURE_TOOL_NAME
   : null
 const OVERFLOW_TEST_TOOL_NAME = feature('OVERFLOW_TEST_TOOL')
   ? (
-      require('../../tools/OverflowTestTool/OverflowTestTool.js') as typeof import('../../tools/OverflowTestTool/OverflowTestTool.js')
+      require('../../tools/OverflowTestTool/OverflowTestTool.js') as ToolNameModule
     ).OVERFLOW_TEST_TOOL_NAME
   : null
 const VERIFY_PLAN_EXECUTION_TOOL_NAME =
   process.env.USER_TYPE === 'ant'
     ? (
-        require('../../tools/VerifyPlanExecutionTool/constants.js') as typeof import('../../tools/VerifyPlanExecutionTool/constants.js')
+        require('../../tools/VerifyPlanExecutionTool/constants.js') as ToolNameModule
       ).VERIFY_PLAN_EXECUTION_TOOL_NAME
     : null
 const WORKFLOW_TOOL_NAME = feature('WORKFLOW_SCRIPTS')
   ? (
-      require('../../tools/WorkflowTool/constants.js') as typeof import('../../tools/WorkflowTool/constants.js')
+      require('../../tools/WorkflowTool/constants.js') as ToolNameModule
     ).WORKFLOW_TOOL_NAME
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */

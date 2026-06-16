@@ -216,7 +216,7 @@ async function executeBYOCPersistence(
   const failedFiles: FailedPersistence[] = []
 
   for (const result of results) {
-    if (result.success) {
+    if (result.success === true) {
       persistedFiles.push({
         filename: result.path,
         file_id: result.fileId,

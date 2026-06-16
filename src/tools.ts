@@ -11,45 +11,96 @@ import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
+import { loadToolExport } from './utils/toolModuleLoader.js'
 // Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const REPLTool =
   process.env.USER_TYPE === 'ant'
-    ? require('./tools/REPLTool/REPLTool.js').REPLTool
+    ? loadToolExport(
+        require('./tools/REPLTool/REPLTool.js'),
+        'REPLTool',
+        './tools/REPLTool/REPLTool.js',
+      )
     : null
 const SuggestBackgroundPRTool =
   process.env.USER_TYPE === 'ant'
-    ? require('./tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
-        .SuggestBackgroundPRTool
+    ? loadToolExport(
+        require('./tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js'),
+        'SuggestBackgroundPRTool',
+        './tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js',
+      )
     : null
 const SleepTool =
   feature('PROACTIVE') || feature('KAIROS')
-    ? require('./tools/SleepTool/SleepTool.js').SleepTool
+    ? loadToolExport(
+        require('./tools/SleepTool/SleepTool.js'),
+        'SleepTool',
+        './tools/SleepTool/SleepTool.js',
+      )
     : null
 const cronTools = feature('AGENT_TRIGGERS')
   ? [
-      require('./tools/ScheduleCronTool/CronCreateTool.js').CronCreateTool,
-      require('./tools/ScheduleCronTool/CronDeleteTool.js').CronDeleteTool,
-      require('./tools/ScheduleCronTool/CronListTool.js').CronListTool,
+      loadToolExport(
+        require('./tools/ScheduleCronTool/CronCreateTool.js'),
+        'CronCreateTool',
+        './tools/ScheduleCronTool/CronCreateTool.js',
+      ),
+      loadToolExport(
+        require('./tools/ScheduleCronTool/CronDeleteTool.js'),
+        'CronDeleteTool',
+        './tools/ScheduleCronTool/CronDeleteTool.js',
+      ),
+      loadToolExport(
+        require('./tools/ScheduleCronTool/CronListTool.js'),
+        'CronListTool',
+        './tools/ScheduleCronTool/CronListTool.js',
+      ),
     ]
   : []
 const RemoteTriggerTool = feature('AGENT_TRIGGERS_REMOTE')
-  ? require('./tools/RemoteTriggerTool/RemoteTriggerTool.js').RemoteTriggerTool
+  ? loadToolExport(
+      require('./tools/RemoteTriggerTool/RemoteTriggerTool.js'),
+      'RemoteTriggerTool',
+      './tools/RemoteTriggerTool/RemoteTriggerTool.js',
+    )
   : null
 const MonitorTool = feature('MONITOR_TOOL')
-  ? require('./tools/MonitorTool/MonitorTool.js').MonitorTool
+  ? loadToolExport(
+      require('./tools/MonitorTool/MonitorTool.js'),
+      'MonitorTool',
+      './tools/MonitorTool/MonitorTool.js',
+    )
   : null
 const SendUserFileTool = feature('KAIROS')
-  ? require('./tools/SendUserFileTool/SendUserFileTool.js').SendUserFileTool
+  ? loadToolExport(
+      require('./tools/SendUserFileTool/SendUserFileTool.js'),
+      'SendUserFileTool',
+      './tools/SendUserFileTool/SendUserFileTool.js',
+    )
   : null
 const PushNotificationTool =
   feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
-    ? require('./tools/PushNotificationTool/PushNotificationTool.js')
-        .PushNotificationTool
+    ? loadToolExport(
+        require('./tools/PushNotificationTool/PushNotificationTool.js'),
+        'PushNotificationTool',
+        './tools/PushNotificationTool/PushNotificationTool.js',
+      )
     : null
 const SubscribePRTool = feature('KAIROS_GITHUB_WEBHOOKS')
-  ? require('./tools/SubscribePRTool/SubscribePRTool.js').SubscribePRTool
+  ? loadToolExport(
+      require('./tools/SubscribePRTool/SubscribePRTool.js'),
+      'SubscribePRTool',
+      './tools/SubscribePRTool/SubscribePRTool.js',
+    )
   : null
+const TungstenTool =
+  process.env.USER_TYPE === 'ant'
+    ? loadToolExport(
+        require('./tools/TungstenTool/TungstenTool.js'),
+        'TungstenTool',
+        './tools/TungstenTool/TungstenTool.js',
+      )
+    : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { TaskOutputTool } from './tools/TaskOutputTool/TaskOutputTool.js'
 import { WebSearchTool } from './tools/WebSearchTool/WebSearchTool.js'
@@ -57,7 +108,6 @@ import { TodoWriteTool } from './tools/TodoWriteTool/TodoWriteTool.js'
 import { ExitPlanModeV2Tool } from './tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
 import { TestingPermissionTool } from './tools/testing/TestingPermissionTool.js'
 import { GrepTool } from './tools/GrepTool/GrepTool.js'
-import { TungstenTool } from './tools/TungstenTool/TungstenTool.js'
 // Lazy require to break circular dependency: tools.ts -> TeamCreateTool/TeamDeleteTool -> ... -> tools.ts
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getTeamCreateTool = () =>
@@ -90,8 +140,11 @@ import { isTodoV2Enabled } from './utils/tasks.js'
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const VerifyPlanExecutionTool =
   process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
-    ? require('./tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js')
-        .VerifyPlanExecutionTool
+    ? loadToolExport(
+        require('./tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js'),
+        'VerifyPlanExecutionTool',
+        './tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js',
+      )
     : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.js'
@@ -105,31 +158,58 @@ import { feature } from 'bun:bundle'
 // Dead code elimination: conditional import for OVERFLOW_TEST_TOOL
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const OverflowTestTool = feature('OVERFLOW_TEST_TOOL')
-  ? require('./tools/OverflowTestTool/OverflowTestTool.js').OverflowTestTool
+  ? loadToolExport(
+      require('./tools/OverflowTestTool/OverflowTestTool.js'),
+      'OverflowTestTool',
+      './tools/OverflowTestTool/OverflowTestTool.js',
+    )
   : null
 const CtxInspectTool = feature('CONTEXT_COLLAPSE')
-  ? require('./tools/CtxInspectTool/CtxInspectTool.js').CtxInspectTool
+  ? loadToolExport(
+      require('./tools/CtxInspectTool/CtxInspectTool.js'),
+      'CtxInspectTool',
+      './tools/CtxInspectTool/CtxInspectTool.js',
+    )
   : null
 const TerminalCaptureTool = feature('TERMINAL_PANEL')
-  ? require('./tools/TerminalCaptureTool/TerminalCaptureTool.js')
-      .TerminalCaptureTool
+  ? loadToolExport(
+      require('./tools/TerminalCaptureTool/TerminalCaptureTool.js'),
+      'TerminalCaptureTool',
+      './tools/TerminalCaptureTool/TerminalCaptureTool.js',
+    )
   : null
 const WebBrowserTool = feature('WEB_BROWSER_TOOL')
-  ? require('./tools/WebBrowserTool/WebBrowserTool.js').WebBrowserTool
+  ? loadToolExport(
+      require('./tools/WebBrowserTool/WebBrowserTool.js'),
+      'WebBrowserTool',
+      './tools/WebBrowserTool/WebBrowserTool.js',
+    )
   : null
 const coordinatorModeModule = feature('COORDINATOR_MODE')
   ? (require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js'))
   : null
 const SnipTool = feature('HISTORY_SNIP')
-  ? require('./tools/SnipTool/SnipTool.js').SnipTool
+  ? loadToolExport(
+      require('./tools/SnipTool/SnipTool.js'),
+      'SnipTool',
+      './tools/SnipTool/SnipTool.js',
+    )
   : null
 const ListPeersTool = feature('UDS_INBOX')
-  ? require('./tools/ListPeersTool/ListPeersTool.js').ListPeersTool
+  ? loadToolExport(
+      require('./tools/ListPeersTool/ListPeersTool.js'),
+      'ListPeersTool',
+      './tools/ListPeersTool/ListPeersTool.js',
+    )
   : null
 const WorkflowTool = feature('WORKFLOW_SCRIPTS')
   ? (() => {
       require('./tools/WorkflowTool/bundled/index.js').initBundledWorkflows()
-      return require('./tools/WorkflowTool/WorkflowTool.js').WorkflowTool
+      return loadToolExport(
+        require('./tools/WorkflowTool/WorkflowTool.js'),
+        'WorkflowTool',
+        './tools/WorkflowTool/WorkflowTool.js',
+      )
     })()
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
@@ -212,7 +292,7 @@ export function getAllBaseTools(): Tools {
     SkillTool,
     EnterPlanModeTool,
     ...(process.env.USER_TYPE === 'ant' ? [ConfigTool] : []),
-    ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
+    ...(TungstenTool ? [TungstenTool] : []),
     ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),
     ...(isTodoV2Enabled()

@@ -21,7 +21,7 @@ export function ToolsStep(t0) {
     goBack,
     updateWizardData,
     wizardData
-  } = useWizard();
+  } = useWizard<AgentWizardData>();
   let t1;
   if ($[0] !== goNext || $[1] !== updateWizardData) {
     t1 = selectedTools => {

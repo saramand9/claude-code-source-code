@@ -23,6 +23,7 @@ import {
   getCanonicalName,
   getMarketingNameForModel,
 } from '../utils/model/model.js'
+import { getAntModelOverrideConfig } from '../utils/model/antModels.js'
 import { getSkillToolCommands } from 'src/commands.js'
 import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.js'
 import { getOutputStyleConfig } from './outputStyles.js'
@@ -63,9 +64,34 @@ import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
 
 // Dead code elimination: conditional imports for feature-gated modules
 /* eslint-disable @typescript-eslint/no-require-imports */
+type CachedMCConfigModule = {
+  getCachedMCConfig(): {
+    supportedModels?: string[]
+    enabled?: boolean
+    systemPromptSuggestSummaries?: boolean
+    keepRecent?: number
+  }
+}
+
+type BriefPromptModule = {
+  BRIEF_PROACTIVE_SECTION: string
+}
+
+type BriefToolModule = {
+  isBriefEnabled(): boolean
+}
+
+type DiscoverSkillsPromptModule = {
+  DISCOVER_SKILLS_TOOL_NAME: string
+}
+
+type SkillSearchFeatureCheckModule = {
+  isSkillSearchEnabled(): boolean
+}
+
 const getCachedMCConfigForFRC = feature('CACHED_MICROCOMPACT')
   ? (
-      require('../services/compact/cachedMCConfig.js') as typeof import('../services/compact/cachedMCConfig.js')
+      require('../services/compact/cachedMCConfig.js') as CachedMCConfigModule
     ).getCachedMCConfig
   : null
 
@@ -76,24 +102,24 @@ const proactiveModule =
 const BRIEF_PROACTIVE_SECTION: string | null =
   feature('KAIROS') || feature('KAIROS_BRIEF')
     ? (
-        require('../tools/BriefTool/prompt.js') as typeof import('../tools/BriefTool/prompt.js')
+        require('../tools/BriefTool/prompt.js') as BriefPromptModule
       ).BRIEF_PROACTIVE_SECTION
     : null
 const briefToolModule =
   feature('KAIROS') || feature('KAIROS_BRIEF')
-    ? (require('../tools/BriefTool/BriefTool.js') as typeof import('../tools/BriefTool/BriefTool.js'))
+    ? (require('../tools/BriefTool/BriefTool.js') as BriefToolModule)
     : null
 const DISCOVER_SKILLS_TOOL_NAME: string | null = feature(
   'EXPERIMENTAL_SKILL_SEARCH',
 )
   ? (
-      require('../tools/DiscoverSkillsTool/prompt.js') as typeof import('../tools/DiscoverSkillsTool/prompt.js')
+      require('../tools/DiscoverSkillsTool/prompt.js') as DiscoverSkillsPromptModule
     ).DISCOVER_SKILLS_TOOL_NAME
   : null
 // Capture the module (not .isSkillSearchEnabled directly) so spyOn() in tests
 // patches what we actually call — a captured function ref would point past the spy.
 const skillSearchFeatureCheck = feature('EXPERIMENTAL_SKILL_SEARCH')
-  ? (require('../services/skillSearch/featureCheck.js') as typeof import('../services/skillSearch/featureCheck.js'))
+  ? (require('../services/skillSearch/featureCheck.js') as SkillSearchFeatureCheckModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import type { OutputStyleConfig } from './outputStyles.js'

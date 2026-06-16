@@ -847,8 +847,15 @@ export async function* runAgent({
     killShellTasksForAgent(agentId, toolUseContext.getAppState, rootSetAppState)
     /* eslint-disable @typescript-eslint/no-require-imports */
     if (feature('MONITOR_TOOL')) {
-      const mcpMod =
-        require('../../tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('../../tasks/MonitorMcpTask/MonitorMcpTask.js')
+      const mcpMod = require(
+        '../../tasks/MonitorMcpTask/MonitorMcpTask.js',
+      ) as {
+        killMonitorMcpTasksForAgent(
+          agentId: string,
+          getAppState: typeof toolUseContext.getAppState,
+          setAppState: typeof rootSetAppState,
+        ): void
+      }
       mcpMod.killMonitorMcpTasksForAgent(
         agentId,
         toolUseContext.getAppState,

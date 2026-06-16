@@ -66,7 +66,7 @@ export function setupVscodeSdkMcp(sdkClients: MCPServerConnection[]): void {
 
   if (client && client.type === 'connected') {
     // Store the client reference for later use
-    vscodeMcpClient = client
+    vscodeMcpClient = client as ConnectedMCPServer
 
     client.client.setNotificationHandler(
       LogEventNotificationSchema(),

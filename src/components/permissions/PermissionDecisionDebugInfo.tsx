@@ -7,6 +7,7 @@ import { Ansi, Box, color, Text, useTheme } from '../../ink.js';
 import { useAppState } from '../../state/AppState.js';
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js';
 import { permissionModeTitle } from '../../utils/permissions/PermissionMode.js';
+import type { PermissionRuleValue } from '../../utils/permissions/PermissionRule.js';
 import type { PermissionDecision, PermissionDecisionReason } from '../../utils/permissions/PermissionResult.js';
 import { extractRules } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js';
@@ -46,7 +47,9 @@ function decisionReasonDisplayString(decisionReason: PermissionDecisionReason & 
       return '';
   }
 }
-function PermissionDecisionInfoItem(t0) {
+function PermissionDecisionInfoItem(
+  t0: PermissionDecisionInfoItemProps,
+): React.ReactNode {
   const $ = _c(10);
   const {
     title,
@@ -105,7 +108,9 @@ function PermissionDecisionInfoItem(t0) {
   }
   return t4;
 }
-function SuggestedRules(t0) {
+function SuggestedRules(t0: {
+  suggestions: PermissionUpdate[] | undefined;
+}): React.ReactNode {
   const $ = _c(18);
   const {
     suggestions
@@ -180,7 +185,7 @@ function SuggestedRules(t0) {
   }
   return t7;
 }
-function _temp(rule) {
+function _temp(rule: PermissionRuleValue): string {
   return chalk.bold(permissionRuleValueToString(rule));
 }
 type Props = {
@@ -207,7 +212,10 @@ function extractMode(updates: PermissionUpdate[] | undefined): PermissionMode | 
   const update = updates.findLast(u => u.type === 'setMode');
   return update?.type === 'setMode' ? update.mode : undefined;
 }
-function SuggestionDisplay(t0) {
+function SuggestionDisplay(t0: {
+  suggestions: PermissionUpdate[] | undefined;
+  width: number;
+}): React.ReactNode {
   const $ = _c(22);
   const {
     suggestions,
@@ -333,13 +341,13 @@ function SuggestionDisplay(t0) {
   }
   return t1;
 }
-function _temp3(dir, index_0) {
+function _temp3(dir: string, index_0: number): React.ReactNode {
   return <Text key={index_0}>{figures.bullet} {dir}</Text>;
 }
-function _temp2(rule, index) {
+function _temp2(rule: PermissionRuleValue, index: number): React.ReactNode {
   return <Text key={index}>{figures.bullet} {permissionRuleValueToString(rule)}</Text>;
 }
-export function PermissionDecisionDebugInfo(t0) {
+export function PermissionDecisionDebugInfo(t0: Props): React.ReactNode {
   const $ = _c(25);
   const {
     permissionResult,
@@ -397,11 +405,13 @@ export function PermissionDecisionDebugInfo(t0) {
   } else {
     t3 = $[8];
   }
+  const permissionMessage =
+    permissionResult.behavior !== "allow" ? permissionResult.message : undefined;
   let t4;
-  if ($[9] !== permissionResult.behavior || $[10] !== permissionResult.message) {
-    t4 = permissionResult.behavior !== "allow" && <Box flexDirection="row"><Box justifyContent="flex-end" minWidth={10}><Text dimColor={true}>Message </Text></Box><Text>{permissionResult.message}</Text></Box>;
+  if ($[9] !== permissionResult.behavior || $[10] !== permissionMessage) {
+    t4 = permissionMessage !== undefined && <Box flexDirection="row"><Box justifyContent="flex-end" minWidth={10}><Text dimColor={true}>Message </Text></Box><Text>{permissionMessage}</Text></Box>;
     $[9] = permissionResult.behavior;
-    $[10] = permissionResult.message;
+    $[10] = permissionMessage;
     $[11] = t4;
   } else {
     t4 = $[11];

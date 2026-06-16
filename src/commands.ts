@@ -84,9 +84,7 @@ const forceSnip = feature('HISTORY_SNIP')
   ? require('./commands/force-snip.js').default
   : null
 const workflowsCmd = feature('WORKFLOW_SCRIPTS')
-  ? (
-      require('./commands/workflows/index.js') as typeof import('./commands/workflows/index.js')
-    ).default
+  ? (require('./commands/workflows/index.js') as CommandModule).default
   : null
 const webCmd = feature('CCR_REMOTE_SETUP')
   ? (
@@ -95,7 +93,7 @@ const webCmd = feature('CCR_REMOTE_SETUP')
   : null
 const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (
-      require('./services/skillSearch/localSearch.js') as typeof import('./services/skillSearch/localSearch.js')
+      require('./services/skillSearch/localSearch.js') as SkillSearchLocalModule
     ).clearSkillIndexCache
   : null
 const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
@@ -106,19 +104,13 @@ const ultraplan = feature('ULTRAPLAN')
   : null
 const torch = feature('TORCH') ? require('./commands/torch.js').default : null
 const peersCmd = feature('UDS_INBOX')
-  ? (
-      require('./commands/peers/index.js') as typeof import('./commands/peers/index.js')
-    ).default
+  ? (require('./commands/peers/index.js') as CommandModule).default
   : null
 const forkCmd = feature('FORK_SUBAGENT')
-  ? (
-      require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
-    ).default
+  ? (require('./commands/fork/index.js') as CommandModule).default
   : null
 const buddy = feature('BUDDY')
-  ? (
-      require('./commands/buddy/index.js') as typeof import('./commands/buddy/index.js')
-    ).default
+  ? (require('./commands/buddy/index.js') as CommandModule).default
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import thinkback from './commands/thinkback/index.js'
@@ -208,6 +200,18 @@ import {
   getCommandName,
   isCommandEnabled,
 } from './types/command.js'
+
+type CommandModule = {
+  default: Command
+}
+
+type SkillSearchLocalModule = {
+  clearSkillIndexCache: () => void | Promise<void>
+}
+
+type WorkflowCommandModule = {
+  getWorkflowCommands: (cwd: string) => Promise<Command[]>
+}
 
 // Re-export types from the centralized location
 export type {
@@ -400,7 +404,7 @@ async function getSkills(cwd: string): Promise<{
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getWorkflowCommands = feature('WORKFLOW_SCRIPTS')
   ? (
-      require('./tools/WorkflowTool/createWorkflowCommand.js') as typeof import('./tools/WorkflowTool/createWorkflowCommand.js')
+      require('./tools/WorkflowTool/createWorkflowCommand.js') as WorkflowCommandModule
     ).getWorkflowCommands
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */

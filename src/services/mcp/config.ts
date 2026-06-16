@@ -1325,10 +1325,10 @@ export function parseMcpConfig(params: {
   const validatedServers: Record<string, McpServerConfig> = {}
 
   for (const [name, config] of Object.entries(schemaResult.data.mcpServers)) {
-    let configToCheck = config
+    let configToCheck: McpServerConfig = config as McpServerConfig
 
     if (expandVars) {
-      const { expanded, missingVars } = expandEnvVars(config)
+      const { expanded, missingVars } = expandEnvVars(configToCheck)
 
       if (missingVars.length > 0) {
         errors.push({
@@ -1351,6 +1351,7 @@ export function parseMcpConfig(params: {
     if (
       getPlatform() === 'windows' &&
       (!configToCheck.type || configToCheck.type === 'stdio') &&
+      typeof configToCheck.command === 'string' &&
       (configToCheck.command === 'npx' ||
         configToCheck.command.endsWith('\\npx') ||
         configToCheck.command.endsWith('/npx'))

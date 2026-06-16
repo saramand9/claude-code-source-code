@@ -1,5 +1,5 @@
 import type {
-  McpbManifest,
+  McpbManifestAny as McpbManifest,
   McpbUserConfigurationOption,
 } from '@anthropic-ai/mcpb'
 import axios from 'axios'

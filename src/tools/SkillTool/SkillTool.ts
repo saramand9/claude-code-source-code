@@ -98,6 +98,28 @@ export type { SkillToolProgress as Progress } from '../../types/tools.js'
 
 import type { SkillToolProgress as Progress } from '../../types/tools.js'
 
+type RemoteSkillMeta = {
+  url: string
+}
+
+type RemoteSkillLoadResult = {
+  cacheHit: boolean
+  latencyMs: number
+  skillPath: string
+  content: string
+  fileCount?: number
+  totalBytes?: number
+  fetchMethod?: string
+}
+
+type RemoteSkillModules = {
+  isSkillSearchEnabled(): boolean
+  stripCanonicalPrefix(commandName: string): string | null
+  getDiscoveredRemoteSkill(slug: string): RemoteSkillMeta | undefined
+  loadRemoteSkill(slug: string, url: string): Promise<RemoteSkillLoadResult>
+  logRemoteSkillLoaded(event: Record<string, unknown>): void
+}
+
 // Conditional require for remote skill modules — static imports here would
 // pull in akiBackend.ts (via remoteSkillLoader → akiBackend), which has
 // module-level memoize()/lazySchema() consts that survive tree-shaking as
@@ -107,11 +129,11 @@ import type { SkillToolProgress as Progress } from '../../types/tools.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const remoteSkillModules = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? {
-      ...(require('../../services/skillSearch/remoteSkillState.js') as typeof import('../../services/skillSearch/remoteSkillState.js')),
-      ...(require('../../services/skillSearch/remoteSkillLoader.js') as typeof import('../../services/skillSearch/remoteSkillLoader.js')),
-      ...(require('../../services/skillSearch/telemetry.js') as typeof import('../../services/skillSearch/telemetry.js')),
-      ...(require('../../services/skillSearch/featureCheck.js') as typeof import('../../services/skillSearch/featureCheck.js')),
-    }
+      ...(require('../../services/skillSearch/remoteSkillState.js') as Partial<RemoteSkillModules>),
+      ...(require('../../services/skillSearch/remoteSkillLoader.js') as Partial<RemoteSkillModules>),
+      ...(require('../../services/skillSearch/telemetry.js') as Partial<RemoteSkillModules>),
+      ...(require('../../services/skillSearch/featureCheck.js') as Partial<RemoteSkillModules>),
+    } as RemoteSkillModules
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 

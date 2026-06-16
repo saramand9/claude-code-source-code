@@ -51,24 +51,59 @@ const COMPACTABLE_TOOLS = new Set<string>([
 
 // --- Cached microcompact state (ant-only, gated by feature('CACHED_MICROCOMPACT')) ---
 
+type CacheEditsBlock = Record<string, unknown>
+
+type PinnedCacheEdits = {
+  userMessageIndex: number
+  block: CacheEditsBlock
+}
+
+type CachedMCState = {
+  pinnedEdits: PinnedCacheEdits[]
+  registeredTools: Set<string>
+  toolOrder: string[]
+  deletedRefs: Set<string>
+}
+
+type CachedMCConfig = {
+  triggerThreshold: number
+  keepRecent: number
+}
+
+type CachedMCModule = {
+  createCachedMCState(): CachedMCState
+  markToolsSentToAPI(state: CachedMCState): void
+  resetCachedMCState(state: CachedMCState): void
+  isCachedMicrocompactEnabled(): boolean
+  isModelSupportedForCacheEditing(model: string): boolean
+  getCachedMCConfig(): CachedMCConfig
+  registerToolResult(state: CachedMCState, toolUseId: string): void
+  registerToolMessage(state: CachedMCState, groupIds: string[]): void
+  getToolResultsToDelete(state: CachedMCState): string[]
+  createCacheEditsBlock(
+    state: CachedMCState,
+    toolsToDelete: string[],
+  ): CacheEditsBlock | null
+}
+
+const CACHED_MICROCOMPACT_MODULE_PATH = './cachedMicrocompact.js'
+
 // Lazy-initialized cached MC module and state to avoid importing in external builds.
 // The imports and state live inside feature() checks for dead code elimination.
-let cachedMCModule: typeof import('./cachedMicrocompact.js') | null = null
-let cachedMCState: import('./cachedMicrocompact.js').CachedMCState | null = null
-let pendingCacheEdits:
-  | import('./cachedMicrocompact.js').CacheEditsBlock
-  | null = null
+let cachedMCModule: CachedMCModule | null = null
+let cachedMCState: CachedMCState | null = null
+let pendingCacheEdits: CacheEditsBlock | null = null
 
-async function getCachedMCModule(): Promise<
-  typeof import('./cachedMicrocompact.js')
-> {
+async function getCachedMCModule(): Promise<CachedMCModule> {
   if (!cachedMCModule) {
-    cachedMCModule = await import('./cachedMicrocompact.js')
+    cachedMCModule = (await import(
+      CACHED_MICROCOMPACT_MODULE_PATH
+    )) as CachedMCModule
   }
   return cachedMCModule
 }
 
-function ensureCachedMCState(): import('./cachedMicrocompact.js').CachedMCState {
+function ensureCachedMCState(): CachedMCState {
   if (!cachedMCState && cachedMCModule) {
     cachedMCState = cachedMCModule.createCachedMCState()
   }
@@ -85,9 +120,7 @@ function ensureCachedMCState(): import('./cachedMicrocompact.js').CachedMCState 
  * Returns null if there are no new pending edits.
  * Clears the pending state (caller must pin them after insertion).
  */
-export function consumePendingCacheEdits():
-  | import('./cachedMicrocompact.js').CacheEditsBlock
-  | null {
+export function consumePendingCacheEdits(): CacheEditsBlock | null {
   const edits = pendingCacheEdits
   pendingCacheEdits = null
   return edits
@@ -97,7 +130,7 @@ export function consumePendingCacheEdits():
  * Get all previously-pinned cache edits that must be re-sent at their
  * original positions for cache hits.
  */
-export function getPinnedCacheEdits(): import('./cachedMicrocompact.js').PinnedCacheEdits[] {
+export function getPinnedCacheEdits(): PinnedCacheEdits[] {
   if (!cachedMCState) {
     return []
   }
@@ -110,7 +143,7 @@ export function getPinnedCacheEdits(): import('./cachedMicrocompact.js').PinnedC
  */
 export function pinCacheEdits(
   userMessageIndex: number,
-  block: import('./cachedMicrocompact.js').CacheEditsBlock,
+  block: CacheEditsBlock,
 ): void {
   if (cachedMCState) {
     cachedMCState.pinnedEdits.push({ userMessageIndex, block })

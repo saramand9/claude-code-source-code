@@ -34,7 +34,12 @@ function getIcon(itemId: string): string {
 function isUnifiedSuggestion(itemId: string): boolean {
   return itemId.startsWith('file-') || itemId.startsWith('mcp-resource-') || itemId.startsWith('agent-');
 }
-const SuggestionItemRow = memo(function SuggestionItemRow(t0) {
+type SuggestionItemRowProps = {
+  item: SuggestionItem;
+  maxColumnWidth?: number;
+  isSelected: boolean;
+};
+const SuggestionItemRow = memo(function SuggestionItemRow(t0: SuggestionItemRowProps) {
   const $ = _c(36);
   const {
     item,
@@ -210,7 +215,7 @@ type Props = {
    */
   overlay?: boolean;
 };
-export function PromptInputFooterSuggestions(t0) {
+export function PromptInputFooterSuggestions(t0: Props): React.ReactNode {
   const $ = _c(22);
   const {
     suggestions,

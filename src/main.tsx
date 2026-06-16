@@ -71,14 +71,58 @@ const getTeammateUtils = () => require('./utils/teammate.js') as typeof import('
 const getTeammatePromptAddendum = () => require('./utils/swarm/teammatePromptAddendum.js') as typeof import('./utils/swarm/teammatePromptAddendum.js');
 const getTeammateModeSnapshot = () => require('./utils/swarm/backends/teammateModeSnapshot.js') as typeof import('./utils/swarm/backends/teammateModeSnapshot.js');
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+function isAntUserType(): boolean {
+  return (process.env.USER_TYPE as string | undefined) === 'ant';
+}
+
+type AssistantModule = {
+  initializeAssistantTeam(): Promise<Awaited<ReturnType<typeof computeInitialTeamContext>>>;
+  markAssistantForced(): void;
+  isAssistantMode(): boolean;
+  isAssistantForced(): boolean;
+  getAssistantSystemPromptAddendum(): string;
+  getAssistantActivationPath(): string | undefined;
+};
+
+type KairosGateModule = {
+  isKairosEnabled(): Promise<boolean>;
+};
+
+const assistantIndexModulePath: string = './assistant/index.js';
+const assistantGateModulePath: string = './assistant/gate.js';
+const eventLoopStallDetectorModulePath: string =
+  './utils/eventLoopStallDetector.js';
+const parseConnectUrlModulePath: string = './server/parseConnectUrl.js';
+const snapshotUpdateDialogModulePath: string =
+  './components/agents/SnapshotUpdateDialog.js';
+const sdkHeapDumpMonitorModulePath: string = './utils/sdkHeapDumpMonitor.js';
+const sessionDataUploaderModulePath: string =
+  './utils/sessionDataUploader.js';
+const createSSHSessionModulePath: string = './ssh/createSSHSession.js';
+const assistantSessionDiscoveryModulePath: string =
+  './assistant/sessionDiscovery.js';
+const ccshareResumeModulePath: string = './utils/ccshareResume.js';
+const serverModulePath: string = './server/server.js';
+const serverSessionManagerModulePath: string = './server/sessionManager.js';
+const dangerousBackendModulePath: string =
+  './server/backends/dangerousBackend.js';
+const serverBannerModulePath: string = './server/serverBanner.js';
+const serverLogModulePath: string = './server/serverLog.js';
+const serverLockfileModulePath: string = './server/lockfile.js';
+const connectHeadlessModulePath: string = './server/connectHeadless.js';
+const upCliModulePath: string = 'src/cli/up.js';
+const rollbackCliModulePath: string = 'src/cli/rollback.js';
+const antCliHandlersModulePath: string = './cli/handlers/ant.js';
+
 // Dead code elimination: conditional import for COORDINATOR_MODE
 /* eslint-disable @typescript-eslint/no-require-imports */
 const coordinatorModeModule = feature('COORDINATOR_MODE') ? require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 // Dead code elimination: conditional import for KAIROS (assistant mode)
 /* eslint-disable @typescript-eslint/no-require-imports */
-const assistantModule = feature('KAIROS') ? require('./assistant/index.js') as typeof import('./assistant/index.js') : null;
-const kairosGate = feature('KAIROS') ? require('./assistant/gate.js') as typeof import('./assistant/gate.js') : null;
+const assistantModule = feature('KAIROS') ? require(assistantIndexModulePath) as AssistantModule : null;
+const kairosGate = feature('KAIROS') ? require(assistantGateModulePath) as KairosGateModule : null;
 import { relative, resolve } from 'path';
 import { isAnalyticsDisabled } from 'src/services/analytics/config.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
@@ -263,7 +307,7 @@ function isBeingDebugged() {
 }
 
 // Exit if we detect node debugging or inspection
-if ("external" !== 'ant' && isBeingDebugged()) {
+if (!isAntUserType() && isBeingDebugged()) {
   // Use process.exit directly here since we're in the top-level code before imports
   // and gracefulShutdown is not yet available
   // eslint-disable-next-line custom-rules/no-top-level-side-effects
@@ -337,7 +381,7 @@ function runMigrations(): void {
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       resetAutoModeOptInForDefaultOffer();
     }
-    if ("external" === 'ant') {
+    if (isAntUserType()) {
       migrateFennecToOpus();
     }
     saveGlobalConfig(prev => prev.migrationVersion === CURRENT_MIGRATION_VERSION ? prev : {
@@ -425,8 +469,8 @@ export function startDeferredPrefetches(): void {
   }
 
   // Event loop stall detector — logs when the main thread is blocked >500ms
-  if ("external" === 'ant') {
-    void import('./utils/eventLoopStallDetector.js').then(m => m.startEventLoopStallDetector());
+  if (isAntUserType()) {
+    void import(eventLoopStallDetectorModulePath).then(m => m.startEventLoopStallDetector());
   }
 }
 function loadSettingsFromFlag(settingsFile: string): void {
@@ -616,7 +660,7 @@ export async function main() {
       const ccUrl = rawCliArgs[ccIdx]!;
       const {
         parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
+      } = await import(parseConnectUrlModulePath);
       const parsed = parseConnectUrl(ccUrl);
       _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
       if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
@@ -1134,11 +1178,11 @@ async function run(): Promise<CommanderCommand> {
     const disableSlashCommands = options.disableSlashCommands || false;
 
     // Extract tasks mode options (ant-only)
-    const tasksOption = "external" === 'ant' && (options as {
+    const tasksOption = isAntUserType() && (options as {
       tasks?: boolean | string;
     }).tasks;
     const taskListId = tasksOption ? typeof tasksOption === 'string' ? tasksOption : DEFAULT_TASKS_MODE_TASK_LIST_ID : undefined;
-    if ("external" === 'ant' && taskListId) {
+    if (isAntUserType() && taskListId) {
       process.env.CLAUDE_CODE_TASK_LIST_ID = taskListId;
     }
 
@@ -1528,7 +1572,7 @@ async function run(): Promise<CommanderCommand> {
     };
     // Store the explicit CLI flag so teammates can inherit it
     setChromeFlagOverride(chromeOpts.chrome);
-    const enableClaudeInChrome = shouldEnableClaudeInChrome(chromeOpts.chrome) && ("external" === 'ant' || isClaudeAISubscriber());
+    const enableClaudeInChrome = shouldEnableClaudeInChrome(chromeOpts.chrome) && (isAntUserType() || isClaudeAISubscriber());
     const autoEnableClaudeInChrome = !enableClaudeInChrome && shouldAutoEnableClaudeInChrome();
     if (enableClaudeInChrome) {
       const platform = getPlatform();
@@ -1760,7 +1804,7 @@ async function run(): Promise<CommanderCommand> {
     } = initResult;
 
     // Handle overly broad shell allow rules for ant users (Bash(*), PowerShell(*))
-    if ("external" === 'ant' && overlyBroadBashPermissions.length > 0) {
+    if (isAntUserType() && overlyBroadBashPermissions.length > 0) {
       for (const permission of overlyBroadBashPermissions) {
         logForDebugging(`Ignoring overly broad shell permission ${permission.ruleDisplay} from ${permission.sourceDisplay}`);
       }
@@ -2010,7 +2054,7 @@ async function run(): Promise<CommanderCommand> {
     //  - no env override (which short-circuits _CACHED_MAY_BE_STALE before disk)
     //  - flag absent from disk (== null also catches pre-#22279 poisoned null)
     const explicitModel = options.model || process.env.ANTHROPIC_MODEL;
-    if ("external" === 'ant' && explicitModel && explicitModel !== 'default' && !hasGrowthBookEnvOverride('tengu_ant_model_override') && getGlobalConfig().cachedGrowthBookFeatures?.['tengu_ant_model_override'] == null) {
+    if (isAntUserType() && explicitModel && explicitModel !== 'default' && !hasGrowthBookEnvOverride('tengu_ant_model_override') && getGlobalConfig().cachedGrowthBookFeatures?.['tengu_ant_model_override'] == null) {
       await initializeGrowthBook();
     }
 
@@ -2156,7 +2200,7 @@ async function run(): Promise<CommanderCommand> {
         // Log agent memory loaded event for tmux teammates
         if (customAgent.memory) {
           logEvent('tengu_agent_memory_loaded', {
-            ...("external" === 'ant' && {
+            ...(isAntUserType() && {
               agent_type: customAgent.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
             }),
             scope: customAgent.memory as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -2220,7 +2264,7 @@ async function run(): Promise<CommanderCommand> {
       getFpsMetrics = ctx.getFpsMetrics;
       stats = ctx.stats;
       // Install asciicast recorder before Ink mounts (ant-only, opt-in via CLAUDE_CODE_TERMINAL_RECORDING=1)
-      if ("external" === 'ant') {
+      if (isAntUserType()) {
         installAsciicastRecorder();
       }
       const {
@@ -2265,7 +2309,7 @@ async function run(): Promise<CommanderCommand> {
         if (choice === 'merge') {
           const {
             buildMergePrompt
-          } = await import('./components/agents/SnapshotUpdateDialog.js');
+          } = await import(snapshotUpdateDialogModulePath);
           const mergePrompt = buildMergePrompt(agentDef.agentType, agentDef.memory!);
           inputPrompt = inputPrompt ? `${mergePrompt}\n\n${inputPrompt}` : mergePrompt;
         }
@@ -2300,7 +2344,7 @@ async function run(): Promise<CommanderCommand> {
       // in managed settings). Runs after onboarding so managed settings and
       // login state are fully loaded.
       const orgValidation = await validateForceLoginOrg();
-      if (!orgValidation.valid) {
+      if (orgValidation.valid === false) {
         await exitWithError(root, orgValidation.message);
       }
     }
@@ -2612,7 +2656,7 @@ async function run(): Promise<CommanderCommand> {
       profileCheckpoint('before_validateForceLoginOrg');
       // Validate org restriction for non-interactive sessions
       const orgValidation = await validateForceLoginOrg();
-      if (!orgValidation.valid) {
+      if (orgValidation.valid === false) {
         process.stderr.write(orgValidation.message + '\n');
         process.exit(1);
       }
@@ -2816,8 +2860,8 @@ async function run(): Promise<CommanderCommand> {
       if (!isBareMode()) {
         startDeferredPrefetches();
         void import('./utils/backgroundHousekeeping.js').then(m => m.startBackgroundHousekeeping());
-        if ("external" === 'ant') {
-          void import('./utils/sdkHeapDumpMonitor.js').then(m => m.startSdkMemoryMonitor());
+        if (isAntUserType()) {
+          void import(sdkHeapDumpMonitorModulePath).then(m => m.startSdkMemoryMonitor());
         }
       }
       logSessionTelemetry();
@@ -3061,7 +3105,7 @@ async function run(): Promise<CommanderCommand> {
     //   - Runtime: uploader checks github.com/anthropics/* remote + gcloud auth.
     //   - Safety: CLAUDE_CODE_DISABLE_SESSION_DATA_UPLOAD=1 bypasses (tests set this).
     // Import is dynamic + async to avoid adding startup latency.
-    const sessionUploaderPromise = "external" === 'ant' ? import('./utils/sessionDataUploader.js') : null;
+    const sessionUploaderPromise = isAntUserType() ? import(sessionDataUploaderModulePath) : null;
 
     // Defer session uploader resolution to the onTurnComplete callback to avoid
     // adding a new top-level await in main.tsx (performance-critical path).
@@ -3200,7 +3244,7 @@ async function run(): Promise<CommanderCommand> {
         createSSHSession,
         createLocalSSHSession,
         SSHSessionError
-      } = await import('./ssh/createSSHSession.js');
+      } = await import(createSSHSessionModulePath);
       let sshSession;
       try {
         if (_pendingSSH.local) {
@@ -3263,7 +3307,7 @@ async function run(): Promise<CommanderCommand> {
       // loaded by useAssistantHistory on scroll-up (no blocking fetch here).
       const {
         discoverAssistantSessions
-      } = await import('./assistant/sessionDiscovery.js');
+      } = await import(assistantSessionDiscoveryModulePath);
       let targetSessionId = _pendingAssistantChat.sessionId;
 
       // Discovery flow — list bridge environments, filter sessions
@@ -3578,13 +3622,13 @@ async function run(): Promise<CommanderCommand> {
           }
         }
       }
-      if ("external" === 'ant') {
+      if (isAntUserType()) {
         if (options.resume && typeof options.resume === 'string' && !maybeSessionId) {
           // Check for ccshare URL (e.g. https://go/ccshare/boris-20260311-211036)
           const {
             parseCcshareId,
             loadCcshare
-          } = await import('./utils/ccshareResume.js');
+          } = await import(ccshareResumeModulePath);
           const ccshareId = parseCcshareId(options.resume);
           if (ccshareId) {
             try {
@@ -3813,7 +3857,7 @@ async function run(): Promise<CommanderCommand> {
   if (canUserConfigureAdvisor()) {
     program.addOption(new Option('--advisor <model>', 'Enable the server-side advisor tool with the specified model (alias or full ID).').hideHelp());
   }
-  if ("external" === 'ant') {
+  if (isAntUserType()) {
     program.addOption(new Option('--delegate-permissions', '[ANT-ONLY] Alias for --permission-mode auto.').implies({
       permissionMode: 'auto'
     }));
@@ -3973,24 +4017,24 @@ async function run(): Promise<CommanderCommand> {
       } = await import('crypto');
       const {
         startServer
-      } = await import('./server/server.js');
+      } = await import(serverModulePath);
       const {
         SessionManager
-      } = await import('./server/sessionManager.js');
+      } = await import(serverSessionManagerModulePath);
       const {
         DangerousBackend
-      } = await import('./server/backends/dangerousBackend.js');
+      } = await import(dangerousBackendModulePath);
       const {
         printBanner
-      } = await import('./server/serverBanner.js');
+      } = await import(serverBannerModulePath);
       const {
         createServerLogger
-      } = await import('./server/serverLog.js');
+      } = await import(serverLogModulePath);
       const {
         writeServerLock,
         removeServerLock,
         probeRunningServer
-      } = await import('./server/lockfile.js');
+      } = await import(serverLockfileModulePath);
       const existing = await probeRunningServer();
       if (existing) {
         process.stderr.write(`A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`);
@@ -4058,11 +4102,11 @@ async function run(): Promise<CommanderCommand> {
   if (feature('DIRECT_CONNECT')) {
     program.command('open <cc-url>').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print [prompt]', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, opts: {
       print?: string | boolean;
-      outputFormat: string;
+      outputFormat?: string;
     }) => {
       const {
         parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
+      } = await import(parseConnectUrlModulePath);
       const {
         serverUrl,
         authToken
@@ -4088,10 +4132,10 @@ async function run(): Promise<CommanderCommand> {
       }
       const {
         runConnectHeadless
-      } = await import('./server/connectHeadless.js');
+      } = await import(connectHeadlessModulePath);
       const prompt = typeof opts.print === 'string' ? opts.print : '';
       const interactive = opts.print === true;
-      await runConnectHeadless(connectConfig, prompt, opts.outputFormat, interactive);
+      await runConnectHeadless(connectConfig, prompt, opts.outputFormat ?? 'text', interactive);
     });
   }
 
@@ -4367,18 +4411,18 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // claude up — run the project's CLAUDE.md "# claude up" setup instructions.
-  if ("external" === 'ant') {
+  if (isAntUserType()) {
     program.command('up').description('[ANT-ONLY] Initialize or upgrade the local dev environment using the "# claude up" section of the nearest CLAUDE.md').action(async () => {
       const {
         up
-      } = await import('src/cli/up.js');
+      } = await import(upCliModulePath);
       await up();
     });
   }
 
   // claude rollback (ant-only)
   // Rolls back to previous releases
-  if ("external" === 'ant') {
+  if (isAntUserType()) {
     program.command('rollback [target]').description('[ANT-ONLY] Roll back to a previous release\n\nExamples:\n  claude rollback                                    Go 1 version back from current\n  claude rollback 3                                  Go 3 versions back from current\n  claude rollback 2.0.73-dev.20251217.t190658        Roll back to a specific version').option('-l, --list', 'List recent published versions with ages').option('--dry-run', 'Show what would be installed without installing').option('--safe', 'Roll back to the server-pinned safe version (set by oncall during incidents)').action(async (target?: string, options?: {
       list?: boolean;
       dryRun?: boolean;
@@ -4386,7 +4430,7 @@ async function run(): Promise<CommanderCommand> {
     }) => {
       const {
         rollback
-      } = await import('src/cli/rollback.js');
+      } = await import(rollbackCliModulePath);
       await rollback(target, options);
     });
   }
@@ -4402,7 +4446,7 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // ant-only commands
-  if ("external" === 'ant') {
+  if (isAntUserType()) {
     const validateLogId = (value: string) => {
       const maybeSessionId = validateUuid(value);
       if (maybeSessionId) return maybeSessionId;
@@ -4412,7 +4456,7 @@ async function run(): Promise<CommanderCommand> {
     program.command('log').description('[ANT-ONLY] Manage conversation logs.').argument('[number|sessionId]', 'A number (0, 1, 2, etc.) to display a specific log, or the sesssion ID (uuid) of a log', validateLogId).action(async (logId: string | number | undefined) => {
       const {
         logHandler
-      } = await import('./cli/handlers/ant.js');
+      } = await import(antCliHandlersModulePath);
       await logHandler(logId);
     });
 
@@ -4420,7 +4464,7 @@ async function run(): Promise<CommanderCommand> {
     program.command('error').description('[ANT-ONLY] View error logs. Optionally provide a number (0, -1, -2, etc.) to display a specific log.').argument('[number]', 'A number (0, 1, 2, etc.) to display a specific log', parseInt).action(async (number: number | undefined) => {
       const {
         errorHandler
-      } = await import('./cli/handlers/ant.js');
+      } = await import(antCliHandlersModulePath);
       await errorHandler(number);
     });
 
@@ -4433,10 +4477,10 @@ Examples:
   $ claude export <uuid>.jsonl output.txt           Render JSONL session file to text`).action(async (source: string, outputFile: string) => {
       const {
         exportHandler
-      } = await import('./cli/handlers/ant.js');
+      } = await import(antCliHandlersModulePath);
       await exportHandler(source, outputFile);
     });
-    if ("external" === 'ant') {
+    if (isAntUserType()) {
       const taskCmd = program.command('task').description('[ANT-ONLY] Manage task list tasks');
       taskCmd.command('create <subject>').description('Create a new task').option('-d, --description <text>', 'Task description').option('-l, --list <id>', 'Task list ID (defaults to "tasklist")').action(async (subject: string, opts: {
         description?: string;
@@ -4444,7 +4488,7 @@ Examples:
       }) => {
         const {
           taskCreateHandler
-        } = await import('./cli/handlers/ant.js');
+        } = await import(antCliHandlersModulePath);
         await taskCreateHandler(subject, opts);
       });
       taskCmd.command('list').description('List all tasks').option('-l, --list <id>', 'Task list ID (defaults to "tasklist")').option('--pending', 'Show only pending tasks').option('--json', 'Output as JSON').action(async (opts: {
@@ -4454,7 +4498,7 @@ Examples:
       }) => {
         const {
           taskListHandler
-        } = await import('./cli/handlers/ant.js');
+        } = await import(antCliHandlersModulePath);
         await taskListHandler(opts);
       });
       taskCmd.command('get <id>').description('Get details of a task').option('-l, --list <id>', 'Task list ID (defaults to "tasklist")').action(async (id: string, opts: {
@@ -4462,7 +4506,7 @@ Examples:
       }) => {
         const {
           taskGetHandler
-        } = await import('./cli/handlers/ant.js');
+        } = await import(antCliHandlersModulePath);
         await taskGetHandler(id, opts);
       });
       taskCmd.command('update <id>').description('Update a task').option('-l, --list <id>', 'Task list ID (defaults to "tasklist")').option('-s, --status <status>', `Set status (${TASK_STATUSES.join(', ')})`).option('--subject <text>', 'Update subject').option('-d, --description <text>', 'Update description').option('--owner <agentId>', 'Set owner').option('--clear-owner', 'Clear owner').action(async (id: string, opts: {
@@ -4475,7 +4519,7 @@ Examples:
       }) => {
         const {
           taskUpdateHandler
-        } = await import('./cli/handlers/ant.js');
+        } = await import(antCliHandlersModulePath);
         await taskUpdateHandler(id, opts);
       });
       taskCmd.command('dir').description('Show the tasks directory path').option('-l, --list <id>', 'Task list ID (defaults to "tasklist")').action(async (opts: {
@@ -4483,7 +4527,7 @@ Examples:
       }) => {
         const {
           taskDirHandler
-        } = await import('./cli/handlers/ant.js');
+        } = await import(antCliHandlersModulePath);
         await taskDirHandler(opts);
       });
     }
@@ -4496,7 +4540,7 @@ Examples:
     }) => {
       const {
         completionHandler
-      } = await import('./cli/handlers/ant.js');
+      } = await import(antCliHandlersModulePath);
       await completionHandler(shell, opts, program);
     });
   }
@@ -4595,7 +4639,7 @@ async function logTenguInit({
         assistantActivationPath: assistantActivationPath as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       }),
       autoUpdatesChannel: (getInitialSettings().autoUpdatesChannel ?? 'latest') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...("external" === 'ant' ? (() => {
+      ...(isAntUserType() ? (() => {
         const cwd = getCwd();
         const gitRoot = findGitRoot(cwd);
         const rp = gitRoot ? relative(gitRoot, cwd) || '.' : undefined;

@@ -66,6 +66,7 @@ export type SpinnerAnimationRowProps = {
   // Thinking (state owned by parent, mode-dependent)
   thinkingStatus: 'thinking' | number | null;
   effortSuffix: string;
+  ttftText?: string | null;
 };
 
 /**
@@ -98,7 +99,8 @@ export function SpinnerAnimationRow({
   foregroundedTeammate,
   leaderIsIdle = false,
   thinkingStatus,
-  effortSuffix
+  effortSuffix,
+  ttftText = null
 }: SpinnerAnimationRowProps): React.ReactNode {
   const [viewportRef, time] = useAnimationFrame(reducedMotion ? null : 50);
 
@@ -161,6 +163,7 @@ export function SpinnerAnimationRow({
   const effectiveElapsedMs = hasRunningTeammates ? Math.max(elapsedTimeMs, now - turnStartRef.current) : elapsedTimeMs;
   const timerText = formatDuration(effectiveElapsedMs);
   const timerWidth = stringWidth(timerText);
+  const ttftWidth = ttftText ? stringWidth(ttftText) : 0;
 
   // === Token count (leader + teammates, or foregrounded teammate) ===
   const totalTokens = foregroundedTeammate && !foregroundedTeammate.isIdle ? foregroundedTeammate.progress?.tokenCount ?? 0 : leaderTokens + teammateTokens;
@@ -189,8 +192,10 @@ export function SpinnerAnimationRow({
   const usedAfterThinking = showThinking ? thinkingWidthValue + sep : 0;
   const showTimer = wantsTimerAndTokens && availableSpace > usedAfterThinking + timerWidth;
   const usedAfterTimer = usedAfterThinking + (showTimer ? timerWidth + sep : 0);
-  const showTokens = wantsTimerAndTokens && totalTokens > 0 && availableSpace > usedAfterTimer + tokensWidth;
-  const thinkingOnly = showThinking && thinkingStatus === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && true;
+  const showTtft = ttftText !== null && availableSpace > usedAfterTimer + ttftWidth;
+  const usedAfterTtft = usedAfterTimer + (showTtft ? ttftWidth + sep : 0);
+  const showTokens = wantsTimerAndTokens && totalTokens > 0 && availableSpace > usedAfterTtft + tokensWidth;
+  const thinkingOnly = showThinking && thinkingStatus === 'thinking' && !spinnerSuffix && !showTimer && !showTtft && !showTokens && true;
 
   // === Thinking shimmer color (formerly ThinkingShimmerText's own timer) ===
   // Same sine-wave opacity, but derived from our shared `time` instead of a
@@ -204,6 +209,8 @@ export function SpinnerAnimationRow({
             {spinnerSuffix}
           </Text>] : []), ...(showTimer ? [<Text dimColor key="elapsedTime">
             {timerText}
+          </Text>] : []), ...(showTtft && ttftText ? [<Text dimColor key="ttft">
+            {ttftText}
           </Text>] : []), ...(showTokens ? [<Box flexDirection="row" key="tokens">
             {!hasRunningTeammates && <SpinnerModeGlyph mode={mode} />}
             <Text dimColor>{tokenCount} tokens</Text>

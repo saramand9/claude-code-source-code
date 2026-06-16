@@ -103,7 +103,7 @@ async function retryWithBackoff<T>(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const result = await attemptFn(attempt)
 
-    if (result.done) {
+    if (result.done === true) {
       return result.value
     }
 

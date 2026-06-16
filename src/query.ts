@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
+import { randomUUID } from 'crypto'
 import type {
   ToolResultBlockParam,
   ToolUseBlock,
@@ -10,13 +11,111 @@ import {
   isAutoCompactEnabled,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
-import { buildPostCompactMessages } from './services/compact/compact.js'
+import {
+  buildPostCompactMessages,
+  type CompactionResult,
+} from './services/compact/compact.js'
+
+type Terminal = {
+  reason:
+    | 'blocking_limit'
+    | 'image_error'
+    | 'model_error'
+    | 'aborted_streaming'
+    | 'prompt_too_long'
+    | 'completed'
+    | 'stop_hook_prevented'
+    | 'aborted_tools'
+    | 'hook_stopped'
+    | 'max_turns'
+  error?: unknown
+  turnCount?: number
+}
+
+type Continue =
+  | { reason: 'collapse_drain_retry'; committed: number }
+  | { reason: 'reactive_compact_retry' }
+  | { reason: 'max_output_tokens_escalate' }
+  | { reason: 'max_output_tokens_recovery'; attempt: number }
+  | { reason: 'stop_hook_blocking' }
+  | { reason: 'token_budget_continuation' }
+  | { reason: 'next_turn' }
+
+type ReactiveCompactModule = {
+  isReactiveCompactEnabled(): boolean
+  isWithheldPromptTooLong(message: Message | StreamEvent | undefined): boolean
+  isWithheldMediaSizeError(message: Message | StreamEvent | undefined): boolean
+  tryReactiveCompact(args: {
+    hasAttempted: boolean
+    querySource: QuerySource
+    aborted: boolean
+    messages: Message[]
+    cacheSafeParams: {
+      systemPrompt: SystemPrompt
+      userContext: { [k: string]: string }
+      systemContext: { [k: string]: string }
+      toolUseContext: ToolUseContext
+      forkContextMessages: Message[]
+    }
+  }): Promise<CompactionResult | null>
+}
+
+type ContextCollapseModule = {
+  applyCollapsesIfNeeded(
+    messages: Message[],
+    toolUseContext: ToolUseContext,
+    querySource: QuerySource,
+  ): Promise<{ messages: Message[] }>
+  isContextCollapseEnabled(): boolean
+  isWithheldPromptTooLong(
+    message: Message | StreamEvent,
+    isPromptTooLong: typeof isPromptTooLongMessage,
+    querySource: QuerySource,
+  ): boolean
+  recoverFromOverflow(
+    messages: Message[],
+    querySource: QuerySource,
+  ): { committed: number; messages: Message[] }
+}
+
+type SkillPrefetchModule = {
+  startSkillDiscoveryPrefetch(
+    signal: null,
+    messages: Message[],
+    toolUseContext: ToolUseContext,
+  ): unknown
+  collectSkillDiscoveryPrefetch(prefetch: unknown): Promise<
+    Parameters<typeof createAttachmentMessage>[0][]
+  >
+}
+
+type SnipModule = {
+  snipCompactIfNeeded(messages: Message[]): {
+    messages: Message[]
+    tokensFreed: number
+    boundaryMessage?: Message
+  }
+}
+
+type TaskSummaryModule = {
+  shouldGenerateTaskSummary(): boolean
+  maybeGenerateTaskSummary(args: {
+    systemPrompt: SystemPrompt
+    userContext: { [k: string]: string }
+    systemContext: { [k: string]: string }
+    toolUseContext: ToolUseContext
+    forkContextMessages: Message[]
+  }): void
+}
+
+type JobClassifierModule = Record<string, unknown>
+
 /* eslint-disable @typescript-eslint/no-require-imports */
 const reactiveCompact = feature('REACTIVE_COMPACT')
-  ? (require('./services/compact/reactiveCompact.js') as typeof import('./services/compact/reactiveCompact.js'))
+  ? (require('./services/compact/reactiveCompact.js') as ReactiveCompactModule)
   : null
 const contextCollapse = feature('CONTEXT_COLLAPSE')
-  ? (require('./services/contextCollapse/index.js') as typeof import('./services/contextCollapse/index.js'))
+  ? (require('./services/contextCollapse/index.js') as ContextCollapseModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
@@ -64,10 +163,10 @@ import {
 } from './utils/attachments.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
-  ? (require('./services/skillSearch/prefetch.js') as typeof import('./services/skillSearch/prefetch.js'))
+  ? (require('./services/skillSearch/prefetch.js') as SkillPrefetchModule)
   : null
 const jobClassifier = feature('TEMPLATES')
-  ? (require('./jobs/classifier.js') as typeof import('./jobs/classifier.js'))
+  ? (require('./jobs/classifier.js') as JobClassifierModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
@@ -101,7 +200,6 @@ import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks } from './query/stopHooks.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
-import type { Terminal, Continue } from './query/transitions.js'
 import { feature } from 'bun:bundle'
 import {
   getCurrentTurnTokenBudget,
@@ -113,12 +211,21 @@ import { count } from './utils/array.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const snipModule = feature('HISTORY_SNIP')
-  ? (require('./services/compact/snipCompact.js') as typeof import('./services/compact/snipCompact.js'))
+  ? (require('./services/compact/snipCompact.js') as SnipModule)
   : null
 const taskSummaryModule = feature('BG_SESSIONS')
-  ? (require('./utils/taskSummary.js') as typeof import('./utils/taskSummary.js'))
+  ? (require('./utils/taskSummary.js') as TaskSummaryModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+function createTombstoneMessage(message: Message): TombstoneMessage {
+  return {
+    type: 'tombstone',
+    uuid: randomUUID() as TombstoneMessage['uuid'],
+    timestamp: new Date().toISOString(),
+    message,
+  }
+}
 
 function* yieldMissingToolResultBlocks(
   assistantMessages: AssistantMessage[],
@@ -714,7 +821,7 @@ async function* queryLoop(
               // These partial messages (especially thinking blocks) have invalid signatures
               // that would cause "thinking blocks cannot be modified" API errors.
               for (const msg of assistantMessages) {
-                yield { type: 'tombstone' as const, message: msg }
+                yield createTombstoneMessage(msg)
               }
               logEvent('tengu_orphaned_messages_tombstoned', {
                 orphanedMessageCount: assistantMessages.length,

@@ -140,10 +140,11 @@ export function BrowseMarketplace({
         } of marketplaces_0) {
           if (marketplace) {
             // Count how many plugins from this marketplace are installed
-            const installedFromThisMarketplace = count(marketplace.plugins, plugin => isPluginInstalled(createPluginId(plugin.name, name)));
+            const marketplacePlugins = marketplace.plugins as InstallablePlugin['entry'][];
+            const installedFromThisMarketplace = count(marketplacePlugins, plugin => isPluginInstalled(createPluginId(plugin.name, name)));
             marketplaceInfos.push({
               name,
-              totalPlugins: marketplace.plugins.length,
+              totalPlugins: marketplacePlugins.length,
               installedCount: installedFromThisMarketplace,
               source: getMarketplaceSourceDisplay(marketplaceConfig.source)
             });
@@ -328,7 +329,7 @@ export function BrowseMarketplace({
         marketplaceName: plugin_1.marketplaceName,
         scope: 'user'
       });
-      if (result.success) {
+      if (result.success === true) {
         successCount_0++;
       } else {
         failureCount++;
@@ -377,7 +378,7 @@ export function BrowseMarketplace({
       marketplaceName: plugin_2.marketplaceName,
       scope
     });
-    if (result_0.success) {
+    if (result_0.success === true) {
       const loaded = await findPluginOptionsTarget(plugin_2.pluginId);
       if (loaded) {
         setIsInstalling(false);

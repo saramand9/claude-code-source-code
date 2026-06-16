@@ -18,7 +18,6 @@
  */
 
 import { diffArrays } from 'diff'
-import type * as hljsNamespace from 'highlight.js'
 import { basename, extname } from 'path'
 
 // Lazy: defers loading highlight.js until first render. The full bundle
@@ -30,7 +29,13 @@ import { basename, extname } from 'path'
 // pushed later tests in the same shard into GC-pause territory and a
 // beforeEach/afterEach hook timeout (officialRegistry.test.ts, PR #24150).
 // Same lazy pattern the NAPI wrapper used for dlopen.
-type HLJSApi = typeof hljsNamespace
+type HLJSApi = {
+  getLanguage(name: string): unknown
+  highlight(
+    code: string,
+    options: { language: string; ignoreIllegals?: boolean },
+  ): { emitter: unknown }
+}
 let cachedHljs: HLJSApi | null = null
 function hljs(): HLJSApi {
   if (cachedHljs) return cachedHljs

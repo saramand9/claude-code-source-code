@@ -5,17 +5,18 @@ import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
+import { getAntModelOverrideConfig, resolveAntModel } from './model/antModels.js'
 import { isEnvTruthy } from './envUtils.js'
-import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
-
-export type { EffortLevel }
+import type { EffortLevel as SDKEffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export const EFFORT_LEVELS = [
   'low',
   'medium',
   'high',
   'max',
-] as const satisfies readonly EffortLevel[]
+] as const satisfies readonly SDKEffortLevel[]
+
+export type EffortLevel = (typeof EFFORT_LEVELS)[number]
 
 export type EffortValue = EffortLevel | number
 

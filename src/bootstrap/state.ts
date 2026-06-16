@@ -197,6 +197,10 @@ type State = {
   mainThreadAgentType: string | undefined
   // Remote mode (--remote flag)
   isRemoteMode: boolean
+  // True only when the REPL bridge accepts inbound Remote Control messages.
+  // CCR mirror/outbound-only mode keeps a bridge handle but must not expose
+  // cross-session send/file tools as interactive.
+  replBridgeActive: boolean
   // Direct connect server URL (for display in header)
   directConnectServerUrl: string | undefined
   // System prompt section cache state
@@ -388,11 +392,7 @@ function getInitialState(): State {
     mainThreadAgentType: undefined,
     // Remote mode
     isRemoteMode: false,
-    ...(process.env.USER_TYPE === 'ant'
-      ? {
-          replBridgeActive: false,
-        }
-      : {}),
+    replBridgeActive: false,
     // Direct connect server URL
     directConnectServerUrl: undefined,
     // System prompt section cache state
@@ -1634,6 +1634,14 @@ export function getIsRemoteMode(): boolean {
 
 export function setIsRemoteMode(value: boolean): void {
   STATE.isRemoteMode = value
+}
+
+export function isReplBridgeActive(): boolean {
+  return STATE.replBridgeActive
+}
+
+export function setReplBridgeActive(value: boolean): void {
+  STATE.replBridgeActive = value
 }
 
 // System prompt section accessors

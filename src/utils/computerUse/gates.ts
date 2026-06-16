@@ -4,9 +4,10 @@ import { getDynamicConfig_CACHED_MAY_BE_STALE } from '../../services/analytics/g
 import { getSubscriptionType } from '../auth.js'
 import { isEnvTruthy } from '../envUtils.js'
 
-type ChicagoConfig = CuSubGates & {
+type ChicagoConfig = {
   enabled: boolean
   coordinateMode: CoordinateMode
+  [key: string]: boolean | CoordinateMode
 }
 
 const DEFAULTS: ChicagoConfig = {
@@ -17,7 +18,7 @@ const DEFAULTS: ChicagoConfig = {
   hideBeforeAction: true,
   autoTargetDisplay: true,
   clipboardGuard: true,
-  coordinateMode: 'pixels',
+  coordinateMode: 'pixels' as CoordinateMode,
 }
 
 // Spread over defaults so a partial JSON ({"enabled": true} alone) inherits the
@@ -59,7 +60,7 @@ export function getChicagoEnabled(): boolean {
 
 export function getChicagoSubGates(): CuSubGates {
   const { enabled: _e, coordinateMode: _c, ...subGates } = readConfig()
-  return subGates
+  return subGates as CuSubGates
 }
 
 // Frozen at first read — setup.ts builds tool descriptions and executor.ts

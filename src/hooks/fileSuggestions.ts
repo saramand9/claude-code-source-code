@@ -723,9 +723,11 @@ export async function generateFileSuggestions(
 
   // Use custom command directly if configured. We don't mix in our config files
   // because the command returns pre-ranked results using its own search logic.
-  if (getInitialSettings().fileSuggestion?.type === 'command') {
+  const fileSuggestion = getInitialSettings().fileSuggestion
+  if (fileSuggestion?.type === 'command') {
     const input: FileSuggestionCommandInput = {
       ...createBaseHookInput(),
+      command: fileSuggestion.command,
       query: partialPath,
     }
     const results = await executeFileSuggestionCommand(input)

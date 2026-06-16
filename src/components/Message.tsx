@@ -29,6 +29,20 @@ import { UserTextMessage } from './messages/UserTextMessage.js';
 import { UserToolResultMessage } from './messages/UserToolResultMessage/UserToolResultMessage.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { ExpandShellOutputProvider } from './shell/ExpandShellOutputContext.js';
+type SnipProjectionModule = {
+  isSnipBoundaryMessage(message: SystemMessage): boolean;
+};
+type SnipCompactModule = {
+  isSnipMarkerMessage(message: SystemMessage): boolean;
+};
+type SnipBoundaryMessageModule = {
+  SnipBoundaryMessage: React.ComponentType<{
+    message: SystemMessage;
+  }>;
+};
+const snipProjectionModulePath: string = '../services/compact/snipProjection.js';
+const snipCompactModulePath: string = '../services/compact/snipCompact.js';
+const snipBoundaryMessageModulePath: string = './messages/SnipBoundaryMessage.js';
 export type Props = {
   message: NormalizedUserMessage | AssistantMessage | AttachmentMessageType | SystemMessage | GroupedToolUseMessageType | CollapsedReadSearchGroupType;
   lookups: ReturnType<typeof buildMessageLookups>;
@@ -249,21 +263,21 @@ function MessageImpl(t0) {
         if (feature("HISTORY_SNIP")) {
           const {
             isSnipBoundaryMessage
-          } = require("../services/compact/snipProjection.js") as typeof import('../services/compact/snipProjection.js');
+          } = require(snipProjectionModulePath) as SnipProjectionModule;
           const {
             isSnipMarkerMessage
-          } = require("../services/compact/snipCompact.js") as typeof import('../services/compact/snipCompact.js');
+          } = require(snipCompactModulePath) as SnipCompactModule;
           if (isSnipBoundaryMessage(message)) {
             let t2;
             if ($[65] === Symbol.for("react.memo_cache_sentinel")) {
-              t2 = require("./messages/SnipBoundaryMessage.js");
+              t2 = require(snipBoundaryMessageModulePath);
               $[65] = t2;
             } else {
               t2 = $[65];
             }
             const {
               SnipBoundaryMessage
-            } = t2 as typeof import('./messages/SnipBoundaryMessage.js');
+            } = t2 as SnipBoundaryMessageModule;
             let t3;
             if ($[66] !== message) {
               t3 = <SnipBoundaryMessage message={message} />;

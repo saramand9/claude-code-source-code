@@ -36,7 +36,7 @@ export function ConfirmStep(t0) {
   const {
     goBack,
     wizardData
-  } = useWizard();
+  } = useWizard<AgentWizardData>();
   let t1;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
     t1 = {
@@ -154,7 +154,7 @@ export function ConfirmStep(t0) {
     let t25;
     if ($[39] !== agent.agentType || $[40] !== wizardData.location) {
       t25 = getNewRelativeAgentFilePath({
-        source: wizardData.location,
+        source: wizardData.location!,
         agentType: agent.agentType
       });
       $[39] = agent.agentType;

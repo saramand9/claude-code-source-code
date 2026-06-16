@@ -1,7 +1,10 @@
 import figures from 'figures'
 import { logError } from 'src/utils/log.js'
 import { callIdeRpc } from '../services/mcp/client.js'
-import type { MCPServerConnection } from '../services/mcp/types.js'
+import type {
+  ConnectedMCPServer,
+  MCPServerConnection,
+} from '../services/mcp/types.js'
 import { ClaudeError } from '../utils/errors.js'
 import { normalizePathForComparison, pathsEqual } from '../utils/file.js'
 import { getConnectedIdeClient } from '../utils/ide.js'
@@ -109,6 +112,8 @@ export class DiagnosticTrackingService {
       return
     }
 
+    const connectedClient = this.mcpClient as ConnectedMCPServer
+
     try {
       // Call the openFile tool to ensure the file is loaded
       await callIdeRpc(
@@ -121,7 +126,7 @@ export class DiagnosticTrackingService {
           selectToEndOfLine: false,
           makeFrontmost: false,
         },
-        this.mcpClient,
+        connectedClient,
       )
     } catch (error) {
       logError(error as Error)
@@ -141,13 +146,14 @@ export class DiagnosticTrackingService {
       return
     }
 
+    const connectedClient = this.mcpClient as ConnectedMCPServer
     const timestamp = Date.now()
 
     try {
       const result = await callIdeRpc(
         'getDiagnostics',
         { uri: `file://${filePath}` },
-        this.mcpClient,
+        connectedClient,
       )
       const diagnosticFile = this.parseDiagnosticResult(result)[0]
       if (diagnosticFile) {
@@ -194,13 +200,15 @@ export class DiagnosticTrackingService {
       return []
     }
 
+    const connectedClient = this.mcpClient as ConnectedMCPServer
+
     // Check if we have any files with diagnostic changes
     let allDiagnosticFiles: DiagnosticFile[] = []
     try {
       const result = await callIdeRpc(
         'getDiagnostics',
         {}, // Empty params fetches all diagnostics
-        this.mcpClient,
+        connectedClient,
       )
       allDiagnosticFiles = this.parseDiagnosticResult(result)
     } catch (_error) {

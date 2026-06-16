@@ -301,7 +301,8 @@ export function getScopeLabel(scope: ConfigScope): string {
 export function ensureConfigScope(scope?: string): ConfigScope {
   if (!scope) return 'local'
 
-  if (!ConfigScopeSchema().options.includes(scope as ConfigScope)) {
+  const validScopes = ConfigScopeSchema().options as readonly string[]
+  if (!validScopes.includes(scope)) {
     throw new Error(
       `Invalid scope: ${scope}. Must be one of: ${ConfigScopeSchema().options.join(', ')}`,
     )
@@ -438,22 +439,29 @@ export function getMcpServerScopeFromToolName(
 // Type guards for MCP server config types
 function isStdioConfig(
   config: McpServerConfig,
-): config is McpStdioServerConfig {
-  return config.type === 'stdio' || config.type === undefined
+): config is McpStdioServerConfig & { command: string } {
+  return (
+    (config.type === 'stdio' || config.type === undefined) &&
+    typeof config.command === 'string'
+  )
 }
 
-function isSSEConfig(config: McpServerConfig): config is McpSSEServerConfig {
-  return config.type === 'sse'
+function isSSEConfig(
+  config: McpServerConfig,
+): config is McpSSEServerConfig & { type: 'sse'; url: string } {
+  return config.type === 'sse' && typeof config.url === 'string'
 }
 
-function isHTTPConfig(config: McpServerConfig): config is McpHTTPServerConfig {
-  return config.type === 'http'
+function isHTTPConfig(
+  config: McpServerConfig,
+): config is McpHTTPServerConfig & { type: 'http'; url: string } {
+  return config.type === 'http' && typeof config.url === 'string'
 }
 
 function isWebSocketConfig(
   config: McpServerConfig,
-): config is McpWebSocketServerConfig {
-  return config.type === 'ws'
+): config is McpWebSocketServerConfig & { type: 'ws'; url: string } {
+  return config.type === 'ws' && typeof config.url === 'string'
 }
 
 /**

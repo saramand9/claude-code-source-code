@@ -1303,7 +1303,7 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   // This MUST come before checking allow rules to prevent users from accidentally granting
   // permission to edit protected files
   const safetyCheck = checkPathSafetyForAutoEdit(path, pathsToCheck)
-  if (!safetyCheck.safe) {
+  if (safetyCheck.safe === false) {
     // SDK suggestion: if under .claude/skills/{name}/, emit the narrowed
     // session-scoped addRules that step 1.6 will honor on the next call.
     // Everything else (.claude/settings.json, .git/, .vscode/, .idea/) falls

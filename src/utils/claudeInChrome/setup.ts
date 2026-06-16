@@ -94,7 +94,7 @@ export function setupClaudeInChrome(): {
   systemPrompt: string
 } {
   const isNativeBuild = isInBundledMode()
-  const allowedTools = BROWSER_TOOLS.map(
+  const allowedTools = (BROWSER_TOOLS as unknown as Array<{ name: string }>).map(
     tool => `mcp__claude-in-chrome__${tool.name}`,
   )
 

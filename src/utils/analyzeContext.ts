@@ -288,7 +288,10 @@ async function countSystemTokens(
       )
       .map(content => ({ name: extractSectionName(content), content })),
     ...Object.entries(systemContext)
-      .filter(([, content]) => content.length > 0)
+      .filter((entry): entry is [string, string] => {
+        const [, content] = entry
+        return typeof content === 'string' && content.length > 0
+      })
       .map(([name, content]) => ({ name, content })),
   ]
 
@@ -1118,8 +1121,13 @@ export async function analyzeContextUsage(
   }
   if (feature('CONTEXT_COLLAPSE')) {
     /* eslint-disable @typescript-eslint/no-require-imports */
+    type ContextCollapseModule = {
+      isContextCollapseEnabled(): boolean
+    }
+    const contextCollapseModulePath: string =
+      '../services/contextCollapse/index.js'
     const { isContextCollapseEnabled } =
-      require('../services/contextCollapse/index.js') as typeof import('../services/contextCollapse/index.js')
+      require(contextCollapseModulePath) as ContextCollapseModule
     /* eslint-enable @typescript-eslint/no-require-imports */
     if (isContextCollapseEnabled()) {
       skipReservedBuffer = true

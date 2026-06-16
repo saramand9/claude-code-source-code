@@ -24,6 +24,7 @@ import type { AppState } from '../../state/AppState.js'
 import type { AgentDefinitionsResult } from '../../tools/AgentTool/loadAgentsDir.js'
 import { getAgentDefinitionsWithOverrides } from '../../tools/AgentTool/loadAgentsDir.js'
 import type { PluginError } from '../../types/plugin.js'
+import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
@@ -92,6 +93,7 @@ export async function refreshActivePlugins(
   ])
 
   const { enabled, disabled, errors } = pluginResult
+  const enabledPlugins = enabled as LoadedPlugin[]
 
   // Populate mcpServers/lspServers on each enabled plugin. These are lazy
   // cache slots NOT filled by loadAllPlugins() — they're written later by
@@ -101,7 +103,7 @@ export async function refreshActivePlugins(
   // without re-parsing manifests. Errors are pushed to the shared errors array.
   const [mcpCounts, lspCounts] = await Promise.all([
     Promise.all(
-      enabled.map(async p => {
+      enabledPlugins.map(async p => {
         if (p.mcpServers) return Object.keys(p.mcpServers).length
         const servers = await loadPluginMcpServers(p, errors)
         if (servers) p.mcpServers = servers
@@ -109,7 +111,7 @@ export async function refreshActivePlugins(
       }),
     ),
     Promise.all(
-      enabled.map(async p => {
+      enabledPlugins.map(async p => {
         if (p.lspServers) return Object.keys(p.lspServers).length
         const servers = await loadPluginLspServers(p, errors)
         if (servers) p.lspServers = servers
@@ -160,11 +162,14 @@ export async function refreshActivePlugins(
     )
   }
 
-  const hook_count = enabled.reduce((sum, p) => {
+  const hook_count = enabledPlugins.reduce((sum, p) => {
     if (!p.hooksConfig) return sum
+    const hookMatchers = Object.values(p.hooksConfig) as Array<
+      Array<{ hooks: unknown[] }> | undefined
+    >
     return (
       sum +
-      Object.values(p.hooksConfig).reduce(
+      hookMatchers.reduce(
         (s, matchers) =>
           s + (matchers?.reduce((h, m) => h + m.hooks.length, 0) ?? 0),
         0,
@@ -173,11 +178,11 @@ export async function refreshActivePlugins(
   }, 0)
 
   logForDebugging(
-    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
+    `refreshActivePlugins: ${enabledPlugins.length} enabled, ${pluginCommands.length} commands, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
   )
 
   return {
-    enabled_count: enabled.length,
+    enabled_count: enabledPlugins.length,
     disabled_count: disabled.length,
     command_count: pluginCommands.length,
     agent_count: agentDefinitions.allAgents.length,

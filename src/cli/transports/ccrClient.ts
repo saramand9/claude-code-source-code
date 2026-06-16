@@ -119,7 +119,7 @@ export function createStreamAccumulator(): StreamAccumulatorState {
 
 function scopeKey(m: {
   session_id: string
-  parent_tool_use_id: string | null
+  parent_tool_use_id?: string | null
 }): string {
   return `${m.session_id}:${m.parent_tool_use_id ?? ''}`
 }
@@ -184,7 +184,7 @@ export function accumulateStreamEvents(
           type: 'stream_event',
           uuid: msg.uuid,
           session_id: msg.session_id,
-          parent_tool_use_id: msg.parent_tool_use_id,
+          parent_tool_use_id: msg.parent_tool_use_id ?? null,
           event: {
             type: 'content_block_delta',
             index: msg.event.index,
@@ -211,10 +211,11 @@ export function clearStreamAccumulatorForMessage(
   state: StreamAccumulatorState,
   assistant: {
     session_id: string
-    parent_tool_use_id: string | null
-    message: { id: string }
+    parent_tool_use_id?: string | null
+    message: { id?: string }
   },
 ): void {
+  if (!assistant.message.id) return
   state.byMessage.delete(assistant.message.id)
   const scope = scopeKey(assistant)
   if (state.scopeToMessage.get(scope) === assistant.message.id) {
@@ -222,7 +223,7 @@ export function clearStreamAccumulatorForMessage(
   }
 }
 
-type RequestResult = { ok: true } | { ok: false; retryAfterMs?: number }
+type RequestResult = { ok: boolean; retryAfterMs?: number }
 
 type WorkerEvent = {
   payload: EventPayload

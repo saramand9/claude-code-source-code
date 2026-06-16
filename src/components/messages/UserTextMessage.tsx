@@ -18,6 +18,17 @@ import { UserPlanMessage } from './UserPlanMessage.js';
 import { UserPromptMessage } from './UserPromptMessage.js';
 import { UserResourceUpdateMessage } from './UserResourceUpdateMessage.js';
 import { UserTeammateMessage } from './UserTeammateMessage.js';
+type UserTextFeatureModule<TName extends string> = Record<
+  TName,
+  React.ComponentType<{
+    addMargin: boolean;
+    param: TextBlockParam;
+  }>
+>;
+const userGitHubWebhookModulePath: string = './UserGitHubWebhookMessage.js';
+const userForkBoilerplateModulePath: string =
+  './UserForkBoilerplateMessage.js';
+const userCrossSessionModulePath: string = './UserCrossSessionMessage.js';
 type Props = {
   addMargin: boolean;
   param: TextBlockParam;
@@ -94,14 +105,14 @@ export function UserTextMessage(t0) {
     if (param.text.startsWith("<github-webhook-activity>")) {
       let t1;
       if ($[9] === Symbol.for("react.memo_cache_sentinel")) {
-        t1 = require("./UserGitHubWebhookMessage.js");
+        t1 = require(userGitHubWebhookModulePath);
         $[9] = t1;
       } else {
         t1 = $[9];
       }
       const {
         UserGitHubWebhookMessage
-      } = t1 as typeof import('./UserGitHubWebhookMessage.js');
+      } = t1 as UserTextFeatureModule<'UserGitHubWebhookMessage'>;
       let t2;
       if ($[10] !== addMargin || $[11] !== param) {
         t2 = <UserGitHubWebhookMessage addMargin={addMargin} param={param} />;
@@ -191,14 +202,14 @@ export function UserTextMessage(t0) {
     if (param.text.includes("<fork-boilerplate>")) {
       let t1;
       if ($[32] === Symbol.for("react.memo_cache_sentinel")) {
-        t1 = require("./UserForkBoilerplateMessage.js");
+        t1 = require(userForkBoilerplateModulePath);
         $[32] = t1;
       } else {
         t1 = $[32];
       }
       const {
         UserForkBoilerplateMessage
-      } = t1 as typeof import('./UserForkBoilerplateMessage.js');
+      } = t1 as UserTextFeatureModule<'UserForkBoilerplateMessage'>;
       let t2;
       if ($[33] !== addMargin || $[34] !== param) {
         t2 = <UserForkBoilerplateMessage addMargin={addMargin} param={param} />;
@@ -215,14 +226,14 @@ export function UserTextMessage(t0) {
     if (param.text.includes("<cross-session-message")) {
       let t1;
       if ($[36] === Symbol.for("react.memo_cache_sentinel")) {
-        t1 = require("./UserCrossSessionMessage.js");
+        t1 = require(userCrossSessionModulePath);
         $[36] = t1;
       } else {
         t1 = $[36];
       }
       const {
         UserCrossSessionMessage
-      } = t1 as typeof import('./UserCrossSessionMessage.js');
+      } = t1 as UserTextFeatureModule<'UserCrossSessionMessage'>;
       let t2;
       if ($[37] !== addMargin || $[38] !== param) {
         t2 = <UserCrossSessionMessage addMargin={addMargin} param={param} />;
