@@ -135,6 +135,20 @@ const notebookEditFinalResponse =
   'structured NotebookEdit tool completed with after-notebook-4187'
 const notebookEditCellId = 'cell-alpha'
 let notebookEditFilePath = ''
+const notebookVariantPrompt = 'cli notebook insert delete prompt'
+const notebookVariantBaseCellId = 'cell-base'
+const notebookVariantBaseSource = 'print("notebook-base-3194")'
+const notebookVariantInsertedSource = 'inserted markdown notebook-3194'
+const notebookVariantFinalResponse =
+  'structured NotebookEdit insert delete completed'
+let notebookVariantFilePath = ''
+const notebookRejectPrompt = 'cli notebook missing cell rejection prompt'
+const notebookRejectCellId = 'cell-only'
+const notebookRejectOriginalSource = 'print("notebook-reject-before-9027")'
+const notebookRejectAttemptedSource = 'print("notebook-reject-after-9027")'
+const notebookRejectFinalResponse =
+  'structured NotebookEdit missing cell rejection completed'
+let notebookRejectFilePath = ''
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -864,18 +878,25 @@ function writeStreamingWriteToolUse(res, sequence, options = {}) {
   res.end()
 }
 
-function writeStreamingNotebookEditToolUse(res, sequence) {
+function writeStreamingNotebookEditToolUse(res, sequence, options = {}) {
   const id = `msg_cli_notebook_edit_tool_use_${sequence}`
-  const toolUseId = `toolu_cli_notebook_edit_${sequence}`
-  const inputDeltas = splitIntoDeltas(
-    JSON.stringify({
-      notebook_path: notebookEditFilePath,
-      cell_id: notebookEditCellId,
-      new_source: notebookEditUpdatedSource,
-      cell_type: 'code',
-      edit_mode: 'replace',
-    }),
-  )
+  const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_notebook_edit_'}${sequence}`
+  const input = {
+    notebook_path: options.notebookPath ?? notebookEditFilePath,
+    new_source: options.newSource ?? notebookEditUpdatedSource,
+    edit_mode: options.editMode ?? 'replace',
+  }
+  if (options.cellId !== undefined) {
+    input.cell_id = options.cellId
+  } else {
+    input.cell_id = notebookEditCellId
+  }
+  if (options.cellType !== undefined) {
+    input.cell_type = options.cellType
+  } else {
+    input.cell_type = 'code'
+  }
+  const inputDeltas = splitIntoDeltas(JSON.stringify(input))
 
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -970,6 +991,82 @@ function responseForBody(body, fallbackIndex) {
       toolUse: true,
       toolOptions: {
         filePath: notebookEditFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookVariantPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_delete_')) {
+      return {
+        index: responses.length + 15,
+        text: notebookVariantFinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_insert_')) {
+      return {
+        index: responses.length + 15,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: 'cell-1',
+          editMode: 'delete',
+          newSource: '',
+          notebookPath: notebookVariantFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_delete_',
+        },
+        text: '',
+      }
+    }
+    if (combinedText.includes(notebookVariantBaseSource)) {
+      return {
+        index: responses.length + 15,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookVariantBaseCellId,
+          cellType: 'markdown',
+          editMode: 'insert',
+          newSource: notebookVariantInsertedSource,
+          notebookPath: notebookVariantFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_insert_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 15,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookVariantFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookRejectPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_reject_')) {
+      return {
+        index: responses.length + 16,
+        text: notebookRejectFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookRejectOriginalSource)) {
+      return {
+        index: responses.length + 16,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: 'missing-cell-9027',
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookRejectAttemptedSource,
+          notebookPath: notebookRejectFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_reject_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 16,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookRejectFilePath,
       },
       text: '',
     }
@@ -1284,7 +1381,11 @@ function startMockServer() {
           return
         }
         if (response.notebookEditToolUse) {
-          writeStreamingNotebookEditToolUse(res, sequence)
+          writeStreamingNotebookEditToolUse(
+            res,
+            sequence,
+            response.notebookEditToolOptions,
+          )
           return
         }
         if (response.toolUse) {
@@ -1564,6 +1665,64 @@ async function main() {
             metadata: {},
             outputs: [],
             source: notebookEditOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookVariantFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-insert-delete.ipynb',
+  )
+  await writeFile(
+    notebookVariantFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookVariantBaseCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookVariantBaseSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookRejectFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-missing-cell-rejection.ipynb',
+  )
+  await writeFile(
+    notebookRejectFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookRejectCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookRejectOriginalSource,
           },
         ],
         metadata: {
@@ -2445,6 +2604,185 @@ async function main() {
       'NotebookEdit should clear code cell outputs',
     )
 
+    const beforeNotebookVariantRequests = server.requests.length
+    const notebookVariantArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '4',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const notebookVariantRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookVariantArgs, notebookVariantPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookVariantRun.is_error,
+      false,
+      'NotebookEdit insert/delete run should succeed',
+    )
+    assert.equal(
+      notebookVariantRun.result,
+      notebookVariantFinalResponse,
+      'NotebookEdit insert/delete final response',
+    )
+    const notebookVariantRequests = server.requests
+      .slice(beforeNotebookVariantRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookVariantRequests.length,
+      4,
+      'NotebookEdit insert/delete run should make Read, insert, delete, and final requests',
+    )
+    const notebookVariantReadFollowUpTexts = requestTexts(
+      notebookVariantRequests[1],
+    )
+    assert(
+      containsText(notebookVariantReadFollowUpTexts, notebookVariantBaseSource),
+      'NotebookEdit insert follow-up request should include Read notebook content',
+    )
+    const notebookInsertResultBlocks = requestContentBlocks(
+      notebookVariantRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookInsertResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_insert_') &&
+          typeof block.content === 'string' &&
+          block.content.includes('Inserted cell') &&
+          block.content.includes(notebookVariantInsertedSource)
+        )
+      }),
+      'NotebookEdit insert follow-up should include inserted-cell tool_result content',
+    )
+    const notebookDeleteResultBlocks = requestContentBlocks(
+      notebookVariantRequests[3],
+      'tool_result',
+    )
+    assert(
+      notebookDeleteResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_delete_') &&
+          typeof block.content === 'string' &&
+          block.content.includes('Deleted cell cell-1')
+        )
+      }),
+      'NotebookEdit delete follow-up should include deleted-cell tool_result content',
+    )
+    const variantNotebook = JSON.parse(
+      await readFile(notebookVariantFilePath, 'utf8'),
+    )
+    assert.equal(
+      variantNotebook.cells.length,
+      1,
+      'NotebookEdit delete should remove the inserted cell',
+    )
+    assert.equal(
+      variantNotebook.cells[0].id,
+      notebookVariantBaseCellId,
+      'NotebookEdit insert/delete should preserve the original base cell',
+    )
+    assert.equal(
+      variantNotebook.cells[0].source,
+      notebookVariantBaseSource,
+      'NotebookEdit insert/delete should leave the base cell source unchanged',
+    )
+
+    const beforeNotebookRejectRequests = server.requests.length
+    const notebookRejectArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const notebookRejectRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookRejectArgs, notebookRejectPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookRejectRun.is_error,
+      false,
+      'NotebookEdit missing-cell rejection run should complete after model final response',
+    )
+    assert.equal(
+      notebookRejectRun.result,
+      notebookRejectFinalResponse,
+      'NotebookEdit missing-cell rejection final response',
+    )
+    const notebookRejectRequests = server.requests
+      .slice(beforeNotebookRejectRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookRejectRequests.length,
+      3,
+      'NotebookEdit missing-cell rejection run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookRejectReadFollowUpTexts = requestTexts(
+      notebookRejectRequests[1],
+    )
+    assert(
+      containsText(notebookRejectReadFollowUpTexts, notebookRejectOriginalSource),
+      'NotebookEdit missing-cell follow-up should include Read notebook content',
+    )
+    const notebookRejectResultBlocks = requestContentBlocks(
+      notebookRejectRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookRejectResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_reject_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('missing-cell-9027')
+        )
+      }),
+      'NotebookEdit missing-cell follow-up should include error tool_result content',
+    )
+    const rejectedNotebook = JSON.parse(
+      await readFile(notebookRejectFilePath, 'utf8'),
+    )
+    assert.equal(
+      rejectedNotebook.cells[0].source,
+      notebookRejectOriginalSource,
+      'NotebookEdit missing-cell rejection should leave notebook unchanged',
+    )
+
     console.log('ok - cli print/resume/continue E2E')
     console.log(`ok - local mock captured ${promptRequests.length} streamed prompt requests`)
     console.log('ok - textual tool-call leak is reported without executing a tool')
@@ -2462,6 +2800,8 @@ async function main() {
     console.log('ok - Write rejects updating a file that was not read first')
     console.log('ok - Write rejects stale updates after external modification')
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
+    console.log('ok - NotebookEdit inserts and deletes an artifact notebook cell')
+    console.log('ok - NotebookEdit rejects editing a missing notebook cell')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
     await server.close()
