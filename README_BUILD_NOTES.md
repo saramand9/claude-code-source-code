@@ -650,6 +650,42 @@ git diff --check
 - `node --check dist\cli.js` 通过。
 - `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
 
+## 2026-06-17 NotebookEdit cell-N 与 markdown replace 验证记录
+
+本轮继续补齐 `NotebookEdit` 的定位和 cell 类型边界。此前已覆盖按真实 cell id replace、insert/delete、缺失 cell、未读/stale 保护；本轮补充按 `cell-N` 索引定位并替换 markdown cell。
+
+### 本轮尝试修复/真实适配
+
+- 新增真实 CLI E2E：构造一个包含 code cell 和 markdown cell 的 `.ipynb`，mock 先触发 `Read`，再触发 `NotebookEdit`，参数为 `cell_id: "cell-1"`、`cell_type: "markdown"`、`edit_mode: "replace"`。
+- 测试断言 follow-up request 中包含原始 markdown 内容，证明模型视图确实拿到了 notebook 内容。
+- 测试断言 `NotebookEdit` tool_result 包含 `Updated cell cell-1` 和新的 markdown 内容。
+- 测试断言落盘后的 notebook 保留第一个 code cell，第二个 markdown cell 的 `source` 被替换且 `cell_type` 仍为 `markdown`。
+
+### 本轮 mock/stub/降级说明
+
+- 这轮不是 mock。mock server 只模拟模型 API；实际 notebook 读取、`cell-N` 解析、markdown replace 和文件落盘都来自真实 `dist/cli.js`。
+- 仍未覆盖损坏 notebook JSON、超大 notebook、配置/managed policy deny、hook 拒绝和复杂并发编辑。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+npm run check
+npm run test:build-safety
+node --check dist\cli.js
+git diff --check
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - NotebookEdit replaces a markdown cell by cell index`。
+- `npm run check` 通过。
+- `npm run test:build-safety` 通过，当前为 31/31 项。
+- `node --check dist\cli.js` 通过。
+- `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
 ## 构建和启动
 
 ```powershell
@@ -719,6 +755,7 @@ NotebookEdit 写入链路 E2E：bare/simple 模式显式 `--tools Read,NotebookE
 NotebookEdit 变体与拒绝路径 E2E：真实 CLI 会执行 `insert` markdown cell、随后按 `cell-1` 删除该 cell；缺失 cell 会返回 `is_error` tool_result 且 notebook 不变
 NotebookEdit 读后写保护 E2E：未读直接编辑 notebook 会返回 `is_error` tool_result 且文件不变；Read 后外部修改同一 notebook 会返回 stale-write `is_error` tool_result 且保留外部修改
 disallowedTools 写入工具禁用 E2E：`--disallowedTools Write` 和 `--disallowedTools NotebookEdit` 会让对应工具返回 `No such tool available` 错误 tool_result，且不写入文件
+NotebookEdit cell-N/markdown E2E：真实 CLI 会用 `cell_id: "cell-1"` 定位第二个 cell，替换 markdown source，并保持第一个 code cell 不变
 交互 UI 流式显示回归：构建副本中 streaming 文本不再按最后一个换行截断，assistant/streaming 更新保留 live-scroll 兜底，并通过真实 `Messages`/Ink 渲染确认未完成行可见
 modifiers-napi 缺失 fallback
 image-processor-napi 缺失时 sharp fallback
@@ -761,6 +798,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 - 同一 CLI E2E 还覆盖 NotebookEdit 变体和拒绝路径：mock 触发 insert markdown cell 后再触发 delete `cell-1`，最终 notebook 只保留原始 base cell；缺失 cell 的 replace 请求会返回 `is_error` tool_result，notebook 文件不变。
 - 同一 CLI E2E 还覆盖 NotebookEdit 读后写保护：未读直接编辑 notebook 会返回 `is_error` tool_result 且文件不变；Read 后 mock 模拟外部修改同一 notebook 会返回 stale-write `is_error` tool_result，磁盘保留外部修改内容。
 - 同一 CLI E2E 还覆盖 CLI deny-list：`--disallowedTools Write` 下 Write tool_use 会返回 `No such tool available: Write`，目标文件不创建；`--disallowedTools NotebookEdit` 下 Read 仍可执行，但 NotebookEdit tool_use 会返回 `No such tool available: NotebookEdit`，notebook 不变。
+- 同一 CLI E2E 还覆盖 NotebookEdit `cell-N` 索引定位和 markdown replace：`cell_id: "cell-1"` 会定位第二个 cell，替换 markdown source，并保持第一个 code cell 不变。
 - 交互 UI 流式显示回归：`visibleStreamingText` 不再按最后一个换行截断，避免无尾随换行内容必须等最终 message 或键盘 repaint 才出现；`maybeRepinLiveScroll` 会在 streaming 文本更新和 assistant 消息落地时保持 live 区域可见，除非用户最近主动滚动离开；真实 `Messages`/Ink 渲染测试会把无尾随换行的 `streamingText` 渲染到模拟 TTY，并确认输出中包含完整 tail。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
 - `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
@@ -781,6 +819,6 @@ ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块�
 
 History Snip 的当前风险也要单独看待：它已不再是完全关闭、stub 或简单保守前缀裁剪，而是高可用外部版。它可以按安全 turn 分段删除、按目标 token 收敛、按目标 ID 删除完整安全 turn，并在后续模型视图中投影清理旧消息；但它仍不做官方语义评分、模型摘要、任意单消息精确点删或复杂跨轮调度。
 
-Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链、bare/simple 显式 `Write` 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝、Write deny-list 禁用、bare/simple 显式 `Read -> NotebookEdit(replace) -> final` notebook 替换 cell 路径、NotebookEdit `insert -> delete` 路径、NotebookEdit 缺失 cell 拒绝路径、NotebookEdit 未读直接编辑拒绝、NotebookEdit 读后外部修改拒绝，以及 NotebookEdit deny-list 禁用。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、交互权限弹窗拒绝、hook 拒绝、配置/managed policy deny 规则、Write CRLF 或编码边界、NotebookEdit 损坏 notebook/超大 notebook/markdown replace/按 cell-N 直接 replace、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
+Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链、bare/simple 显式 `Write` 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝、Write deny-list 禁用、bare/simple 显式 `Read -> NotebookEdit(replace) -> final` notebook 替换 cell 路径、NotebookEdit `insert -> delete` 路径、NotebookEdit 缺失 cell 拒绝路径、NotebookEdit 未读直接编辑拒绝、NotebookEdit 读后外部修改拒绝、NotebookEdit deny-list 禁用，以及 NotebookEdit `cell-N` markdown replace。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、交互权限弹窗拒绝、hook 拒绝、配置/managed policy deny 规则、Write CRLF 或编码边界、NotebookEdit 损坏 notebook/超大 notebook、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
 
 交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归和真实 `Messages`/Ink 组件渲染回归；`test:cli-e2e` 仍覆盖的是 `--bare --print --output-format json` 非交互路径，完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。

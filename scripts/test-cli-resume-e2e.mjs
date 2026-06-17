@@ -176,6 +176,13 @@ const notebookDenyAttemptedSource = 'print("notebook-deny-after-1186")'
 const notebookDenyFinalResponse =
   'structured NotebookEdit permission deny completed'
 let notebookDenyFilePath = ''
+const notebookCellIndexPrompt = 'cli notebook cell index replace prompt'
+const notebookCellIndexFirstSource = 'print("notebook-index-code-2401")'
+const notebookCellIndexOriginalMarkdown = 'old markdown notebook-index-2401'
+const notebookCellIndexUpdatedMarkdown = 'new markdown notebook-index-2401'
+const notebookCellIndexFinalResponse =
+  'structured NotebookEdit cell index replace completed'
+let notebookCellIndexFilePath = ''
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -1211,6 +1218,37 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(notebookCellIndexPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_cell_index_')) {
+      return {
+        index: responses.length + 21,
+        text: notebookCellIndexFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookCellIndexOriginalMarkdown)) {
+      return {
+        index: responses.length + 21,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: 'cell-1',
+          cellType: 'markdown',
+          editMode: 'replace',
+          newSource: notebookCellIndexUpdatedMarkdown,
+          notebookPath: notebookCellIndexFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_cell_index_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 21,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookCellIndexFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeUpdatePrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_update_')) {
       return {
@@ -1971,6 +2009,41 @@ async function main() {
             metadata: {},
             outputs: [],
             source: notebookDenyOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookCellIndexFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-cell-index-replace.ipynb',
+  )
+  await writeFile(
+    notebookCellIndexFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: 'notebook-index-code-cell',
+            metadata: {},
+            outputs: [],
+            source: notebookCellIndexFirstSource,
+          },
+          {
+            cell_type: 'markdown',
+            id: 'notebook-index-markdown-cell',
+            metadata: {},
+            source: notebookCellIndexOriginalMarkdown,
           },
         ],
         metadata: {
@@ -3326,6 +3399,96 @@ async function main() {
       'NotebookEdit permission deny should leave notebook unchanged',
     )
 
+    const beforeNotebookCellIndexRequests = server.requests.length
+    const notebookCellIndexArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const notebookCellIndexRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookCellIndexArgs, notebookCellIndexPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookCellIndexRun.is_error,
+      false,
+      'NotebookEdit cell-index replace run should succeed',
+    )
+    assert.equal(
+      notebookCellIndexRun.result,
+      notebookCellIndexFinalResponse,
+      'NotebookEdit cell-index replace final response',
+    )
+    const notebookCellIndexRequests = server.requests
+      .slice(beforeNotebookCellIndexRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookCellIndexRequests.length,
+      3,
+      'NotebookEdit cell-index replace run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookCellIndexReadFollowUpTexts = requestTexts(
+      notebookCellIndexRequests[1],
+    )
+    assert(
+      containsText(
+        notebookCellIndexReadFollowUpTexts,
+        notebookCellIndexOriginalMarkdown,
+      ),
+      'NotebookEdit cell-index replace follow-up should include original markdown content',
+    )
+    const notebookCellIndexResultBlocks = requestContentBlocks(
+      notebookCellIndexRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookCellIndexResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_cell_index_') &&
+          typeof block.content === 'string' &&
+          block.content.includes('Updated cell cell-1') &&
+          block.content.includes(notebookCellIndexUpdatedMarkdown)
+        )
+      }),
+      'NotebookEdit cell-index replace follow-up should include updated markdown tool_result',
+    )
+    const cellIndexNotebook = JSON.parse(
+      await readFile(notebookCellIndexFilePath, 'utf8'),
+    )
+    assert.equal(
+      cellIndexNotebook.cells[0].source,
+      notebookCellIndexFirstSource,
+      'NotebookEdit cell-index replace should preserve the first code cell',
+    )
+    assert.equal(
+      cellIndexNotebook.cells[1].cell_type,
+      'markdown',
+      'NotebookEdit cell-index replace should keep the target cell as markdown',
+    )
+    assert.equal(
+      cellIndexNotebook.cells[1].source,
+      notebookCellIndexUpdatedMarkdown,
+      'NotebookEdit cell-index replace should update the markdown cell source',
+    )
+
     console.log('ok - cli print/resume/continue E2E')
     console.log(`ok - local mock captured ${promptRequests.length} streamed prompt requests`)
     console.log('ok - textual tool-call leak is reported without executing a tool')
@@ -3349,6 +3512,7 @@ async function main() {
     console.log('ok - NotebookEdit rejects editing a notebook that was not read first')
     console.log('ok - NotebookEdit rejects stale notebook edits after external modification')
     console.log('ok - NotebookEdit respects explicit disallowedTools denial')
+    console.log('ok - NotebookEdit replaces a markdown cell by cell index')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
     await server.close()
