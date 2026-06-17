@@ -127,6 +127,10 @@ const writeStaleFinalResponse =
   'structured Write stale rejection completed'
 let writeStaleFilePath = ''
 let writeStaleWasExternallyModified = false
+const writeDenyPrompt = 'cli write permission deny prompt'
+const writeDenyContent = 'write permission deny fixture: attempted-6681'
+const writeDenyFinalResponse = 'structured Write permission deny completed'
+let writeDenyFilePath = ''
 
 const notebookEditPrompt = 'cli read then notebook edit prompt'
 const notebookEditOriginalSource = 'print("before-notebook-4187")'
@@ -165,6 +169,13 @@ const notebookStaleFinalResponse =
   'structured NotebookEdit stale rejection completed'
 let notebookStaleFilePath = ''
 let notebookStaleWasExternallyModified = false
+const notebookDenyPrompt = 'cli notebook edit permission deny prompt'
+const notebookDenyCellId = 'cell-deny'
+const notebookDenyOriginalSource = 'print("notebook-deny-before-1186")'
+const notebookDenyAttemptedSource = 'print("notebook-deny-after-1186")'
+const notebookDenyFinalResponse =
+  'structured NotebookEdit permission deny completed'
+let notebookDenyFilePath = ''
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -1169,6 +1180,37 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(notebookDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_deny_')) {
+      return {
+        index: responses.length + 20,
+        text: notebookDenyFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookDenyOriginalSource)) {
+      return {
+        index: responses.length + 20,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookDenyCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookDenyAttemptedSource,
+          notebookPath: notebookDenyFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_deny_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 20,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookDenyFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeUpdatePrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_update_')) {
       return {
@@ -1245,6 +1287,24 @@ function responseForBody(body, fallbackIndex) {
       toolUse: true,
       toolOptions: {
         filePath: writeStaleFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_deny_')) {
+      return {
+        index: responses.length + 19,
+        text: writeDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 19,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeDenyContent}\n`,
+        filePath: writeDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_deny_',
       },
       text: '',
     }
@@ -1750,6 +1810,8 @@ async function main() {
     `${writeStaleOriginalContent}\n`,
     'utf8',
   )
+  writeDenyFilePath = join(ARTIFACT_DIR, 'cli-write-permission-deny.txt')
+  await rm(writeDenyFilePath, { force: true })
   notebookEditFilePath = join(ARTIFACT_DIR, 'cli-read-then-notebook-edit.ipynb')
   await writeFile(
     notebookEditFilePath,
@@ -1880,6 +1942,35 @@ async function main() {
             metadata: {},
             outputs: [],
             source: notebookStaleOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookDenyFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-permission-deny.ipynb',
+  )
+  await writeFile(
+    notebookDenyFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookDenyCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookDenyOriginalSource,
           },
         ],
         metadata: {
@@ -2682,6 +2773,77 @@ async function main() {
       'Stale Write rejection should preserve the external modification',
     )
 
+    const beforeWriteDenyRequests = server.requests.length
+    const writeDenyArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--disallowedTools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    const writeDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeDenyArgs, writeDenyPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeDenyRun.is_error,
+      false,
+      'Write permission deny run should complete after model final response',
+    )
+    assert.equal(
+      writeDenyRun.result,
+      writeDenyFinalResponse,
+      'Write permission deny final response',
+    )
+    const writeDenyRequests = server.requests
+      .slice(beforeWriteDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeDenyRequests.length,
+      2,
+      'Write permission deny run should make tool_use and final requests',
+    )
+    const writeDenyResultBlocks = requestContentBlocks(
+      writeDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('No such tool available: Write')
+        )
+      }),
+      `Write permission deny follow-up should include explicit deny error result: ${JSON.stringify(writeDenyResultBlocks, null, 2)}`,
+    )
+    const writeDenyFileExists = await stat(writeDenyFilePath).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeDenyFileExists,
+      false,
+      'Write permission deny should not create the denied file',
+    )
+
     const beforeNotebookEditRequests = server.requests.length
     const notebookEditArgs = [
       '--bare',
@@ -3087,6 +3249,83 @@ async function main() {
       'NotebookEdit stale rejection should preserve the external modification',
     )
 
+    const beforeNotebookDenyRequests = server.requests.length
+    const notebookDenyArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--disallowedTools',
+      'NotebookEdit',
+      '--model',
+      'sonnet',
+    ]
+    const notebookDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookDenyArgs, notebookDenyPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookDenyRun.is_error,
+      false,
+      'NotebookEdit permission deny run should complete after model final response',
+    )
+    assert.equal(
+      notebookDenyRun.result,
+      notebookDenyFinalResponse,
+      'NotebookEdit permission deny final response',
+    )
+    const notebookDenyRequests = server.requests
+      .slice(beforeNotebookDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookDenyRequests.length,
+      3,
+      'NotebookEdit permission deny run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookDenyReadFollowUpTexts = requestTexts(notebookDenyRequests[1])
+    assert(
+      containsText(notebookDenyReadFollowUpTexts, notebookDenyOriginalSource),
+      'NotebookEdit permission deny follow-up should include Read notebook content',
+    )
+    const notebookDenyResultBlocks = requestContentBlocks(
+      notebookDenyRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('No such tool available: NotebookEdit')
+        )
+      }),
+      `NotebookEdit permission deny follow-up should include explicit deny error result: ${JSON.stringify(notebookDenyResultBlocks, null, 2)}`,
+    )
+    const deniedNotebook = JSON.parse(
+      await readFile(notebookDenyFilePath, 'utf8'),
+    )
+    assert.equal(
+      deniedNotebook.cells[0].source,
+      notebookDenyOriginalSource,
+      'NotebookEdit permission deny should leave notebook unchanged',
+    )
+
     console.log('ok - cli print/resume/continue E2E')
     console.log(`ok - local mock captured ${promptRequests.length} streamed prompt requests`)
     console.log('ok - textual tool-call leak is reported without executing a tool')
@@ -3103,11 +3342,13 @@ async function main() {
     console.log('ok - Read then Write updates an existing artifact file')
     console.log('ok - Write rejects updating a file that was not read first')
     console.log('ok - Write rejects stale updates after external modification')
+    console.log('ok - Write respects explicit disallowedTools denial')
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log('ok - NotebookEdit inserts and deletes an artifact notebook cell')
     console.log('ok - NotebookEdit rejects editing a missing notebook cell')
     console.log('ok - NotebookEdit rejects editing a notebook that was not read first')
     console.log('ok - NotebookEdit rejects stale notebook edits after external modification')
+    console.log('ok - NotebookEdit respects explicit disallowedTools denial')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
     await server.close()
