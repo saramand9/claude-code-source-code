@@ -149,6 +149,22 @@ const notebookRejectAttemptedSource = 'print("notebook-reject-after-9027")'
 const notebookRejectFinalResponse =
   'structured NotebookEdit missing cell rejection completed'
 let notebookRejectFilePath = ''
+const notebookUnreadPrompt = 'cli unread notebook edit rejection prompt'
+const notebookUnreadCellId = 'cell-unread'
+const notebookUnreadOriginalSource = 'print("notebook-unread-before-5441")'
+const notebookUnreadAttemptedSource = 'print("notebook-unread-after-5441")'
+const notebookUnreadFinalResponse =
+  'structured NotebookEdit unread rejection completed'
+let notebookUnreadFilePath = ''
+const notebookStalePrompt = 'cli stale notebook edit rejection prompt'
+const notebookStaleCellId = 'cell-stale'
+const notebookStaleOriginalSource = 'print("notebook-stale-before-7730")'
+const notebookStaleExternalSource = 'print("notebook-stale-external-7730")'
+const notebookStaleAttemptedSource = 'print("notebook-stale-after-7730")'
+const notebookStaleFinalResponse =
+  'structured NotebookEdit stale rejection completed'
+let notebookStaleFilePath = ''
+let notebookStaleWasExternallyModified = false
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -1071,6 +1087,88 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(notebookUnreadPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_unread_')) {
+      return {
+        index: responses.length + 17,
+        text: notebookUnreadFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 17,
+      notebookEditToolUse: true,
+      notebookEditToolOptions: {
+        cellId: notebookUnreadCellId,
+        cellType: 'code',
+        editMode: 'replace',
+        newSource: notebookUnreadAttemptedSource,
+        notebookPath: notebookUnreadFilePath,
+        toolUseIdPrefix: 'toolu_cli_notebook_unread_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookStalePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_stale_')) {
+      return {
+        index: responses.length + 18,
+        text: notebookStaleFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookStaleOriginalSource)) {
+      if (!notebookStaleWasExternallyModified) {
+        writeFileSync(
+          notebookStaleFilePath,
+          JSON.stringify(
+            {
+              cells: [
+                {
+                  cell_type: 'code',
+                  execution_count: 1,
+                  id: notebookStaleCellId,
+                  metadata: {},
+                  outputs: [],
+                  source: notebookStaleExternalSource,
+                },
+              ],
+              metadata: {
+                language_info: { name: 'python' },
+              },
+              nbformat: 4,
+              nbformat_minor: 5,
+            },
+            null,
+            1,
+          ),
+          'utf8',
+        )
+        const future = new Date(Date.now() + 10_000)
+        utimesSync(notebookStaleFilePath, future, future)
+        notebookStaleWasExternallyModified = true
+      }
+      return {
+        index: responses.length + 18,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookStaleCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookStaleAttemptedSource,
+          notebookPath: notebookStaleFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_stale_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 18,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookStaleFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeUpdatePrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_update_')) {
       return {
@@ -1723,6 +1821,65 @@ async function main() {
             metadata: {},
             outputs: [],
             source: notebookRejectOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookUnreadFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-unread-rejection.ipynb',
+  )
+  await writeFile(
+    notebookUnreadFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookUnreadCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookUnreadOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookStaleFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-stale-rejection.ipynb',
+  )
+  notebookStaleWasExternallyModified = false
+  await writeFile(
+    notebookStaleFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookStaleCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookStaleOriginalSource,
           },
         ],
         metadata: {
@@ -2783,6 +2940,153 @@ async function main() {
       'NotebookEdit missing-cell rejection should leave notebook unchanged',
     )
 
+    const beforeNotebookUnreadRequests = server.requests.length
+    const notebookUnreadArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'NotebookEdit',
+      '--allowedTools',
+      'NotebookEdit',
+      '--model',
+      'sonnet',
+    ]
+    const notebookUnreadRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookUnreadArgs, notebookUnreadPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookUnreadRun.is_error,
+      false,
+      'NotebookEdit unread rejection run should complete after model final response',
+    )
+    assert.equal(
+      notebookUnreadRun.result,
+      notebookUnreadFinalResponse,
+      'NotebookEdit unread rejection final response',
+    )
+    const notebookUnreadRequests = server.requests
+      .slice(beforeNotebookUnreadRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookUnreadRequests.length,
+      2,
+      'NotebookEdit unread rejection run should make tool_use and final requests',
+    )
+    const notebookUnreadResultBlocks = requestContentBlocks(
+      notebookUnreadRequests[1],
+      'tool_result',
+    )
+    assert(
+      notebookUnreadResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_unread_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('File has not been read yet')
+        )
+      }),
+      'NotebookEdit unread follow-up should include read-before-write error result',
+    )
+    const unreadNotebook = JSON.parse(
+      await readFile(notebookUnreadFilePath, 'utf8'),
+    )
+    assert.equal(
+      unreadNotebook.cells[0].source,
+      notebookUnreadOriginalSource,
+      'NotebookEdit unread rejection should leave notebook unchanged',
+    )
+
+    const beforeNotebookStaleRequests = server.requests.length
+    const notebookStaleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const notebookStaleRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookStaleArgs, notebookStalePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookStaleRun.is_error,
+      false,
+      'NotebookEdit stale rejection run should complete after model final response',
+    )
+    assert.equal(
+      notebookStaleRun.result,
+      notebookStaleFinalResponse,
+      'NotebookEdit stale rejection final response',
+    )
+    const notebookStaleRequests = server.requests
+      .slice(beforeNotebookStaleRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookStaleRequests.length,
+      3,
+      'NotebookEdit stale rejection run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookStaleReadFollowUpTexts = requestTexts(
+      notebookStaleRequests[1],
+    )
+    assert(
+      containsText(notebookStaleReadFollowUpTexts, notebookStaleOriginalSource),
+      'NotebookEdit stale follow-up should include Read notebook content before external modification',
+    )
+    const notebookStaleResultBlocks = requestContentBlocks(
+      notebookStaleRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookStaleResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_stale_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('modified since read')
+        )
+      }),
+      'NotebookEdit stale follow-up should include modified-since-read error result',
+    )
+    const staleNotebook = JSON.parse(
+      await readFile(notebookStaleFilePath, 'utf8'),
+    )
+    assert.equal(
+      staleNotebook.cells[0].source,
+      notebookStaleExternalSource,
+      'NotebookEdit stale rejection should preserve the external modification',
+    )
+
     console.log('ok - cli print/resume/continue E2E')
     console.log(`ok - local mock captured ${promptRequests.length} streamed prompt requests`)
     console.log('ok - textual tool-call leak is reported without executing a tool')
@@ -2802,6 +3106,8 @@ async function main() {
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log('ok - NotebookEdit inserts and deletes an artifact notebook cell')
     console.log('ok - NotebookEdit rejects editing a missing notebook cell')
+    console.log('ok - NotebookEdit rejects editing a notebook that was not read first')
+    console.log('ok - NotebookEdit rejects stale notebook edits after external modification')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
     await server.close()
