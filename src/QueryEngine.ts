@@ -112,6 +112,10 @@ type SnipCompactModule = {
     store: Message[],
     options: { force: boolean },
   ): { messages: Message[]; executed: boolean }
+  replaySnipBoundary(
+    store: Message[],
+    boundary: Message,
+  ): { messages: Message[]; executed: boolean } | undefined
 }
 
 type SnipProjectionModule = {
@@ -135,13 +139,11 @@ const getCoordinatorUserContext: (
 
 // Dead code elimination: conditional import for snip compaction
 /* eslint-disable @typescript-eslint/no-require-imports */
-const snipCompactModulePath: string = './services/compact/snipCompact.js'
-const snipProjectionModulePath: string = './services/compact/snipProjection.js'
 const snipModule = feature('HISTORY_SNIP')
-  ? (require(snipCompactModulePath) as SnipCompactModule)
+  ? (require('./services/compact/snipCompact.js') as SnipCompactModule)
   : null
 const snipProjection = feature('HISTORY_SNIP')
-  ? (require(snipProjectionModulePath) as SnipProjectionModule)
+  ? (require('./services/compact/snipProjection.js') as SnipProjectionModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -454,6 +456,22 @@ export class QueryEngine {
 
     // Update params to reflect updates from processing /slash commands
     const messages = [...this.mutableMessages]
+    const pendingTranscriptWrites = new Set<Promise<unknown>>()
+    const trackTranscriptWrite = (promise: Promise<unknown>) => {
+      let tracked: Promise<unknown>
+      tracked = promise.finally(() => {
+        pendingTranscriptWrites.delete(tracked)
+      })
+      pendingTranscriptWrites.add(tracked)
+      return promise
+    }
+    const waitForTranscriptWrites = async () => {
+      if (!persistSession) return
+      while (pendingTranscriptWrites.size > 0) {
+        await Promise.all([...pendingTranscriptWrites])
+      }
+      await flushSessionStorage()
+    }
 
     // Persist the user's message(s) to transcript BEFORE entering the query
     // loop. The for-await below only calls recordTranscript when ask() yields
@@ -470,7 +488,7 @@ export class QueryEngine {
     // — the single largest controllable critical-path cost after module eval.
     // Transcript is still written (for post-hoc debugging); just not blocking.
     if (persistSession && messagesFromUserInput.length > 0) {
-      const transcriptPromise = recordTranscript(messages)
+      const transcriptPromise = trackTranscriptWrite(recordTranscript(messages))
       if (isBareMode()) {
         void transcriptPromise
       } else {
@@ -628,13 +646,8 @@ export class QueryEngine {
       }
 
       if (persistSession) {
-        await recordTranscript(messages)
-        if (
-          isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-          isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-        ) {
-          await flushSessionStorage()
-        }
+        await trackTranscriptWrite(recordTranscript(messages))
+        await waitForTranscriptWrites()
       }
 
       yield {
@@ -731,7 +744,9 @@ export class QueryEngine {
               m => m.uuid === tailUuid,
             )
             if (tailIdx !== -1) {
-              await recordTranscript(this.mutableMessages.slice(0, tailIdx + 1))
+              await trackTranscriptWrite(
+                recordTranscript(this.mutableMessages.slice(0, tailIdx + 1)),
+              )
             }
           }
         }
@@ -747,9 +762,9 @@ export class QueryEngine {
           // useLogMessages.ts fire-and-forgets. enqueueWrite is
           // order-preserving so fire-and-forget here is safe.
           if (message.type === 'assistant') {
-            void recordTranscript(messages)
+            void trackTranscriptWrite(recordTranscript(messages))
           } else {
-            await recordTranscript(messages)
+            await trackTranscriptWrite(recordTranscript(messages))
           }
         }
 
@@ -799,7 +814,7 @@ export class QueryEngine {
           // forking the chain and orphaning the conversation on resume.
           if (persistSession) {
             messages.push(message)
-            void recordTranscript(messages)
+            void trackTranscriptWrite(recordTranscript(messages))
           }
           yield* normalizeMessage(message)
           break
@@ -853,7 +868,7 @@ export class QueryEngine {
           // Record inline (same reason as progress above).
           if (persistSession) {
             messages.push(message)
-            void recordTranscript(messages)
+            void trackTranscriptWrite(recordTranscript(messages))
           }
 
           // Extract structured output from StructuredOutput tool calls
@@ -863,12 +878,7 @@ export class QueryEngine {
           // Handle max turns reached signal from query.ts
           else if (message.attachment.type === 'max_turns_reached') {
             if (persistSession) {
-              if (
-                isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-                isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-              ) {
-                await flushSessionStorage()
-              }
+              await waitForTranscriptWrites()
             }
             yield {
               type: 'result',
@@ -932,6 +942,11 @@ export class QueryEngine {
             if (snipResult.executed) {
               this.mutableMessages.length = 0
               this.mutableMessages.push(...snipResult.messages)
+              messages.length = 0
+              messages.push(...snipResult.messages)
+              if (persistSession) {
+                await trackTranscriptWrite(recordTranscript(messages))
+              }
             }
             break
           }
@@ -993,12 +1008,7 @@ export class QueryEngine {
       // Check if USD budget has been exceeded
       if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
         if (persistSession) {
-          if (
-            isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-            isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-          ) {
-            await flushSessionStorage()
-          }
+          await waitForTranscriptWrites()
         }
         yield {
           type: 'result',
@@ -1036,12 +1046,7 @@ export class QueryEngine {
         )
         if (callsThisQuery >= maxRetries) {
           if (persistSession) {
-            if (
-              isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-              isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-            ) {
-              await flushSessionStorage()
-            }
+            await waitForTranscriptWrites()
           }
           yield {
             type: 'result',
@@ -1093,12 +1098,7 @@ export class QueryEngine {
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
-      if (
-        isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-        isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-      ) {
-        await flushSessionStorage()
-      }
+      await waitForTranscriptWrites()
     }
 
     if (!isResultSuccessful(result, lastStopReason)) {
@@ -1300,7 +1300,7 @@ export async function* ask({
           snipReplay: (yielded: Message, store: Message[]) => {
             if (!snipProjection!.isSnipBoundaryMessage(yielded))
               return undefined
-            return snipModule!.snipCompactIfNeeded(store, { force: true })
+            return snipModule!.replaySnipBoundary(store, yielded)
           },
         }
       : {}),

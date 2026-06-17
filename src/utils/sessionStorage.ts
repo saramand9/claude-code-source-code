@@ -2013,8 +2013,14 @@ function applySnipRemovals(messages: Map<UUID, TranscriptMessage>): void {
   // subsequent survivors sharing the same chain segment don't re-walk.
   const resolve = (start: UUID): UUID | null => {
     const path: UUID[] = []
+    const seen = new Set<UUID>()
     let cur: UUID | null | undefined = start
     while (cur && toDelete.has(cur)) {
+      if (seen.has(cur)) {
+        cur = null
+        break
+      }
+      seen.add(cur)
       path.push(cur)
       cur = deletedParent.get(cur)
       if (cur === undefined) {

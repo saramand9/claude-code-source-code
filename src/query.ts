@@ -197,6 +197,7 @@ import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
+import { detectTextualToolCallLeakInAssistantMessages } from './utils/textualToolCallLeak.js'
 import { handleStopHooks } from './query/stopHooks.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
@@ -1101,6 +1102,33 @@ async function* queryLoop(
       // To help track down bugs, log loudly for ants
       logAntError('Query error', error)
       return { reason: 'model_error', error }
+    }
+
+    if (!needsFollowUp) {
+      const textualToolCallLeak = detectTextualToolCallLeakInAssistantMessages(
+        assistantMessages,
+        toolUseContext.options.tools,
+      )
+      if (textualToolCallLeak) {
+        logEvent('tengu_textual_tool_call_leak_detected', {
+          toolName:
+            textualToolCallLeak.toolName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          callCount: textualToolCallLeak.callCount,
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
+        })
+        const error = new Error(
+          `Model returned textual ${textualToolCallLeak.toolName} call instead of structured tool_use`,
+        )
+        yield createAssistantAPIErrorMessage({
+          content:
+            `The model returned a textual tool call for ${textualToolCallLeak.toolName} instead of a structured tool_use block. ` +
+            `No tool was executed. This usually means the configured model or proxy is not fully compatible with Anthropic tool use.`,
+          error: 'invalid_request',
+          errorDetails: error.message,
+        })
+        return { reason: 'model_error', error }
+      }
     }
 
     // Execute post-sampling hooks after model response is complete

@@ -1305,6 +1305,14 @@ export function REPL({
     onRepin();
     setCursor(null);
   }, [onRepin, setCursor]);
+  const maybeRepinLiveScroll = useCallback(() => {
+    const handle = scrollRef.current;
+    if (!isFullscreenEnvEnabled() || !handle || handle.isSticky()) return;
+    if (Date.now() - lastUserScrollTsRef.current < RECENT_SCROLL_REPIN_WINDOW_MS) {
+      return;
+    }
+    repinScroll();
+  }, [repinScroll]);
   // Backstop for the submit-handler repin at onSubmit. If a buffered stdin
   // event (wheel/drag) races between handler-fire and state-commit, the
   // handler's scrollToBottom can be undone. This effect fires on the render
@@ -1313,11 +1321,17 @@ export function REPL({
   // so useAssistantHistory's prepends don't spuriously repin.
   const lastMsg = messages.at(-1);
   const lastMsgIsHuman = lastMsg != null && isHumanTurn(lastMsg);
+  const lastMsgIsAssistant = lastMsg?.type === 'assistant';
   useEffect(() => {
     if (lastMsgIsHuman) {
       repinScroll();
     }
   }, [lastMsgIsHuman, lastMsg, repinScroll]);
+  useEffect(() => {
+    if (lastMsgIsAssistant) {
+      maybeRepinLiveScroll();
+    }
+  }, [lastMsgIsAssistant, lastMsg, maybeRepinLiveScroll]);
   // Assistant-chat: lazy-load remote history on scroll-up. No-op unless
   // KAIROS build + config.viewerOnly. feature() is build-time constant so
   // the branch is dead-code-eliminated in non-KAIROS builds (same pattern
@@ -1510,11 +1524,15 @@ export function REPL({
     setStreamingText(f);
   }, [showStreamingText]);
 
-  // Hide the in-progress source line so text streams line-by-line, not
-  // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
-  // Guard on showStreamingText so toggling reducedMotion mid-stream
-  // immediately hides the streaming preview.
-  const visibleStreamingText = streamingText && showStreamingText ? streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null : null;
+  // Keep the full streaming tail visible. Older line-only rendering hid text
+  // until a newline or the final assistant message, which made long chunks look
+  // stuck until the next keyboard-triggered repaint.
+  const visibleStreamingText = streamingText && showStreamingText ? streamingText : null;
+  useEffect(() => {
+    if (streamingText && showStreamingText) {
+      maybeRepinLiveScroll();
+    }
+  }, [streamingText, showStreamingText, maybeRepinLiveScroll]);
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
   const [spinnerColor, setSpinnerColor] = useState<keyof Theme | null>(null);

@@ -365,6 +365,15 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
     const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
+    const simpleExtraTools = new Set(
+      (process.env.CLAUDE_CODE_SIMPLE_EXTRA_TOOLS ?? '')
+        .split(',')
+        .map(tool => tool.trim())
+        .filter(Boolean),
+    )
+    if (simpleExtraTools.has(FileWriteTool.name)) {
+      simpleTools.push(FileWriteTool)
+    }
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).

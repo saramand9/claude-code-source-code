@@ -1769,6 +1769,7 @@ async function* queryModel(
   let ttftMs = 0
   let partialMessage: BetaMessage | undefined = undefined
   const contentBlocks: (BetaContentBlock | ConnectorTextBlock)[] = []
+  const emittedContentBlockIndices = new Set<number>()
   let usage: NonNullableUsage = EMPTY_USAGE
   let costUSD = 0
   let stopReason: BetaStopReason | null = null
@@ -1779,6 +1780,31 @@ async function* queryModel(
   let research: unknown = undefined
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
+
+  function buildAssistantMessageFromContentBlock(
+    contentBlock: BetaContentBlock | ConnectorTextBlock,
+  ): AssistantMessage {
+    if (!partialMessage) {
+      throw new Error('Message not found')
+    }
+    return {
+      message: {
+        ...partialMessage,
+        content: normalizeContentFromAPI(
+          [contentBlock] as BetaContentBlock[],
+          tools,
+          options.agentId,
+        ),
+      },
+      requestId: streamRequestId ?? undefined,
+      type: 'assistant',
+      uuid: randomUUID(),
+      timestamp: new Date().toISOString(),
+      ...(process.env.USER_TYPE === 'ant' &&
+        research !== undefined && { research }),
+      ...(advisorModel && { advisorModel }),
+    }
+  }
 
   try {
     queryCheckpoint('query_client_creation_start')
@@ -1868,6 +1894,7 @@ async function* queryModel(
     ttftMs = 0
     partialMessage = undefined
     contentBlocks.length = 0
+    emittedContentBlockIndices.clear()
     usage = EMPTY_USAGE
     stopReason = null
     isAdvisorInProgress = false
@@ -2202,24 +2229,9 @@ async function* queryModel(
               })
               throw new Error('Message not found')
             }
-            const m: AssistantMessage = {
-              message: {
-                ...partialMessage,
-                content: normalizeContentFromAPI(
-                  [contentBlock] as BetaContentBlock[],
-                  tools,
-                  options.agentId,
-                ),
-              },
-              requestId: streamRequestId ?? undefined,
-              type: 'assistant',
-              uuid: randomUUID(),
-              timestamp: new Date().toISOString(),
-              ...(process.env.USER_TYPE === 'ant' &&
-                research !== undefined && { research }),
-              ...(advisorModel && { advisorModel }),
-            }
+            const m = buildAssistantMessageFromContentBlock(contentBlock)
             newMessages.push(m)
+            emittedContentBlockIndices.add(part.index)
             yield m
             break
           }
@@ -2347,6 +2359,33 @@ async function* queryModel(
         // whose exit_path='error' probe guards on streamWatchdogFiredAt.
         streamWatchdogFiredAt = null
         throw new Error('Stream idle timeout - no chunks received')
+      }
+
+      const unclosedContentBlocks = contentBlocks
+        .map((contentBlock, index) => ({ contentBlock, index }))
+        .filter(
+          entry =>
+            entry.contentBlock && !emittedContentBlockIndices.has(entry.index),
+        )
+
+      if (partialMessage && unclosedContentBlocks.length > 0) {
+        logEvent('tengu_stream_unclosed_content_blocks_finalized', {
+          block_count: unclosedContentBlocks.length,
+          model:
+            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          request_id: (streamRequestId ?? 'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        for (const { contentBlock, index } of unclosedContentBlocks) {
+          const m = buildAssistantMessageFromContentBlock(contentBlock)
+          newMessages.push(m)
+          emittedContentBlockIndices.add(index)
+          yield m
+        }
+        const lastMsg = newMessages.at(-1)
+        if (lastMsg && stopReason != null) {
+          lastMsg.message.usage = usage
+          lastMsg.message.stop_reason = stopReason
+        }
       }
 
       // Detect when the stream completed without producing any assistant messages.

@@ -25,7 +25,7 @@
 2. **混合**：处理 Bun 编译期能力
 
    - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
-   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`，但运行时实现为保守外部版，不等同于官方完整 ContextCollapse。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，但都不等同于官方完整实现。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -67,7 +67,7 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE` 与 `HISTORY_SNIP`，其它内部 gate 仍按外部构建关闭。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
 | `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools；server 创建时 fail-fast。 |
@@ -79,9 +79,12 @@
 | `scripts/prepare-src.mjs` 隔离输出 | 尝试修复/真实适配 | 避免准备阶段直接修改 `src/` 和根目录 `stubs/`。 |
 | `openspec/templates/verification-report.html` | 尝试修复/真实适配 | 实现验证与后置清理拆分、字段规范化、筛选和搜索。 |
 | `audio-capture-napi` / `image-processor-napi` / `modifiers-napi` / `url-handler-napi` | 混合 | 构建时 external 保留；新增统一可选 native loader，缺失时走 fallback 或返回明确不可用状态。 |
-| `scripts/test-build-safety.mjs` | 尝试修复/真实适配 | 新增可重复的深度回归测试，覆盖 stub manifest、fail-fast、native fallback、deep link 和 CLI smoke。 |
+| `scripts/test-build-safety.mjs` | 尝试修复/真实适配 | 新增可重复的深度回归测试，覆盖 stub manifest、fail-fast、native fallback、deep link、CLI smoke 和交互流式渲染。 |
 | `src/services/contextCollapse/*` | 混合 | 替换原 `.d.ts` 占位，提供可加载的保守外部运行时；不做真实摘要、投影删除或 ctx-agent 调度。 |
 | `src/tools/CtxInspectTool/CtxInspectTool.ts` | 混合 | 补齐工具加载路径和只读检查输出；默认隐藏，仅显式设置 collapse 环境变量时启用。 |
+| `src/services/compact/snipCompact.ts` / `snipProjection.ts` | 混合 | 提供高可用 History Snip 运行时、分段裁剪、目标 ID 裁剪、投影删除、工具对保护和运行时阈值；不是官方完整语义 snip。 |
+| `src/tools/SnipTool/SnipTool.ts` / `src/commands/force-snip.ts` | 混合 | Snip 工具与内部 force-snip 命令可加载、可执行；支持自动分段裁剪、目标 ID 和目标 token 参数。 |
+| `src/components/messages/SnipBoundaryMessage.tsx` | 尝试修复/真实适配 | UI 可渲染 snip 边界摘要，避免历史裁剪事件不可见。 |
 
 ## 尝试修复/真实适配
 
@@ -93,25 +96,27 @@
 - `--version`、`--help`、`auth status`、`-p` 非交互调用。
 - 已存在的纯 TypeScript native 替代实现会被构建使用，例如 `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout`。
 - 验证报告模板的数据校验、过滤、搜索和后置清理逻辑。
+- History Snip 的高可用分段裁剪、目标 ID 裁剪、投影删除、工具对保护、SnipTool 和内部 force-snip 命令加载路径。
 
 ## mock/stub/降级
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - `@ant/claude-for-chrome-mcp` 在构建副本中生成为空 browser tools；server 创建时会 fail-fast。
 - 一批 feature-gated 内部模块会在 `build-src/` 中生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`，例如：
-  - `assistant/AssistantSessionChooser`
   - `commands/agents-platform`
-  - `entrypoints/sdk/*Types`
   - `ink/devtools`
-  - `tools/WorkflowTool`
+  - `components/AntModelSwitchCallout`
+  - `components/UndercoverAutoCallout`
   - `tools/VerifyPlanExecutionTool`
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
-  - `services/compact/*`
+  - `utils/protectedNamespace`
+  - bundled verify skill 相关空文本资源
+- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
   - 不把历史消息投影成 `<collapsed id="...">` 占位。
@@ -141,9 +146,10 @@ import { feature } from 'bun:bundle'
 ```text
 feature('...') -> false
 feature('CONTEXT_COLLAPSE') -> true
+feature('HISTORY_SNIP') -> true
 ```
 
-这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE` 只是被保留进 bundle，运行时仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制；其它 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制。其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
@@ -151,13 +157,12 @@ feature('CONTEXT_COLLAPSE') -> true
 
 1. feature gate 替换仍是最大风险
 
-   除当前选择性保留的 `CONTEXT_COLLAPSE` 外，这仍会关闭大量内部或实验功能，例如：
+   除当前选择性保留的 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 外，这仍会关闭大量内部或实验功能，例如：
 
    ```text
    KAIROS
    BG_SESSIONS
    CACHED_MICROCOMPACT
-   HISTORY_SNIP
    VOICE_MODE
    BASH_CLASSIFIER
    TRANSCRIPT_CLASSIFIER
@@ -169,8 +174,9 @@ feature('CONTEXT_COLLAPSE') -> true
    可能影响：
 
    - 后台任务、KAIROS、主动模式、部分远程/桥接能力不可用。
-   - 历史裁剪、cached microcompact 等高级长上下文能力仍缺失。
+   - cached microcompact 等高级长上下文能力仍缺失。
    - `CONTEXT_COLLAPSE` 虽已可加载，但不是官方完整实现。
+   - `HISTORY_SNIP` 虽已可加载并有高可用裁剪实现，但不是官方完整语义裁剪系统。
    - Bash/权限 classifier 自动判断能力关闭，权限体验可能和官方版不同。
    - 有些命令、工具或 UI 分支会直接消失，而不是被真实实现。
 
@@ -227,9 +233,9 @@ feature('CONTEXT_COLLAPSE') -> true
 ### 本轮 mock/stub/降级说明
 
 - 新增的若干 `.d.ts` 只解决 TypeScript 编译期缺失声明，不代表对应内部模块已经完整实现。
-- 当时 `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭；后续已对 `CONTEXT_COLLAPSE` 做选择性保留，见下一节。
+- 当时 `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭；后续已对 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 做选择性保留，见后续记录。
 - 当前构建仍会生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`；这些 stub 是明确失败边界，不是功能恢复。
-- `build-src/stub-manifest.json` 当前显示：15 个 missing modules、0 个 missing exports、14 个生成 stub。
+- `build-src/stub-manifest.json` 当前显示：14 个 missing modules、0 个 missing exports、13 个生成 stub；manifest 里还包含私有包 stub 和空文本资源 stub 记录。
 
 ### 本轮验证结果
 
@@ -255,7 +261,7 @@ npm run test:build-safety
 ### 本轮技术方案
 
 - 不伪造官方完整 ContextCollapse。
-- 构建层选择性保留 `CONTEXT_COLLAPSE`，其它 feature gate 仍默认关闭。
+- 构建层选择性保留 `CONTEXT_COLLAPSE`，其它非白名单 feature gate 仍默认关闭。
 - 运行时补齐 `src/services/contextCollapse/index.ts`、`operations.ts`、`persist.ts`，替换原来的 `.d.ts` 占位。
 - 工具层补齐 `CtxInspectTool`，避免 `tools.ts` 在 `CONTEXT_COLLAPSE` 被保留后加载缺失工具。
 - `query.ts` 的 prompt-too-long 恢复分支改为 runtime 真启用时才接管，避免默认路径重复吐出 413 错误或压制 AutoCompact。
@@ -294,6 +300,125 @@ node --check dist\cli.js
 - `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`，产物大小约 27.1MB。
 - `npm run test:build-safety` 通过，当前为 17/17 项。
 - 默认启动和显式 `CLAUDE_CONTEXT_COLLAPSE=1` 启动均通过版本烟测。
+
+## 2026-06-16/17 History Snip 高可用外部版优化记录
+
+本轮继续修复长上下文相关缺口，重点是 `HISTORY_SNIP` 之前被构建期关闭，导致 `query.ts`、`QueryEngine.ts`、`tools.ts`、`commands.ts`、消息投影和 UI 边界渲染相关路径无法真实加载。
+
+### 本轮技术方案
+
+- 构建层将 `HISTORY_SNIP` 加入默认保留白名单，避免 SnipTool、force-snip 和运行时 compact 模块继续被折叠掉。
+- 新增 `snipCompact`，使用高可用分段裁剪策略：按 user turn 建立安全段，按目标 token 收敛，保护最近消息，避免 assistant 开头续接、tool_result-only 续接和 tool_use/tool_result 半删。
+- 新增 `snipProjection`，通过 snip boundary 里的 `removedUuids` 在后续模型视图中投影删除旧消息，同时保留边界消息用于审计。
+- 新增 `SnipTool`、内部 `force-snip` 命令和 `SnipBoundaryMessage` UI 组件，补齐工具、命令、渲染三条加载路径，并支持 `targetIds` / `--id` / `--target-tokens`。
+- 新增 `replaySnipBoundary()`，SDK/headless 收到 snip boundary 后按 boundary 元数据确定性重放，不再重新计算一套可能不同的裁剪范围。
+- Snip 运行时默认可用，但可通过 `DISABLE_COMPACT`、`DISABLE_SNIP` 或 `CLAUDE_CODE_DISABLE_SNIP` 关闭。
+
+### 本轮尝试修复/真实适配
+
+- `snipCompactIfNeeded()` 可在自动阈值、强制模式或目标 ID 模式下返回裁剪后的消息、释放 token 估算、删除消息数、策略名和 snip boundary。
+- 自动模式会选择最早的可删安全段，直到接近 `CLAUDE_CODE_SNIP_TARGET_TOKENS` 或默认目标 token。
+- 目标 ID 模式支持 UUID 或 `shortMessageIdForSnip()` 生成的短 ID，删除目标所在的完整安全 turn，不会误删其它 turn。
+- `projectSnippedView()` 会按所有 snip boundary 的 `removedUuids` 清理历史消息，避免后续模型请求继续携带已裁剪内容。
+- `replaySnipBoundary()` 会复用原 boundary 的 `removedUuids`，保证 SDK mutable store、transcript 和后续 API 视图一致。
+- `shouldNudgeForSnips()` 和 SnipTool 使用轻量本地 token 估算，避免引入重配置解析链导致独立运行测试失败。
+- SnipTool 为只读、并发安全工具；调用成功时只追加 system boundary，不直接改写 UI scrollback。
+- force-snip 命令可以手动追加 snip boundary，并支持 `--id` / `--ids` / `--target-tokens` 参数，用于诊断和内部验证。
+
+### 本轮 mock/stub/降级说明
+
+- 当前实现不是官方完整 History Snip。
+- 不做语义相关性评分，不做模型辅助摘要。
+- 目标 ID 裁剪是按完整安全 turn 删除，不做任意单消息精确点删；这是为了避免破坏 assistant/tool_result 结构。
+- token 释放量是本地估算，不是官方 tokenizer 精确计数。
+- 裁剪策略会选择安全 turn 分段；找不到安全边界、目标落在受保护尾部或会切开工具对时会拒绝执行。
+- UI 只展示 snip 边界摘要，不恢复官方可能存在的完整交互细节。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+node --check dist\cli.js
+node dist\cli.js --version
+node dist\cli.js --help
+$env:CLAUDE_CODE_SNIP_TRIGGER_TOKENS='1'; node dist\cli.js --version
+$env:CLAUDE_CODE_SNIP_TRIGGER_TOKENS='1'; $env:CLAUDE_CODE_SNIP_TARGET_TOKENS='1'; node dist\cli.js --version
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`；当前构建为 14 个 missing modules、0 个 missing exports、13 个生成 stub。
+- `npm run test:build-safety` 通过，当时为 20/20 项；resume/transcript 读写侧、恢复入口、session-id/continue、compact+Snip 叠加和 Snip 产物 require 专项补测后为 26/26 项。
+- 新增 Snip 专项覆盖：构建保留、投影删除、保留 snip boundary、保护 tool_use/tool_result 对、目标 ID 裁剪、boundary replay 确定性、SnipTool targetIds 加载执行、force-snip `--id` 命令加载执行。
+- 产物语法检查、默认启动、帮助输出和显式 Snip 阈值环境变量启动均通过。
+
+## 2026-06-17 Resume/Transcript 一致性优化记录
+
+本轮不新增用户可见功能，重点收敛长任务恢复风险：Snip 后 JSONL transcript 是 append-only，旧消息仍在磁盘上；如果 resume 读侧没有按 snip boundary 重放删除和重连 parentUuid，恢复会把已裁剪历史重新带回模型视图，或在删除区间后断链。
+
+### 本轮尝试修复/真实适配
+
+- `applySnipRemovals()` 的 removed-parent 解析增加 cycle guard，避免损坏 transcript 中 removed parent 链成环时卡死恢复流程。
+- `scripts/test-build-safety.mjs` 新增真实 JSONL transcript 回放测试，覆盖多段 Snip 删除、boundary parent 重连、leaf 选择和 `buildConversationChain()` 恢复链。
+- 新增 `loadConversationForResume(..., jsonlPath)` 与 `loadTranscriptFromFile()` 入口级测试，模拟 `--resume path.jsonl` 和 transcript 导入路径，确认恢复入口不会把 Snip 删除段重新带回消息链。
+- 新增真实项目 session 目录测试，覆盖 `loadConversationForResume(sessionId, undefined)` 和 `loadConversationForResume(undefined, undefined)`，对应 `--resume <session-id>` 与 `--continue` 的恢复选择分支。
+- 新增 compact+Snip 叠加恢复测试，覆盖 preserved compact boundary 先剪掉旧前缀、Snip 再删除 compact 后中间 turn 的组合场景，确认两类删除在恢复链中同时生效。
+- 修复 `Message.tsx` 与 `QueryEngine.ts` 中 Snip 模块的变量路径 `require(...)`，改为字面量路径，避免 esbuild 无法静态打包导致运行期 `Cannot find module '../services/compact/snipProjection.js'`。
+- 新增 `recordTranscript()` 写侧专项测试，覆盖 Snip 后重复持久化不会重复写入 UUID，snip boundary 会接到最后一个保留前缀消息，后续 tail 消息会接到 boundary。
+- build-safety snippet bundler 新增 `jsonc-parser` 与 `semver` 的轻量测试 alias，避免导入完整 `sessionStorage` 时被 UI/keybinding 依赖污染测试环境。
+- 新增 `scripts/test-cli-resume-e2e.mjs` 与 `npm run test:cli-e2e`，用本地 Anthropic-compatible SSE mock server 启动真实 `dist/cli.js` 子进程，覆盖 `-p`、`--resume <session-id>` 和 `--continue` 三段会话恢复。
+- 修复 `QueryEngine` headless/print 路径的 transcript flush 可靠性：assistant/user 等 fire-and-forget 写入现在会被跟踪，最终 result 返回前统一等待并 flush，避免普通 `-p` 或 `--bare` 子进程快速退出时只落下 queue-operation/last-prompt，导致下一次 `--resume` 找不到有效会话。
+- 新增 `src/utils/textualToolCallLeak.ts`，检测第三方模型/代理把工具调用以 `Calling: Read` + JSON 文本吐出来、而不是返回结构化 `tool_use` block 的兼容问题。
+- `query.ts` 在没有真实结构化 `tool_use` 时，如果检测到文本化工具调用泄漏，会返回明确的 provider/tool-use 兼容错误，并且不会把文本参数自动当工具执行。
+- 扩展真实 CLI E2E，覆盖结构化 `tool_use(Read)` 的多段 `input_json_delta`，并模拟第三方代理把 `message_delta.stop_reason` 错报为 `end_turn` 的情况；CLI 仍应以真实 `tool_use` block 为准执行工具和 follow-up。
+- 修复流式事件缺失 `content_block_stop` 时的恢复路径：如果 SSE 已收到结构化 content block 内容并正常到达流结束，但代理漏发 stop 事件，`claude.ts` 会在流结束时最终化未关闭 block，避免 assistant/tool_use 被静默丢弃。
+- `scripts/test-cli-resume-e2e.mjs` 增加 CLI 子进程 per-run 超时诊断，超时时会打印 args、stdout/stderr 和 mock server 已收到的请求摘要，避免 E2E 静默挂住。
+- 扩展真实 CLI E2E，覆盖 streaming 事件乱序：mock 故意先发送 `content_block_delta`、后缺失对应 `content_block_start`，运行时应触发 non-streaming fallback，真实 CLI 最终仍返回正常结果。
+- 新增 crash/resume 读侧回归：覆盖 transcript 尾部只有 user、以及尾部 assistant `tool_use` 没有对应 `tool_result` 的两种中断状态，恢复时应识别为 `interrupted_prompt`，并且不会把孤立 `tool_use` 带回 API 消息。
+- 扩展真实 CLI E2E，覆盖同一 assistant response 内多个结构化 `tool_use(Read)` block：两个 Read 的 `input_json_delta` 交错到达、stop 顺序反向，follow-up 请求必须包含两个独立且不同 `tool_use_id` 的 `tool_result` block。
+- 扩展真实 CLI E2E，覆盖 simple CLI 主路径的混合工具类型：同一 assistant response 内普通文本 + `Read` + `Bash` 三类 block 交错返回，follow-up 请求必须保留 assistant 文本，并包含两个不同工具结果。
+- 扩展真实 CLI E2E，覆盖同一 assistant response 内三个结构化工具 block：普通文本 + `Read` + `Bash` + `Read` 交错返回，follow-up 请求必须保留 assistant 文本，并包含三个不同 `tool_use_id` 的 `tool_result` block。
+- 扩展真实 CLI E2E，覆盖显式授权下的副作用型 Bash：模型请求 `Bash` 写入 `build-src/test-artifacts` 下的 fixture 文件，CLI 发送 Bash `tool_result` 后，测试确认磁盘文件实际生成。
+- 扩展真实 CLI E2E，覆盖 simple CLI 主路径的写入类工具链：模型先请求 `Read`，再基于 Read 结果请求 `Edit`，CLI 在 `acceptEdits` 权限模式下实际改写临时 fixture 文件，并把 Edit `tool_result` 发送回模型。
+- 修复 bare/simple 工具池的显式 `Write` opt-in：默认 simple 仍只暴露 Bash/Read/Edit；当用户显式传 `--tools Write` 时，`main.tsx` 会记录 `CLAUDE_CODE_SIMPLE_EXTRA_TOOLS=Write`，`tools.ts` 将 `Write` 加回 simple 工具池。
+- 扩展真实 CLI E2E，覆盖 bare/simple 下显式 `--tools Write --allowedTools Write` 的创建文件路径：mock 返回 `Write` tool_use，真实 `dist/cli.js` 执行后会发送 Write `tool_result`，并在 `build-src/test-artifacts` 下创建包含 marker 的 fixture 文件。
+- 修复交互 UI 流式显示刷新问题：`visibleStreamingText` 不再只显示最后一个换行前的完整行，避免长 chunk 或无尾随换行内容在 streaming 阶段被隐藏；同时增加 live-scroll backstop，assistant 消息落地或 streaming 文本更新时，如果用户最近没有主动滚动，会恢复到底部 live 区域。
+- 扩展 build-safety 到真实 `Messages`/Ink 渲染层：用临时配置目录、`AppStateProvider` 和模拟 TTY 渲染无尾随换行的 `streamingText`，确认未完成行在组件输出中实际可见，而不只依赖源码字符串断言。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+node --check dist\cli.js
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `build-src/` 和 `dist/cli.js`。
+- `npm run test:build-safety` 通过，当前为 31/31 项。
+- 新增 resume/transcript 专项确认：被 `snipMetadata.removedUuids` 标记的消息不会在 resume 后回到 `messages` Map；删除区间后的 survivor 与 snip boundary 会被重连到最近未删除祖先；最终 conversation chain 与预期一致；`loadConversationForResume(..., jsonlPath)`、`loadTranscriptFromFile()`、`loadConversationForResume(sessionId, undefined)` 和 `loadConversationForResume(undefined, undefined)` 入口层不会带回已删除历史；compact preservedSegment 与 Snip 删除叠加时恢复链符合预期；写侧重复调用 `recordTranscript()` 不会重复写 UUID，boundary/tail 接链符合预期。
+- 新增产物级确认：`dist/cli.js` 不再包含 Snip 相关变量路径 `__require(snip...ModulePath)`，避免 UI 渲染 snip boundary 时按磁盘相对路径找未发布的 `.js` 文件。
+- 新增真实 CLI 子进程 E2E 确认：第一段 `-p` 会生成可恢复 transcript；第二段 `--resume <session-id>` 的模型请求体包含第一段 user/assistant 历史和第二段 prompt；第三段 `--continue` 的模型请求体包含前两段历史和第三段 prompt；最终 JSONL transcript 同时包含三段 prompt 与三段 assistant response，且 user/assistant 消息 UUID 不重复。
+- 新增第三方代理 tool-use 兼容性确认：本地 mock 返回纯文本 `Calling: Read` + JSON 时，真实 `dist/cli.js` 会输出 `is_error: true` 的 JSON 结果，说明模型/代理没有返回结构化 `tool_use`；不会自动执行这个文本化工具调用。
+- 新增结构化工具调用正向 E2E：本地 mock 返回标准 `tool_use(Read)` stream，真实 `dist/cli.js` 会执行 Read 工具，并在后续模型请求中发送包含文件内容的 `tool_result`。
+- 新增结构化工具调用异常流式 E2E：本地 mock 将 Read 参数拆成多段 `input_json_delta`，并把 stop reason 错报为 `end_turn`；真实 `dist/cli.js` 仍会执行 Read 并发送 `tool_result`。
+- 新增缺失 stop 事件 E2E：本地 mock 返回结构化 Read 的 `content_block_start` 与 `input_json_delta`，但省略 `content_block_stop`；真实 `dist/cli.js` 会在流结束时最终化该 tool_use，执行 Read 并发送 `tool_result`。
+- 新增 streaming 乱序 fallback E2E：本地 mock 返回 `content_block_delta` 早于 `content_block_start` 的非法 SSE，真实 `dist/cli.js` 会触发 non-streaming fallback，并通过第二次非流式 `/messages` 请求拿到最终回答。
+- 新增中断恢复专项：尾部只有 user 的 transcript 会恢复为 `interrupted_prompt` 并插入一个 synthetic assistant sentinel；尾部孤立 assistant `tool_use` 会被过滤，恢复仍指向原始 user prompt，不会把未配对 tool_use 发送回模型。
+- 新增多工具交错 E2E：本地 mock 在同一 assistant message 内返回两个 Read `tool_use` block，参数 delta 交错、block stop 顺序反向；真实 `dist/cli.js` 会执行两个 Read，并在 follow-up request 中发送两个独立 `tool_result` block。
+- 新增混合工具类型 E2E：在 `CLAUDE_CODE_SIMPLE=1` / `--bare --print` 真实可用工具池内，本地 mock 返回 assistant 文本 + Read + Bash；真实 `dist/cli.js` 会保留 assistant 文本，执行两个工具，并在 follow-up request 中发送两个不同 `tool_use_id` 的结果。这里没有使用 Glob/TodoWrite，因为 simple 主路径默认只暴露 Bash、Read、Edit；`Write` 只有在显式 `--tools Write` 时加入。
+- 新增三工具交错 E2E：本地 mock 在同一 assistant message 内返回 assistant 文本 + Read + Bash + Read，三个工具的 `input_json_delta` 交错到达、stop 顺序打乱；真实 `dist/cli.js` 会执行三个工具，并在 follow-up request 中发送三个互不重复的 `tool_result`。
+- 新增副作用型 Bash E2E：本地 mock 返回写文件 Bash 命令，测试使用 `--allowedTools=Bash` 显式授权；真实 `dist/cli.js` 会执行 Bash、发送 Bash `tool_result`，并在 `build-src/test-artifacts` 下生成包含 marker 的 fixture 文件。
+- 新增写入工具链 E2E：在 `acceptEdits` 权限模式下，本地 mock 先返回 Read，再返回 Edit；真实 `dist/cli.js` 会在第三次模型请求前发送 Edit `tool_result`，并且 `build-src/test-artifacts` 下的 fixture 文件会从 before 标记实际改成 after 标记。
+- 新增 Write 创建文件 E2E：bare/simple 模式下显式 `--tools Write --allowedTools Write` 会把 `Write` 加回工具池；本地 mock 返回 Write `tool_use` 后，真实 `dist/cli.js` 会创建 fixture 文件并在 follow-up request 中发送 Write `tool_result`。
+- 新增交互 UI 回归：build-safety 检查构建副本中的 `visibleStreamingText` 保留完整 streaming tail，不再通过 `lastIndexOf('\n')` 截断未完成行；同时确认保留 `maybeRepinLiveScroll`，覆盖 streaming 文本更新和 assistant 消息落地时的 live-scroll 兜底。另新增真实 `Messages`/Ink 组件渲染测试，确认无尾随换行的 streaming tail 会进入终端输出。
 
 ## 构建和启动
 
@@ -334,12 +459,31 @@ node dist\cli.js --help
 node dist\cli.js doctor --help
 node dist\cli.js -p "<prompt>" --max-turns 1 --model <model>
 npm run test:build-safety
+npm run test:cli-e2e
 $env:CLAUDE_CONTEXT_COLLAPSE='1'; node dist\cli.js --version
+$env:CLAUDE_CODE_SNIP_TRIGGER_TOKENS='1'; node dist\cli.js --version
+$env:CLAUDE_CODE_SNIP_TRIGGER_TOKENS='1'; $env:CLAUDE_CODE_SNIP_TARGET_TOKENS='1'; node dist\cli.js --version
 node --check dist\cli.js
 build-src/stub-manifest.json 生成
 fail-fast stub 默认导出和命名导出行为
 fail-fast stub 调用、构造、取属性和数值转换行为
 ContextCollapse 默认关闭、显式 opt-in、恢复状态和 CtxInspectTool 加载
+History Snip 构建保留、分段裁剪、目标 ID 裁剪、boundary replay、投影删除、工具对保护、SnipTool 和 force-snip 加载
+Snip 后 transcript resume 过滤、parentUuid 重连、conversation chain 恢复、resume 入口恢复、session-id/continue 恢复、compact+Snip 叠加恢复，以及 recordTranscript 写侧去重接链
+真实 dist/cli.js 子进程 E2E：-p、--resume <session-id>、--continue 三段模型请求和 transcript 落盘恢复
+第三方代理文本化工具调用泄漏检测：`Calling: Read` + JSON 被识别为 tool_use 协议兼容错误，不自动执行工具
+结构化 `tool_use(Read)` 正向 E2E：真实 CLI 执行 Read 工具并把 `tool_result` 发回模型
+结构化 `tool_use(Read)` 分片 E2E：多段 `input_json_delta` 且 stop_reason 非 `tool_use` 时仍执行工具并 follow-up
+结构化 `tool_use(Read)` 缺失 stop 事件 E2E：漏发 `content_block_stop` 时仍最终化 tool_use、执行工具并 follow-up
+Streaming 乱序 fallback E2E：`content_block_delta` 早于 `content_block_start` 时触发 non-streaming fallback 并正常返回
+中断恢复读侧测试：尾部只有 user、尾部孤立 `tool_use` 都恢复为可自动续跑的 interrupted prompt
+多工具交错 E2E：同一 assistant response 的两个 Read `tool_use` 均执行，follow-up 中有两个不同 `tool_use_id` 的 `tool_result`
+混合工具类型 E2E：simple 主路径下 assistant 文本 + Read + Bash 均被保留或执行，follow-up 中包含两个不同工具结果
+三工具交错 E2E：simple 主路径下 assistant 文本 + Read + Bash + Read 均被保留或执行，follow-up 中包含三个不同工具结果
+副作用型 Bash E2E：显式 `--allowedTools=Bash` 授权下，Bash 写文件命令会执行并生成 artifact fixture
+写入工具链 E2E：simple 主路径下 `Read -> Edit -> final` 三轮执行通过，Edit 在 `acceptEdits` 下实际更新 fixture 文件
+Write 创建文件 E2E：bare/simple 模式显式 `--tools Write --allowedTools Write` 时，Write 会加入工具池、执行并创建 fixture 文件
+交互 UI 流式显示回归：构建副本中 streaming 文本不再按最后一个换行截断，assistant/streaming 更新保留 live-scroll 兜底，并通过真实 `Messages`/Ink 渲染确认未完成行可见
 modifiers-napi 缺失 fallback
 image-processor-napi 缺失时 sharp fallback
 audio-capture-napi 缺失时语音依赖检查 fallback
@@ -352,7 +496,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 17 项深度检查：
+`npm run test:build-safety` 当前覆盖 31 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -360,6 +504,22 @@ url-handler-napi 缺失由 nativeOptional 包装
 - `CONTEXT_COLLAPSE` 在构建副本中被保留，但 prompt-too-long 兜底仍受 runtime gate 控制。
 - ContextCollapse 外部运行时默认关闭、projection no-op、恢复元数据、显式 opt-in 和 prompt-too-long withholding 行为。
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
+- `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
+- History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
+- Snip 后 resume/transcript 的 JSONL 回放、removedUuids 过滤、parentUuid 重连、leaf 选择、conversation chain 恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复，以及 `recordTranscript()` 写侧去重和 boundary/tail 接链。
+- Prompt/tool 中断恢复：尾部只有 user 时会识别为 `interrupted_prompt`，尾部孤立 assistant `tool_use` 会被过滤并恢复到原始 user prompt，避免 resume 后向 API 发送未配对工具调用。
+- Snip UI/SDK 相关构建产物不再保留变量路径 require，避免 `snipProjection.js` / `snipCompact.js` / `SnipBoundaryMessage.js` 在单文件 bundle 运行期缺失。
+- 真实 `dist/cli.js` 子进程 `-p` / `--resume <session-id>` / `--continue` E2E 由 `npm run test:cli-e2e` 单独覆盖；该测试使用本地 Anthropic-compatible mock server，不依赖外部 API key。
+- 文本化工具调用泄漏检测会保守识别已知工具名和合法 JSON 参数块，例如 `Calling: Read` 后接 `{"file_path":"..."}`；未知工具、非 JSON、普通讨论文本不会触发。
+- 同一 CLI E2E 还覆盖标准结构化 `tool_use(Read)` 正向路径：mock 返回 `content_block_start(tool_use)` + `input_json_delta`，CLI 执行 Read 后的 follow-up request 必须包含真实文件内容。
+- 同一 CLI E2E 还覆盖分片结构化 `tool_use(Read)` 路径：mock 将 `input_json_delta` 拆成多段，并将 `message_delta.stop_reason` 错报为 `end_turn`；CLI 仍以 block 内容判断需要 follow-up，而不依赖 stop reason。
+- 同一 CLI E2E 还覆盖缺失 `content_block_stop` 的结构化 `tool_use(Read)` 路径：mock 省略 stop 事件但正常结束 stream，运行时会最终化未关闭 block，CLI 仍执行 Read 并发送 `tool_result`。
+- 同一 CLI E2E 还覆盖 streaming 事件乱序 fallback：mock 将 `content_block_delta` 放在 `content_block_start` 之前，运行时会把该 streaming attempt 视为损坏并切到 non-streaming fallback；最终结果来自第二次非流式请求。
+- 同一 CLI E2E 还覆盖多工具交错路径：mock 在一个 assistant response 内发两个 `tool_use(Read)` block，两个 block 的 `input_json_delta` 交错到达，`content_block_stop` 反向到达；follow-up request 必须包含两个 `tool_result` block，且 `tool_use_id` 互不重复。
+- 同一 CLI E2E 还覆盖三工具交错路径：mock 在一个 assistant response 内发 assistant 文本 + `Read` + `Bash` + `Read`，三个工具的 `input_json_delta` 交错到达、`content_block_stop` 打乱到达；follow-up request 必须保留文本并包含三个互不重复的 `tool_result` block。
+- 同一 CLI E2E 还覆盖副作用型 Bash：mock 返回写文件 Bash 命令，CLI 通过 `--allowedTools=Bash` 显式授权后执行命令；测试同时验证 follow-up request 中存在 Bash `tool_result`，以及 artifact 文件确实写入。
+- 同一 CLI E2E 还覆盖 bare/simple 下显式 `Write` opt-in：默认 simple 工具池不变，但 `--tools Write --allowedTools Write` 会让 Write 工具可用；mock 返回 Write `tool_use` 后，CLI 会创建 fixture 文件并发送 Write `tool_result`。
+- 交互 UI 流式显示回归：`visibleStreamingText` 不再按最后一个换行截断，避免无尾随换行内容必须等最终 message 或键盘 repaint 才出现；`maybeRepinLiveScroll` 会在 streaming 文本更新和 assistant 消息落地时保持 live 区域可见，除非用户最近主动滚动离开；真实 `Messages`/Ink 渲染测试会把无尾随换行的 `streamingText` 渲染到模拟 TTY，并确认输出中包含完整 tail。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
 - `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
 - `nativeOptional` 对缺失 native 包的统一错误包装。
@@ -371,8 +531,14 @@ url-handler-napi 缺失由 nativeOptional 包装
 
 ## 当前风险边界
 
-当前产物适合验证 CLI 主路径、模型调用、基础项目读取和非交互任务。
+当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
 不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、VerifyPlanExecution、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。
 
-ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代 Snip、真实 ctx-agent、摘要提交或官方投影恢复逻辑。
+ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
+
+History Snip 的当前风险也要单独看待：它已不再是完全关闭、stub 或简单保守前缀裁剪，而是高可用外部版。它可以按安全 turn 分段删除、按目标 token 收敛、按目标 ID 删除完整安全 turn，并在后续模型视图中投影清理旧消息；但它仍不做官方语义评分、模型摘要、任意单消息精确点删或复杂跨轮调度。
+
+Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链，以及 bare/simple 显式 `Write` 创建文件路径。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、Write 覆盖已有文件/读后写路径、NotebookEdit 等其他写入类工具、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
+
+交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归和真实 `Messages`/Ink 组件渲染回归；`test:cli-e2e` 仍覆盖的是 `--bare --print --output-format json` 非交互路径，完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。

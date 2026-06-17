@@ -1149,6 +1149,12 @@ async function run(): Promise<CommanderCommand> {
       includeHookEvents,
       includePartialMessages
     } = options;
+    if (baseTools.length > 0 && isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+      const simpleExtraTools = parseToolListFromCLI(baseTools).filter(tool => tool === 'Write');
+      if (simpleExtraTools.length > 0) {
+        process.env.CLAUDE_CODE_SIMPLE_EXTRA_TOOLS = simpleExtraTools.join(',');
+      }
+    }
     if (options.prefill) {
       seedEarlyInput(options.prefill);
     }

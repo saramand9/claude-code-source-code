@@ -40,9 +40,6 @@ type SnipBoundaryMessageModule = {
     message: SystemMessage;
   }>;
 };
-const snipProjectionModulePath: string = '../services/compact/snipProjection.js';
-const snipCompactModulePath: string = '../services/compact/snipCompact.js';
-const snipBoundaryMessageModulePath: string = './messages/SnipBoundaryMessage.js';
 export type Props = {
   message: NormalizedUserMessage | AssistantMessage | AttachmentMessageType | SystemMessage | GroupedToolUseMessageType | CollapsedReadSearchGroupType;
   lookups: ReturnType<typeof buildMessageLookups>;
@@ -263,14 +260,14 @@ function MessageImpl(t0) {
         if (feature("HISTORY_SNIP")) {
           const {
             isSnipBoundaryMessage
-          } = require(snipProjectionModulePath) as SnipProjectionModule;
+          } = require('../services/compact/snipProjection.js') as SnipProjectionModule;
           const {
             isSnipMarkerMessage
-          } = require(snipCompactModulePath) as SnipCompactModule;
+          } = require('../services/compact/snipCompact.js') as SnipCompactModule;
           if (isSnipBoundaryMessage(message)) {
             let t2;
             if ($[65] === Symbol.for("react.memo_cache_sentinel")) {
-              t2 = require(snipBoundaryMessageModulePath);
+              t2 = require('./messages/SnipBoundaryMessage.js');
               $[65] = t2;
             } else {
               t2 = $[65];

@@ -31,7 +31,7 @@ const BUILD = join(ROOT, 'build-src')
 const ENTRY = join(BUILD, 'entry.ts')
 const STUB_MANIFEST = join(BUILD, 'stub-manifest.json')
 const stubManifest = []
-const DEFAULT_PRESERVED_FEATURES = ['CONTEXT_COLLAPSE']
+const DEFAULT_PRESERVED_FEATURES = ['CONTEXT_COLLAPSE', 'HISTORY_SNIP']
 const preservedFeatures = new Set([
   ...DEFAULT_PRESERVED_FEATURES,
   ...(process.env.CLAUDE_CODE_PRESERVE_FEATURES ?? '')

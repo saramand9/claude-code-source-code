@@ -66,6 +66,26 @@ async function buildAndRunSnippet(name, contents, options = {}) {
   const { alias: optionAlias, ...buildOptions } = options
   await mkdir(TEST_DIR, { recursive: true })
   const outfile = join(TEST_DIR, `${name}.mjs`)
+  const jsoncStub = join(TEST_DIR, 'jsonc-parser-main-stub.mjs')
+  const semverStub = join(TEST_DIR, 'semver-stub.mjs')
+  await writeFile(
+    jsoncStub,
+    `export function parse(json) { return JSON.parse(json); }
+export function modify() { return []; }
+export function applyEdits(content) { return content; }
+`,
+  )
+  await writeFile(
+    semverStub,
+    `export function satisfies() { return true; }
+export function coerce(value) {
+  const version = String(value ?? '0.0.0').match(/\\d+(?:\\.\\d+)?(?:\\.\\d+)?/)?.[0] ?? '0.0.0';
+  return { version, raw: version, major: 0, minor: 0, patch: 0 };
+}
+export function valid(value) { return String(value ?? '0.0.0'); }
+export default { coerce, satisfies, valid };
+`,
+  )
   await esbuild.build({
     stdin: {
       contents,
@@ -82,6 +102,8 @@ async function buildAndRunSnippet(name, contents, options = {}) {
       src: join(BUILD, 'src'),
       '@ant/claude-for-chrome-mcp': join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
       'color-diff-napi': join(BUILD, 'src', 'native-ts', 'color-diff', 'index.ts'),
+      'jsonc-parser/lib/esm/main.js': jsoncStub,
+      semver: semverStub,
       'vscode-jsonrpc/node.js': 'vscode-jsonrpc/node',
       ...(optionAlias ?? {}),
     },
@@ -187,6 +209,7 @@ console.log('tool loader fallback OK');`,
 await test('context collapse build gate is preserved but runtime-gated', async () => {
   const querySource = await readFile(join(BUILD, 'src/query.ts'), 'utf8')
   const toolsSource = await readFile(join(BUILD, 'src/tools.ts'), 'utf8')
+  const commandsSource = await readFile(join(BUILD, 'src/commands.ts'), 'utf8')
   assert.match(
     querySource,
     /const contextCollapse = true\s+\?\s+\(require\('\.\/services\/contextCollapse\/index\.js'\)/,
@@ -196,6 +219,21 @@ await test('context collapse build gate is preserved but runtime-gated', async (
     toolsSource,
     /const CtxInspectTool = true\s+\?\s+loadToolExport/,
     'CtxInspectTool should stay bundled',
+  )
+  assert.match(
+    querySource,
+    /const snipModule = true\s+\?\s+\(require\('\.\/services\/compact\/snipCompact\.js'\)/,
+    'HISTORY_SNIP should stay bundled',
+  )
+  assert.match(
+    toolsSource,
+    /const SnipTool = true\s+\?\s+loadToolExport/,
+    'SnipTool should stay bundled',
+  )
+  assert.match(
+    commandsSource,
+    /const forceSnip = true\s+\?\s+require\('\.\/commands\/force-snip\.js'\)\.default/,
+    'force-snip command should stay bundled',
   )
   assert.match(
     querySource,
@@ -315,6 +353,1072 @@ console.log('ctx inspect tool OK');`,
   assert.equal(output, 'ctx inspect tool OK')
 })
 
+await test('snip runtime projects removed ranges and preserves tool pairs', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-runtime-test',
+    `process.env.CLAUDE_CODE_SNIP_TRIGGER_TOKENS = '1';
+process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES = '4';
+process.env.CLAUDE_CODE_SNIP_MIN_REMOVED_MESSAGES = '2';
+const snip = await import('./src/services/compact/snipCompact.ts');
+const projection = await import('./src/services/compact/snipProjection.ts');
+
+const user = (n, text = 'user message') => ({
+  type: 'user',
+  uuid: '00000000-0000-0000-0000-0000000000' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: { role: 'user', content: text.repeat(30) },
+});
+const assistant = n => ({
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-0000000001' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: {
+    id: 'msg_' + n,
+    role: 'assistant',
+    content: [{ type: 'text', text: ('assistant ' + n + ' ').repeat(30) }],
+  },
+});
+const messages = [
+  user(1), assistant(1),
+  user(2), assistant(2),
+  user(3), assistant(3),
+  user(4), assistant(4),
+  user(5), assistant(5),
+  user(6), assistant(6),
+];
+const result = snip.snipCompactIfNeeded(messages);
+if (!result.executed) throw new Error('snip should execute above threshold');
+if (result.messages.length !== 4) throw new Error('expected protected tail only, got ' + result.messages.length);
+if (!result.boundaryMessage?.snipMetadata?.removedUuids?.includes(messages[0].uuid)) {
+  throw new Error('boundary did not record removed uuids');
+}
+const projected = projection.projectSnippedView([...messages, result.boundaryMessage]);
+if (projected.some(message => message.uuid === messages[0].uuid)) {
+  throw new Error('projection kept removed message');
+}
+if (!projected.some(message => message.uuid === result.boundaryMessage.uuid)) {
+  throw new Error('projection should keep the boundary message');
+}
+
+process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES = '9';
+const toolMessages = [
+  user(11),
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000000120',
+    timestamp: '2026-06-16T00:00:00.000Z',
+    message: {
+      id: 'msg_tool',
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: {} }],
+    },
+  },
+  {
+    type: 'user',
+    uuid: '00000000-0000-0000-0000-000000000121',
+    timestamp: '2026-06-16T00:00:00.000Z',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] },
+  },
+  user(12), assistant(12), user(13), assistant(13), user(14), assistant(14), user(15), assistant(15),
+];
+const splitAttempt = snip.snipCompactIfNeeded(toolMessages, { force: true });
+if (
+  splitAttempt.boundaryMessage?.snipMetadata?.removedUuids?.includes('00000000-0000-0000-0000-000000000120') ||
+  splitAttempt.boundaryMessage?.snipMetadata?.removedUuids?.includes('00000000-0000-0000-0000-000000000121')
+) {
+  throw new Error('snip should not remove only part of a tool_use/tool_result pair');
+}
+
+delete process.env.CLAUDE_CODE_SNIP_TRIGGER_TOKENS;
+delete process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES;
+delete process.env.CLAUDE_CODE_SNIP_MIN_REMOVED_MESSAGES;
+console.log('snip runtime OK');`,
+  )
+  assert.equal(output, 'snip runtime OK')
+})
+
+await test('snip targeted ids and boundary replay are deterministic', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-targeted-replay-test',
+    `process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES = '2';
+const snip = await import('./src/services/compact/snipCompact.ts');
+const projection = await import('./src/services/compact/snipProjection.ts');
+
+const user = n => ({
+  type: 'user',
+  uuid: '2000000' + n + '-0000-0000-0000-0000000000' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: { role: 'user', content: ('target user ' + n + ' ').repeat(20) },
+});
+const assistant = n => ({
+  type: 'assistant',
+  uuid: '3000000' + n + '-0000-0000-0000-0000000001' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: { id: 'msg_target_' + n, role: 'assistant', content: [{ type: 'text', text: ('target assistant ' + n + ' ').repeat(20) }] },
+});
+const messages = [
+  user(1), assistant(1),
+  user(2), assistant(2),
+  user(3), assistant(3),
+  user(4), assistant(4),
+  user(5), assistant(5),
+];
+const targetId = snip.shortMessageIdForSnip(messages[2]);
+const result = snip.snipCompactIfNeeded(messages, {
+  force: true,
+  trigger: 'tool',
+  targetMessageIds: [targetId],
+  reason: 'targeted cleanup',
+});
+if (!result.executed) throw new Error('targeted snip should execute');
+if (result.strategy !== 'targeted_segments') throw new Error('bad strategy: ' + result.strategy);
+if (!result.boundaryMessage.snipMetadata.targetMessageIds.includes(targetId)) {
+  throw new Error('target id missing from metadata');
+}
+if (!result.boundaryMessage.snipMetadata.removedUuids.includes(messages[2].uuid)) {
+  throw new Error('target user was not removed');
+}
+if (!result.boundaryMessage.snipMetadata.removedUuids.includes(messages[3].uuid)) {
+  throw new Error('target assistant turn mate was not removed');
+}
+if (result.boundaryMessage.snipMetadata.removedUuids.includes(messages[0].uuid)) {
+  throw new Error('unrelated old turn should not be removed by targeted snip');
+}
+const projected = projection.projectSnippedView([...messages, result.boundaryMessage]);
+if (projected.some(message => message.uuid === messages[2].uuid || message.uuid === messages[3].uuid)) {
+  throw new Error('projection kept targeted messages');
+}
+if (!projected.some(message => message.uuid === messages[0].uuid)) {
+  throw new Error('projection removed unrelated message');
+}
+
+const replay = snip.replaySnipBoundary(messages, result.boundaryMessage);
+if (!replay?.executed) throw new Error('boundary replay should execute');
+if (!replay.messages.some(message => message.uuid === result.boundaryMessage.uuid)) {
+  throw new Error('replay should append the original boundary');
+}
+if (replay.messages.some(message => message.uuid === messages[2].uuid || message.uuid === messages[3].uuid)) {
+  throw new Error('replay did not remove boundary uuids');
+}
+if (!replay.messages.some(message => message.uuid === messages[0].uuid)) {
+  throw new Error('replay recomputed and removed unrelated history');
+}
+
+delete process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES;
+console.log('snip targeted replay OK');`,
+  )
+  assert.equal(output, 'snip targeted replay OK')
+})
+
+await test('snip transcript resume filters removed ranges and relinks parents', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-transcript-resume-test',
+    `import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const { buildConversationChain, loadTranscriptFile } = await import('./src/utils/sessionStorage.ts');
+
+const sessionId = '40000000-0000-4000-8000-000000000001';
+const timestamp = '2026-06-17T00:00:00.000Z';
+const base = { timestamp, sessionId, cwd: process.cwd(), version: '2.1.88', userType: 'external' };
+const user = (uuid, parentUuid, text) => ({
+  ...base,
+  type: 'user',
+  uuid,
+  parentUuid,
+  message: { role: 'user', content: text },
+});
+const assistant = (uuid, parentUuid, text) => ({
+  ...base,
+  type: 'assistant',
+  uuid,
+  parentUuid,
+  message: { id: 'msg_' + uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] },
+});
+const ids = {
+  u1: '40000000-0000-4000-8000-000000000101',
+  a1: '40000000-0000-4000-8000-000000000102',
+  u2: '40000000-0000-4000-8000-000000000103',
+  a2: '40000000-0000-4000-8000-000000000104',
+  u3: '40000000-0000-4000-8000-000000000105',
+  a3: '40000000-0000-4000-8000-000000000106',
+  u4: '40000000-0000-4000-8000-000000000107',
+  a4: '40000000-0000-4000-8000-000000000108',
+  boundary: '40000000-0000-4000-8000-000000000109',
+  u5: '40000000-0000-4000-8000-000000000110',
+  a5: '40000000-0000-4000-8000-000000000111',
+};
+const entries = [
+  user(ids.u1, null, 'keep one'),
+  assistant(ids.a1, ids.u1, 'keep one answer'),
+  user(ids.u2, ids.a1, 'remove two'),
+  assistant(ids.a2, ids.u2, 'remove two answer'),
+  user(ids.u3, ids.a2, 'keep three'),
+  assistant(ids.a3, ids.u3, 'keep three answer'),
+  user(ids.u4, ids.a3, 'remove four'),
+  assistant(ids.a4, ids.u4, 'remove four answer'),
+  {
+    ...base,
+    type: 'system',
+    subtype: 'snip_boundary',
+    uuid: ids.boundary,
+    parentUuid: ids.a4,
+    content: 'Conversation history snipped',
+    level: 'info',
+    snipMetadata: {
+      trigger: 'auto',
+      strategy: 'auto_segments',
+      removedUuids: [ids.u2, ids.a2, ids.u4, ids.a4],
+      removedMessages: 4,
+      tokensFreed: 123,
+      removedRanges: [
+        { startUuid: ids.u2, endUuid: ids.a2, messages: 2, tokensFreed: 50 },
+        { startUuid: ids.u4, endUuid: ids.a4, messages: 2, tokensFreed: 73 },
+      ],
+    },
+  },
+  user(ids.u5, ids.boundary, 'keep five'),
+  assistant(ids.a5, ids.u5, 'keep five answer'),
+];
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'snip-resume.jsonl');
+await writeFile(file, entries.map(entry => JSON.stringify(entry)).join('\\n'));
+
+const loaded = await loadTranscriptFile(file);
+for (const removed of [ids.u2, ids.a2, ids.u4, ids.a4]) {
+  if (loaded.messages.has(removed)) throw new Error('removed message survived resume: ' + removed);
+}
+if (loaded.messages.get(ids.u3)?.parentUuid !== ids.a1) {
+  throw new Error('first survivor was not relinked across removed range');
+}
+if (loaded.messages.get(ids.boundary)?.parentUuid !== ids.a3) {
+  throw new Error('snip boundary was not relinked across removed tail');
+}
+if (!loaded.leafUuids.has(ids.a5)) {
+  throw new Error('latest assistant should remain resume leaf');
+}
+const chain = buildConversationChain(loaded.messages, loaded.messages.get(ids.a5));
+const chainIds = chain.map(message => message.uuid);
+const expected = [ids.u1, ids.a1, ids.u3, ids.a3, ids.boundary, ids.u5, ids.a5];
+if (JSON.stringify(chainIds) !== JSON.stringify(expected)) {
+  throw new Error('bad resumed chain: ' + JSON.stringify(chainIds));
+}
+console.log('snip transcript resume OK');`,
+  )
+  assert.equal(output, 'snip transcript resume OK')
+})
+
+await test('resume entrypoints load snipped jsonl without removed history', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-resume-entrypoints-test',
+    `process.env.CLAUDE_CODE_SIMPLE = '1';
+import { rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const { loadConversationForResume } = await import('./src/utils/conversationRecovery.ts');
+const { getSessionIdFromLog, loadTranscriptFromFile } = await import('./src/utils/sessionStorage.ts');
+
+const sessionId = '42000000-0000-4000-8000-000000000001';
+const base = { sessionId, cwd: process.cwd(), version: '2.1.88', userType: 'external' };
+const ts = n => '2026-06-17T00:00:' + String(n).padStart(2, '0') + '.000Z';
+const user = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'user',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { role: 'user', content: text },
+});
+const assistant = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'assistant',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { id: 'msg_' + uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] },
+});
+const ids = {
+  u1: '42000000-0000-4000-8000-000000000101',
+  a1: '42000000-0000-4000-8000-000000000102',
+  u2: '42000000-0000-4000-8000-000000000103',
+  a2: '42000000-0000-4000-8000-000000000104',
+  u3: '42000000-0000-4000-8000-000000000105',
+  a3: '42000000-0000-4000-8000-000000000106',
+  boundary: '42000000-0000-4000-8000-000000000107',
+  u4: '42000000-0000-4000-8000-000000000108',
+  a4: '42000000-0000-4000-8000-000000000109',
+};
+const entries = [
+  user(ids.u1, null, 1, 'keep one'),
+  assistant(ids.a1, ids.u1, 2, 'keep one answer'),
+  user(ids.u2, ids.a1, 3, 'remove two'),
+  assistant(ids.a2, ids.u2, 4, 'remove two answer'),
+  user(ids.u3, ids.a2, 5, 'keep three'),
+  assistant(ids.a3, ids.u3, 6, 'keep three answer'),
+  {
+    ...base,
+    type: 'system',
+    subtype: 'snip_boundary',
+    uuid: ids.boundary,
+    parentUuid: ids.a3,
+    timestamp: ts(7),
+    content: 'Conversation history snipped',
+    level: 'info',
+    snipMetadata: {
+      trigger: 'auto',
+      strategy: 'auto_segments',
+      removedUuids: [ids.u2, ids.a2],
+      removedMessages: 2,
+      tokensFreed: 80,
+    },
+  },
+  user(ids.u4, ids.boundary, 8, 'keep four'),
+  assistant(ids.a4, ids.u4, 9, 'keep four answer'),
+];
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'snip-resume-entrypoints.jsonl');
+await rm(file, { force: true });
+await writeFile(file, entries.map(entry => JSON.stringify(entry)).join('\\n') + '\\n');
+
+function assertExpected(messages, label) {
+  const idsInResult = messages.map(message => message.uuid).filter(Boolean);
+  for (const removed of [ids.u2, ids.a2]) {
+    if (idsInResult.includes(removed)) {
+      throw new Error(label + ' brought back removed message ' + removed);
+    }
+  }
+  const expected = [ids.u1, ids.a1, ids.u3, ids.a3, ids.boundary, ids.u4, ids.a4];
+  if (JSON.stringify(idsInResult) !== JSON.stringify(expected)) {
+    throw new Error(label + ' bad message chain: ' + JSON.stringify(idsInResult));
+  }
+}
+
+const resumed = await loadConversationForResume('unused-session-id', file);
+if (!resumed) throw new Error('loadConversationForResume returned null');
+if (resumed.sessionId !== sessionId) {
+  throw new Error('resume should report leaf session id');
+}
+if (resumed.turnInterruptionState.kind !== 'none') {
+  throw new Error('resume should not synthesize interruption state');
+}
+assertExpected(resumed.messages, 'loadConversationForResume');
+
+const imported = await loadTranscriptFromFile(file);
+if (getSessionIdFromLog(imported) !== sessionId) {
+  throw new Error('loadTranscriptFromFile should report leaf session id');
+}
+assertExpected(imported.messages, 'loadTranscriptFromFile');
+
+console.log('snip resume entrypoints OK');`,
+  )
+  assert.equal(output, 'snip resume entrypoints OK')
+})
+
+await test('resume detects prompt interrupted before assistant response', async () => {
+  const output = await buildAndRunSnippet(
+    'interrupted-prompt-resume-test',
+    `process.env.CLAUDE_CODE_SIMPLE = '1';
+import { rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const { loadConversationForResume } = await import('./src/utils/conversationRecovery.ts');
+
+const sessionId = '42500000-0000-4000-8000-000000000001';
+const prompt = 'interrupted prompt should auto resume exactly once';
+const userUuid = '42500000-0000-4000-8000-000000000101';
+const entry = {
+  sessionId,
+  cwd: process.cwd(),
+  version: '2.1.88',
+  userType: 'external',
+  type: 'user',
+  uuid: userUuid,
+  parentUuid: null,
+  timestamp: '2026-06-17T00:00:00.000Z',
+  message: { role: 'user', content: prompt },
+};
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'interrupted-prompt-resume.jsonl');
+await rm(file, { force: true });
+await writeFile(file, JSON.stringify(entry) + '\\n');
+
+const resumed = await loadConversationForResume('unused-session-id', file);
+if (!resumed) throw new Error('loadConversationForResume returned null');
+if (resumed.sessionId !== sessionId) {
+  throw new Error('resume should preserve interrupted session id');
+}
+if (resumed.turnInterruptionState.kind !== 'interrupted_prompt') {
+  throw new Error('expected interrupted_prompt, got ' + resumed.turnInterruptionState.kind);
+}
+if (resumed.turnInterruptionState.message.uuid !== userUuid) {
+  throw new Error('interrupted state should point at original user message');
+}
+
+const textFromContent = content => {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(block => block?.text ?? '').join('\\n');
+};
+const visibleUsers = resumed.messages.filter(
+  message => message.type === 'user' && !message.isMeta,
+);
+if (visibleUsers.length !== 1) {
+  throw new Error('expected one visible user message, got ' + visibleUsers.length);
+}
+if (textFromContent(visibleUsers[0].message.content) !== prompt) {
+  throw new Error('visible user prompt changed during resume');
+}
+const assistantSentinels = resumed.messages.filter(
+  message =>
+    message.type === 'assistant' &&
+    textFromContent(message.message.content) === 'No response requested.',
+);
+if (assistantSentinels.length !== 1) {
+  throw new Error('expected one synthetic assistant sentinel, got ' + assistantSentinels.length);
+}
+console.log('interrupted prompt resume OK');`,
+  )
+  assert.equal(output, 'interrupted prompt resume OK')
+})
+
+await test('resume drops unresolved trailing tool use after interrupted tool execution', async () => {
+  const output = await buildAndRunSnippet(
+    'interrupted-tool-use-resume-test',
+    `process.env.CLAUDE_CODE_SIMPLE = '1';
+import { rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const { loadConversationForResume } = await import('./src/utils/conversationRecovery.ts');
+
+const sessionId = '42600000-0000-4000-8000-000000000001';
+const prompt = 'interrupted tool use should not resume with orphan tool_use';
+const ids = {
+  user: '42600000-0000-4000-8000-000000000101',
+  assistantTool: '42600000-0000-4000-8000-000000000102',
+};
+const base = {
+  sessionId,
+  cwd: process.cwd(),
+  version: '2.1.88',
+  userType: 'external',
+};
+const entries = [
+  {
+    ...base,
+    type: 'user',
+    uuid: ids.user,
+    parentUuid: null,
+    timestamp: '2026-06-17T00:00:00.000Z',
+    message: { role: 'user', content: prompt },
+  },
+  {
+    ...base,
+    type: 'assistant',
+    uuid: ids.assistantTool,
+    parentUuid: ids.user,
+    timestamp: '2026-06-17T00:00:01.000Z',
+    message: {
+      id: 'msg_interrupted_tool',
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'toolu_interrupted_read', name: 'Read', input: { file_path: 'missing.txt' } },
+      ],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    },
+  },
+];
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'interrupted-tool-use-resume.jsonl');
+await rm(file, { force: true });
+await writeFile(file, entries.map(entry => JSON.stringify(entry)).join('\\n') + '\\n');
+
+const resumed = await loadConversationForResume('unused-session-id', file);
+if (!resumed) throw new Error('loadConversationForResume returned null');
+if (resumed.turnInterruptionState.kind !== 'interrupted_prompt') {
+  throw new Error('expected interrupted_prompt, got ' + resumed.turnInterruptionState.kind);
+}
+if (resumed.turnInterruptionState.message.uuid !== ids.user) {
+  throw new Error('interrupted state should resume original user prompt');
+}
+
+const textFromContent = content => {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(block => block?.text ?? '').join('\\n');
+};
+const serialized = JSON.stringify(resumed.messages);
+if (serialized.includes('toolu_interrupted_read')) {
+  throw new Error('orphan tool_use survived resume');
+}
+const visibleUsers = resumed.messages.filter(
+  message => message.type === 'user' && !message.isMeta,
+);
+if (visibleUsers.length !== 1 || textFromContent(visibleUsers[0].message.content) !== prompt) {
+  throw new Error('original prompt should be preserved exactly once');
+}
+const assistantSentinels = resumed.messages.filter(
+  message =>
+    message.type === 'assistant' &&
+    textFromContent(message.message.content) === 'No response requested.',
+);
+if (assistantSentinels.length !== 1) {
+  throw new Error('expected one synthetic assistant sentinel, got ' + assistantSentinels.length);
+}
+console.log('interrupted tool use resume OK');`,
+  )
+  assert.equal(output, 'interrupted tool use resume OK')
+})
+
+await test('resume session id and continue load snipped project session', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-resume-session-continue-test',
+    `import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'snip-resume-config');
+await rm(configDir, { recursive: true, force: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+process.env.CLAUDE_CODE_SIMPLE = '1';
+
+const { loadConversationForResume } = await import('./src/utils/conversationRecovery.ts');
+const { getProjectDir } = await import('./src/utils/sessionStorage.ts');
+
+const sessionId = '43000000-0000-4000-8000-000000000001';
+const base = { sessionId, cwd: process.cwd(), version: '2.1.88', userType: 'external' };
+const ts = n => '2026-06-17T00:01:' + String(n).padStart(2, '0') + '.000Z';
+const user = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'user',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { role: 'user', content: text },
+});
+const assistant = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'assistant',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { id: 'msg_' + uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] },
+});
+const ids = {
+  u1: '43000000-0000-4000-8000-000000000101',
+  a1: '43000000-0000-4000-8000-000000000102',
+  u2: '43000000-0000-4000-8000-000000000103',
+  a2: '43000000-0000-4000-8000-000000000104',
+  u3: '43000000-0000-4000-8000-000000000105',
+  a3: '43000000-0000-4000-8000-000000000106',
+  boundary: '43000000-0000-4000-8000-000000000107',
+  u4: '43000000-0000-4000-8000-000000000108',
+  a4: '43000000-0000-4000-8000-000000000109',
+};
+const entries = [
+  user(ids.u1, null, 1, 'resume session keep one'),
+  assistant(ids.a1, ids.u1, 2, 'resume session keep one answer'),
+  user(ids.u2, ids.a1, 3, 'resume session remove two'),
+  assistant(ids.a2, ids.u2, 4, 'resume session remove two answer'),
+  user(ids.u3, ids.a2, 5, 'resume session keep three'),
+  assistant(ids.a3, ids.u3, 6, 'resume session keep three answer'),
+  {
+    ...base,
+    type: 'system',
+    subtype: 'snip_boundary',
+    uuid: ids.boundary,
+    parentUuid: ids.a3,
+    timestamp: ts(7),
+    content: 'Conversation history snipped',
+    level: 'info',
+    snipMetadata: {
+      trigger: 'auto',
+      strategy: 'auto_segments',
+      removedUuids: [ids.u2, ids.a2],
+      removedMessages: 2,
+      tokensFreed: 64,
+    },
+  },
+  user(ids.u4, ids.boundary, 8, 'resume session keep four'),
+  assistant(ids.a4, ids.u4, 9, 'resume session keep four answer'),
+];
+const projectDir = getProjectDir(process.cwd());
+await mkdir(projectDir, { recursive: true });
+const file = join(projectDir, sessionId + '.jsonl');
+await writeFile(file, entries.map(entry => JSON.stringify(entry)).join('\\n') + '\\n');
+
+function assertExpected(result, label) {
+  if (!result) throw new Error(label + ' returned null');
+  if (result.sessionId !== sessionId) {
+    throw new Error(label + ' should preserve session id, got ' + result.sessionId);
+  }
+  if (result.turnInterruptionState.kind !== 'none') {
+    throw new Error(label + ' should not synthesize interruption state');
+  }
+  const idsInResult = result.messages.map(message => message.uuid).filter(Boolean);
+  for (const removed of [ids.u2, ids.a2]) {
+    if (idsInResult.includes(removed)) {
+      throw new Error(label + ' brought back removed message ' + removed);
+    }
+  }
+  const expected = [ids.u1, ids.a1, ids.u3, ids.a3, ids.boundary, ids.u4, ids.a4];
+  if (JSON.stringify(idsInResult) !== JSON.stringify(expected)) {
+    throw new Error(label + ' bad message chain: ' + JSON.stringify(idsInResult));
+  }
+}
+
+assertExpected(await loadConversationForResume(sessionId, undefined), 'session-id resume');
+assertExpected(await loadConversationForResume(undefined, undefined), 'continue resume');
+
+console.log('snip resume session continue OK');`,
+  )
+  assert.equal(output, 'snip resume session continue OK')
+})
+
+await test('snip resume composes with preserved compact boundary', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-compact-compose-resume-test',
+    `process.env.CLAUDE_CODE_SIMPLE = '1';
+import { rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const { loadConversationForResume } = await import('./src/utils/conversationRecovery.ts');
+const { buildConversationChain, loadTranscriptFile } = await import('./src/utils/sessionStorage.ts');
+
+const sessionId = '44000000-0000-4000-8000-000000000001';
+const base = { sessionId, cwd: process.cwd(), version: '2.1.88', userType: 'external' };
+const ts = n => '2026-06-17T00:02:' + String(n).padStart(2, '0') + '.000Z';
+const user = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'user',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { role: 'user', content: text },
+});
+const assistant = (uuid, parentUuid, n, text) => ({
+  ...base,
+  type: 'assistant',
+  uuid,
+  parentUuid,
+  timestamp: ts(n),
+  message: { id: 'msg_' + uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] },
+});
+const ids = {
+  u1: '44000000-0000-4000-8000-000000000101',
+  a1: '44000000-0000-4000-8000-000000000102',
+  u2: '44000000-0000-4000-8000-000000000103',
+  a2: '44000000-0000-4000-8000-000000000104',
+  compact: '44000000-0000-4000-8000-000000000105',
+  u3: '44000000-0000-4000-8000-000000000106',
+  a3: '44000000-0000-4000-8000-000000000107',
+  u4: '44000000-0000-4000-8000-000000000108',
+  a4: '44000000-0000-4000-8000-000000000109',
+  snip: '44000000-0000-4000-8000-000000000110',
+  u5: '44000000-0000-4000-8000-000000000111',
+  a5: '44000000-0000-4000-8000-000000000112',
+};
+const entries = [
+  user(ids.u1, null, 1, 'pre compact prune one'),
+  assistant(ids.a1, ids.u1, 2, 'pre compact prune one answer'),
+  user(ids.u2, ids.a1, 3, 'pre compact preserved two'),
+  assistant(ids.a2, ids.u2, 4, 'pre compact preserved two answer'),
+  {
+    ...base,
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: ids.compact,
+    parentUuid: null,
+    logicalParentUuid: ids.a2,
+    timestamp: ts(5),
+    content: 'Conversation compacted',
+    level: 'info',
+    compactMetadata: {
+      trigger: 'auto',
+      messagesSummarized: 2,
+      preservedSegment: {
+        anchorUuid: ids.compact,
+        headUuid: ids.u2,
+        tailUuid: ids.a2,
+      },
+    },
+  },
+  user(ids.u3, ids.compact, 6, 'post compact snip remove three'),
+  assistant(ids.a3, ids.u3, 7, 'post compact snip remove three answer'),
+  user(ids.u4, ids.a3, 8, 'post compact keep four'),
+  assistant(ids.a4, ids.u4, 9, 'post compact keep four answer'),
+  {
+    ...base,
+    type: 'system',
+    subtype: 'snip_boundary',
+    uuid: ids.snip,
+    parentUuid: ids.a4,
+    timestamp: ts(10),
+    content: 'Conversation history snipped',
+    level: 'info',
+    snipMetadata: {
+      trigger: 'auto',
+      strategy: 'auto_segments',
+      removedUuids: [ids.u3, ids.a3],
+      removedMessages: 2,
+      tokensFreed: 72,
+    },
+  },
+  user(ids.u5, ids.snip, 11, 'post snip keep five'),
+  assistant(ids.a5, ids.u5, 12, 'post snip keep five answer'),
+];
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'snip-compact-compose.jsonl');
+await rm(file, { force: true });
+await writeFile(file, entries.map(entry => JSON.stringify(entry)).join('\\n') + '\\n');
+
+const loaded = await loadTranscriptFile(file);
+for (const removed of [ids.u1, ids.a1, ids.u3, ids.a3]) {
+  if (loaded.messages.has(removed)) {
+    throw new Error('compact+snip resume kept removed message ' + removed);
+  }
+}
+if (loaded.messages.get(ids.u2)?.parentUuid !== ids.compact) {
+  throw new Error('preserved compact head should relink to compact boundary');
+}
+if (loaded.messages.get(ids.u4)?.parentUuid !== ids.a2) {
+  throw new Error('snip survivor should relink through compact preserved tail');
+}
+const chain = buildConversationChain(loaded.messages, loaded.messages.get(ids.a5));
+const chainIds = chain.map(message => message.uuid);
+const expected = [ids.compact, ids.u2, ids.a2, ids.u4, ids.a4, ids.snip, ids.u5, ids.a5];
+if (JSON.stringify(chainIds) !== JSON.stringify(expected)) {
+  throw new Error('bad compact+snip chain: ' + JSON.stringify(chainIds));
+}
+
+const resumed = await loadConversationForResume('unused-session-id', file);
+if (!resumed) throw new Error('loadConversationForResume returned null');
+const resumedIds = resumed.messages.map(message => message.uuid).filter(Boolean);
+if (JSON.stringify(resumedIds) !== JSON.stringify(expected)) {
+  throw new Error('bad compact+snip resumed messages: ' + JSON.stringify(resumedIds));
+}
+
+console.log('snip compact compose resume OK');`,
+  )
+  assert.equal(output, 'snip compact compose resume OK')
+})
+
+await test('recordTranscript persists snip boundary once and chains survivors', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-record-transcript-test',
+    `import { readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { switchSession } from './src/bootstrap/state.ts';
+const {
+  buildConversationChain,
+  clearSessionMessagesCache,
+  flushSessionStorage,
+  loadTranscriptFile,
+  recordTranscript,
+  resetProjectForTesting,
+  setSessionFileForTesting,
+} = await import('./src/utils/sessionStorage.ts');
+
+const sessionId = '41000000-0000-4000-8000-000000000001';
+const file = join(process.cwd(), 'build-src', 'test-artifacts', 'snip-record.jsonl');
+await rm(file, { force: true });
+switchSession(sessionId, null);
+resetProjectForTesting();
+clearSessionMessagesCache();
+setSessionFileForTesting(file);
+
+const timestamp = '2026-06-17T00:00:00.000Z';
+const user = (uuid, text) => ({
+  type: 'user',
+  uuid,
+  timestamp,
+  message: { role: 'user', content: text },
+});
+const assistant = (uuid, text) => ({
+  type: 'assistant',
+  uuid,
+  timestamp,
+  message: { id: 'msg_' + uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] },
+});
+const ids = {
+  u1: '41000000-0000-4000-8000-000000000101',
+  a1: '41000000-0000-4000-8000-000000000102',
+  u2: '41000000-0000-4000-8000-000000000103',
+  a2: '41000000-0000-4000-8000-000000000104',
+  boundary: '41000000-0000-4000-8000-000000000105',
+  u3: '41000000-0000-4000-8000-000000000106',
+  a3: '41000000-0000-4000-8000-000000000107',
+};
+const baseMessages = [
+  user(ids.u1, 'keep one'),
+  assistant(ids.a1, 'keep one answer'),
+  user(ids.u2, 'remove two'),
+  assistant(ids.a2, 'remove two answer'),
+];
+const boundary = {
+  type: 'system',
+  subtype: 'snip_boundary',
+  uuid: ids.boundary,
+  timestamp,
+  content: 'Conversation history snipped',
+  level: 'info',
+  snipMetadata: {
+    trigger: 'auto',
+    strategy: 'auto_segments',
+    removedUuids: [ids.u2, ids.a2],
+    removedMessages: 2,
+    tokensFreed: 99,
+  },
+};
+const tail = [user(ids.u3, 'keep three'), assistant(ids.a3, 'keep three answer')];
+
+await recordTranscript(baseMessages);
+await recordTranscript([baseMessages[0], baseMessages[1], boundary, ...tail]);
+await recordTranscript([baseMessages[0], baseMessages[1], boundary, ...tail]);
+await flushSessionStorage();
+
+const lines = (await readFile(file, 'utf8')).trim().split('\\n').filter(Boolean);
+const entries = lines.map(line => JSON.parse(line));
+const counts = new Map();
+for (const entry of entries) {
+  if (!entry.uuid) continue;
+  counts.set(entry.uuid, (counts.get(entry.uuid) ?? 0) + 1);
+}
+for (const [uuid, count] of counts) {
+  if (count !== 1) throw new Error('duplicate transcript uuid ' + uuid + ': ' + count);
+}
+const boundaryEntry = entries.find(entry => entry.uuid === ids.boundary);
+if (boundaryEntry?.parentUuid !== ids.a1) {
+  throw new Error('boundary parent should chain from last kept prefix');
+}
+const u3Entry = entries.find(entry => entry.uuid === ids.u3);
+if (u3Entry?.parentUuid !== ids.boundary) {
+  throw new Error('tail user should chain from boundary');
+}
+
+const loaded = await loadTranscriptFile(file);
+if (loaded.messages.has(ids.u2) || loaded.messages.has(ids.a2)) {
+  throw new Error('resume load should filter removed messages');
+}
+const chain = buildConversationChain(loaded.messages, loaded.messages.get(ids.a3));
+const chainIds = chain.map(message => message.uuid);
+const expected = [ids.u1, ids.a1, ids.boundary, ids.u3, ids.a3];
+if (JSON.stringify(chainIds) !== JSON.stringify(expected)) {
+  throw new Error('bad persisted chain: ' + JSON.stringify(chainIds));
+}
+console.log('snip record transcript OK');
+process.exit(0);`,
+  )
+  assert.equal(output, 'snip record transcript OK')
+})
+
+await test('SnipTool and force-snip command are loadable', async () => {
+  const output = await buildAndRunSnippet(
+    'snip-tool-command-test',
+    `process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES = '4';
+const { SnipTool } = await import('./src/tools/SnipTool/SnipTool.ts');
+const forceSnip = (await import('./src/commands/force-snip.ts')).default;
+const snip = await import('./src/services/compact/snipCompact.ts');
+
+const user = n => ({
+  type: 'user',
+  uuid: '10000000-0000-0000-0000-0000000000' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: { role: 'user', content: ('user ' + n + ' ').repeat(25) },
+});
+const assistant = n => ({
+  type: 'assistant',
+  uuid: '10000000-0000-0000-0000-0000000001' + String(n).padStart(2, '0'),
+  timestamp: '2026-06-16T00:00:00.000Z',
+  message: { id: 'msg_' + n, role: 'assistant', content: [{ type: 'text', text: ('assistant ' + n + ' ').repeat(25) }] },
+});
+const messages = [
+  user(1), assistant(1), user(2), assistant(2), user(3), assistant(3),
+  user(4), assistant(4), user(5), assistant(5), user(6), assistant(6),
+];
+
+if (SnipTool.name !== 'Snip') throw new Error('bad tool name');
+if (!SnipTool.isEnabled()) throw new Error('SnipTool should be enabled by default');
+if (!SnipTool.isReadOnly({}) || !SnipTool.isConcurrencySafe({})) {
+  throw new Error('SnipTool should be read-only and concurrency-safe');
+}
+const result = await SnipTool.call({ reason: 'stale context' }, { messages });
+if (!result.data.executed || result.data.removedMessages <= 0 || result.newMessages?.length !== 1) {
+  throw new Error('SnipTool did not append a boundary: ' + JSON.stringify(result.data));
+}
+if (result.data.strategy !== 'auto_segments') {
+  throw new Error('SnipTool should use auto segment strategy by default');
+}
+
+const targetId = snip.shortMessageIdForSnip(messages[2]);
+const targetedResult = await SnipTool.call({ reason: 'targeted stale context', targetIds: [targetId] }, { messages });
+if (targetedResult.data.strategy !== 'targeted_segments' || targetedResult.newMessages?.length !== 1) {
+  throw new Error('SnipTool targetIds did not use targeted strategy');
+}
+if (!targetedResult.newMessages[0].snipMetadata.removedUuids.includes(messages[2].uuid)) {
+  throw new Error('SnipTool targetIds did not remove requested turn');
+}
+
+let appended = 0;
+const module = await forceSnip.load();
+const commandResult = await module.call('--id ' + targetId + ' manual test', {
+  messages,
+  setMessages(updater) {
+    const next = updater(messages);
+    appended = next.length - messages.length;
+  },
+});
+if (commandResult.type !== 'text' || !commandResult.value.includes('Snipped') || appended !== 1) {
+  throw new Error('force-snip command failed');
+}
+
+delete process.env.CLAUDE_CODE_SNIP_PROTECTED_TAIL_MESSAGES;
+console.log('snip tool command OK');`,
+  )
+  assert.equal(output, 'snip tool command OK')
+})
+
+await test('textual tool-call leak detector is conservative', async () => {
+  const output = await buildAndRunSnippet(
+    'textual-tool-call-leak-test',
+    `import { detectTextualToolCallLeak } from './src/utils/textualToolCallLeak.ts';
+const tools = [
+  { name: 'Read' },
+  { name: 'Bash', aliases: ['Shell'] },
+];
+const leaked = detectTextualToolCallLeak('I will inspect the file.\\nCalling: Read\\n{"file_path":"src/index.ts"}', tools);
+if (!leaked || leaked.toolName !== 'Read' || leaked.callCount !== 1) {
+  throw new Error('failed to detect textual Read call leak: ' + JSON.stringify(leaked));
+}
+const sameLine = detectTextualToolCallLeak('Calling: Shell {"command":"pwd"}', tools);
+if (!sameLine || sameLine.toolName !== 'Bash') {
+  throw new Error('failed to resolve alias textual call leak');
+}
+const unknown = detectTextualToolCallLeak('Calling: Unknown\\n{"x":1}', tools);
+if (unknown !== null) throw new Error('unknown tool should not trigger');
+const malformed = detectTextualToolCallLeak('Calling: Read\\nnot json', tools);
+if (malformed !== null) throw new Error('malformed JSON should not trigger');
+const quoted = detectTextualToolCallLeak('The log line was Calling: Read and it means a tool would be called.', tools);
+if (quoted !== null) throw new Error('plain discussion should not trigger');
+console.log('textual tool call leak OK');`,
+  )
+  assert.equal(output, 'textual tool call leak OK')
+})
+
+await test('interactive streaming text stays visible and live-pinned', async () => {
+  const replSource = await readFile(join(BUILD, 'src/screens/REPL.tsx'), 'utf8')
+  assert.match(
+    replSource,
+    /const visibleStreamingText = streamingText && showStreamingText \? streamingText : null/,
+    'interactive streaming text should not be truncated to complete lines',
+  )
+  assert.doesNotMatch(
+    replSource,
+    /visibleStreamingText[\s\S]{0,200}lastIndexOf\('\\n'\)/,
+    'visible streaming text should not hide the unfinished line',
+  )
+  assert.match(
+    replSource,
+    /const maybeRepinLiveScroll = useCallback/,
+    'interactive UI should keep live output pinned when the user has not scrolled away',
+  )
+  assert.match(
+    replSource,
+    /lastMsgIsAssistant[\s\S]{0,200}maybeRepinLiveScroll\(\)/,
+    'assistant message commits should have a live-scroll backstop',
+  )
+  assert.match(
+    replSource,
+    /streamingText && showStreamingText[\s\S]{0,200}maybeRepinLiveScroll\(\)/,
+    'streaming text updates should have a live-scroll backstop',
+  )
+})
+
+await test('interactive Messages renders unfinished streaming text', async () => {
+  const output = await buildAndRunSnippet(
+    'messages-streaming-text-render-test',
+    `import * as React from 'react';
+import { PassThrough, Writable } from 'node:stream';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
+process.env.CLAUDE_CONFIG_DIR = join(process.cwd(), 'build-src', 'test-artifacts', 'messages-config');
+await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+
+const { enableConfigs } = await import('./src/utils/config.ts');
+enableConfigs();
+const { renderSync } = await import('./src/ink/root.ts');
+const { Messages } = await import('./src/components/Messages.tsx');
+const { AppStateProvider, getDefaultAppState } = await import('./src/state/AppState.tsx');
+
+class CaptureStream extends Writable {
+  constructor() {
+    super();
+    this.chunks = [];
+    this.columns = 100;
+    this.rows = 30;
+    this.isTTY = true;
+  }
+  _write(chunk, _encoding, callback) {
+    this.chunks.push(Buffer.from(chunk).toString('utf8'));
+    callback();
+  }
+  get output() {
+    return this.chunks.join('');
+  }
+}
+
+const stdout = new CaptureStream();
+const stderr = new CaptureStream();
+const stdin = new PassThrough();
+stdin.isTTY = true;
+stdin.setRawMode = () => stdin;
+stdin.ref = () => stdin;
+stdin.unref = () => stdin;
+stdin.setEncoding('utf8');
+
+const tail = 'streaming tail without newline marker-9421';
+const instance = renderSync(
+  React.createElement(
+    AppStateProvider,
+    { initialState: getDefaultAppState() },
+    React.createElement(Messages, {
+      messages: [],
+      tools: [],
+      commands: [],
+      verbose: false,
+      toolJSX: null,
+      toolUseConfirmQueue: [],
+      inProgressToolUseIDs: new Set(),
+      isMessageSelectorVisible: false,
+      conversationId: 'test-conversation',
+      screen: 'main',
+      streamingToolUses: [],
+      isLoading: true,
+      hideLogo: true,
+      streamingText: tail,
+      disableRenderCap: true,
+    }),
+  ),
+  { stdout, stderr, stdin, exitOnCtrlC: false, patchConsole: false },
+);
+
+await new Promise(resolve => setTimeout(resolve, 50));
+instance.unmount();
+instance.cleanup();
+
+const normalizedOutput = stdout.output
+  .replace(/\\x1b\\[(\\d+)C/g, (_, count) => ' '.repeat(Number(count)))
+  .replace(/\\x1b\\[[0-?]*[ -/]*[@-~]/g, '')
+  .replace(/\\r/g, '');
+if (!normalizedOutput.includes(tail)) {
+  throw new Error('missing streaming tail in rendered output: ' + JSON.stringify(stdout.output));
+}
+console.log('messages streaming render OK');`,
+    {
+      banner: {
+        js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      },
+    },
+  )
+  assert.match(output, /messages streaming render OK$/)
+})
+
 await test('generated build has no undefined export shims', async () => {
   const offenders = []
   for await (const file of walkFiles(BUILD)) {
@@ -325,6 +1429,12 @@ await test('generated build has no undefined export shims', async () => {
     }
   }
   assert.deepEqual(offenders, [])
+})
+
+await test('generated build has no snip variable-path requires', async () => {
+  const text = await readFile(DIST_CLI, 'utf8')
+  assert.doesNotMatch(text, /__require\(\s*snip(?:Projection|Compact|BoundaryMessage)ModulePath/)
+  assert.doesNotMatch(text, /snip(?:Projection|Compact|BoundaryMessage)ModulePath\s*=/)
 })
 
 await test('private Chrome MCP package stub is explicit', async () => {

@@ -9,6 +9,7 @@
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
     "test:build-safety": "node scripts/test-build-safety.mjs",
+    "test:cli-e2e": "node scripts/test-cli-resume-e2e.mjs",
     "start": "node dist/cli.js"
   },
   "engines": {
