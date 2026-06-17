@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { utimesSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -108,6 +109,24 @@ const writeUpdateUpdatedContent =
 const writeUpdateFinalResponse =
   'structured Write update tool completed with after-6219'
 let writeUpdateFilePath = ''
+const writeUnreadPrompt = 'cli unread write rejection prompt'
+const writeUnreadOriginalContent =
+  'write unread rejection fixture: before-1038'
+const writeUnreadAttemptedContent =
+  'write unread rejection fixture: attempted-after-1038'
+const writeUnreadFinalResponse =
+  'structured Write unread rejection completed'
+let writeUnreadFilePath = ''
+const writeStalePrompt = 'cli stale write rejection prompt'
+const writeStaleOriginalContent = 'write stale rejection fixture: before-4820'
+const writeStaleExternalContent =
+  'write stale rejection fixture: external-change-4820'
+const writeStaleAttemptedContent =
+  'write stale rejection fixture: attempted-after-4820'
+const writeStaleFinalResponse =
+  'structured Write stale rejection completed'
+let writeStaleFilePath = ''
+let writeStaleWasExternallyModified = false
 
 const notebookEditPrompt = 'cli read then notebook edit prompt'
 const notebookEditOriginalSource = 'print("before-notebook-4187")'
@@ -983,6 +1002,58 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(writeUnreadPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_unread_')) {
+      return {
+        index: responses.length + 13,
+        text: writeUnreadFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 13,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeUnreadAttemptedContent}\n`,
+        filePath: writeUnreadFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_unread_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeStalePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_stale_')) {
+      return {
+        index: responses.length + 14,
+        text: writeStaleFinalResponse,
+      }
+    }
+    if (combinedText.includes(writeStaleOriginalContent)) {
+      if (!writeStaleWasExternallyModified) {
+        writeFileSync(writeStaleFilePath, `${writeStaleExternalContent}\n`, 'utf8')
+        const future = new Date(Date.now() + 10_000)
+        utimesSync(writeStaleFilePath, future, future)
+        writeStaleWasExternallyModified = true
+      }
+      return {
+        index: responses.length + 14,
+        writeToolUse: true,
+        writeToolOptions: {
+          content: `${writeStaleAttemptedContent}\n`,
+          filePath: writeStaleFilePath,
+          toolUseIdPrefix: 'toolu_cli_write_stale_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 14,
+      toolUse: true,
+      toolOptions: {
+        filePath: writeStaleFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeToolPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_')) {
       return {
@@ -1465,6 +1536,19 @@ async function main() {
   await writeFile(
     writeUpdateFilePath,
     `${writeUpdateOriginalContent}\n`,
+    'utf8',
+  )
+  writeUnreadFilePath = join(ARTIFACT_DIR, 'cli-unread-write-rejection.txt')
+  await writeFile(
+    writeUnreadFilePath,
+    `${writeUnreadOriginalContent}\n`,
+    'utf8',
+  )
+  writeStaleFilePath = join(ARTIFACT_DIR, 'cli-stale-write-rejection.txt')
+  writeStaleWasExternallyModified = false
+  await writeFile(
+    writeStaleFilePath,
+    `${writeStaleOriginalContent}\n`,
     'utf8',
   )
   notebookEditFilePath = join(ARTIFACT_DIR, 'cli-read-then-notebook-edit.ipynb')
@@ -2143,6 +2227,145 @@ async function main() {
       'Write tool should update the existing fixture file on disk',
     )
 
+    const beforeWriteUnreadRequests = server.requests.length
+    const writeUnreadArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--allowedTools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    const writeUnreadRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeUnreadArgs, writeUnreadPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeUnreadRun.is_error,
+      false,
+      'Unread Write rejection run should complete after model final response',
+    )
+    assert.equal(
+      writeUnreadRun.result,
+      writeUnreadFinalResponse,
+      'Unread Write rejection final response',
+    )
+    const writeUnreadRequests = server.requests
+      .slice(beforeWriteUnreadRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeUnreadRequests.length,
+      2,
+      'Unread Write rejection run should make tool_use and final requests',
+    )
+    const writeUnreadResultBlocks = requestContentBlocks(
+      writeUnreadRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeUnreadResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_unread_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('File has not been read yet')
+        )
+      }),
+      'Unread Write follow-up should include read-before-write error result',
+    )
+    assert.equal(
+      await readFile(writeUnreadFilePath, 'utf8'),
+      `${writeUnreadOriginalContent}\n`,
+      'Unread Write rejection should leave the existing file unchanged',
+    )
+
+    const beforeWriteStaleRequests = server.requests.length
+    const writeStaleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,Write',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const writeStaleRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeStaleArgs, writeStalePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeStaleRun.is_error,
+      false,
+      'Stale Write rejection run should complete after model final response',
+    )
+    assert.equal(
+      writeStaleRun.result,
+      writeStaleFinalResponse,
+      'Stale Write rejection final response',
+    )
+    const writeStaleRequests = server.requests
+      .slice(beforeWriteStaleRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeStaleRequests.length,
+      3,
+      'Stale Write rejection run should make Read, Write, and final requests',
+    )
+    const writeStaleReadFollowUpTexts = requestTexts(writeStaleRequests[1])
+    assert(
+      containsText(writeStaleReadFollowUpTexts, writeStaleOriginalContent),
+      'Stale Write follow-up request should include Read file content before external modification',
+    )
+    const writeStaleResultBlocks = requestContentBlocks(
+      writeStaleRequests[2],
+      'tool_result',
+    )
+    assert(
+      writeStaleResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_stale_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('modified since read')
+        )
+      }),
+      'Stale Write follow-up should include modified-since-read error result',
+    )
+    assert.equal(
+      await readFile(writeStaleFilePath, 'utf8'),
+      `${writeStaleExternalContent}\n`,
+      'Stale Write rejection should preserve the external modification',
+    )
+
     const beforeNotebookEditRequests = server.requests.length
     const notebookEditArgs = [
       '--bare',
@@ -2236,6 +2459,8 @@ async function main() {
     console.log('ok - Read then Edit executes and updates a fixture file')
     console.log('ok - Write tool creates an artifact fixture file')
     console.log('ok - Read then Write updates an existing artifact file')
+    console.log('ok - Write rejects updating a file that was not read first')
+    console.log('ok - Write rejects stale updates after external modification')
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {

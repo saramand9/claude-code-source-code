@@ -497,6 +497,43 @@ git diff --check
 - `node --check dist\cli.js` 通过。
 - `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
 
+## 2026-06-17 Write 拒绝路径补强记录
+
+本轮继续围绕写入安全做负向验证，目标是确认 `Write` 不会在关键保护条件失败时静默写盘。
+
+### 本轮尝试修复/真实适配
+
+- 扩展真实 CLI E2E：模型直接请求 `Write` 覆盖一个已存在但未被 `Read` 的文件时，CLI 返回 `is_error: true` 的 tool_result，内容包含“File has not been read yet”，磁盘文件保持原内容。
+- 扩展真实 CLI E2E：模型先请求 `Read`，mock server 在第二轮请求到达后模拟外部进程修改同一个文件并把 mtime 推到未来，随后模型请求 `Write`；CLI 返回 `is_error: true` 的 tool_result，内容包含“modified since read”，磁盘保留外部修改内容，而不是写入模型尝试的新内容。
+- 这两个用例覆盖了 `FileWriteTool.validateInput()` 的读后写保护和 stale-write 保护，避免只测 happy path。
+
+### 本轮 mock/stub/降级说明
+
+- 这轮不是 mock。mock server 只模拟模型 API；实际的文件读取、写入拒绝、mtime 检查和 tool_result 生成都来自真实 `dist/cli.js`。
+- 仍未覆盖权限显式拒绝、hook 拒绝、编码/CRLF 差异、二进制文件误写、文件系统权限错误，以及工具执行中途进程被强杀后的恢复。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+npm run check
+npm run test:build-safety
+node --check dist\cli.js
+git diff --check
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出：
+  - `ok - Write rejects updating a file that was not read first`
+  - `ok - Write rejects stale updates after external modification`
+- `npm run check` 通过。
+- `npm run test:build-safety` 通过，当前为 31/31 项。
+- `node --check dist\cli.js` 通过。
+- `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
 ## 构建和启动
 
 ```powershell
@@ -561,6 +598,7 @@ Streaming 乱序 fallback E2E：`content_block_delta` 早于 `content_block_star
 写入工具链 E2E：simple 主路径下 `Read -> Edit -> final` 三轮执行通过，Edit 在 `acceptEdits` 下实际更新 fixture 文件
 Write 创建文件 E2E：bare/simple 模式显式 `--tools Write --allowedTools Write` 时，Write 会加入工具池、执行并创建 fixture 文件
 Write 覆盖已有文件 E2E：bare/simple 模式显式 `--tools Read,Write` 且 `acceptEdits` 时，真实 CLI 会先读取已有文件，再覆盖文件并发送更新成功的 `Write` tool_result
+Write 拒绝路径 E2E：未读直接覆盖已有文件会返回 `is_error` tool_result 且文件不变；Read 后外部修改同一文件会返回 stale-write `is_error` tool_result 且保留外部修改
 NotebookEdit 写入链路 E2E：bare/simple 模式显式 `--tools Read,NotebookEdit` 且 `acceptEdits` 时，真实 CLI 会先读取 notebook cell，再替换目标 cell source、清空 outputs，并发送 `NotebookEdit` 的 `tool_result`
 交互 UI 流式显示回归：构建副本中 streaming 文本不再按最后一个换行截断，assistant/streaming 更新保留 live-scroll 兜底，并通过真实 `Messages`/Ink 渲染确认未完成行可见
 modifiers-napi 缺失 fallback
@@ -599,6 +637,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 - 同一 CLI E2E 还覆盖副作用型 Bash：mock 返回写文件 Bash 命令，CLI 通过 `--allowedTools=Bash` 显式授权后执行命令；测试同时验证 follow-up request 中存在 Bash `tool_result`，以及 artifact 文件确实写入。
 - 同一 CLI E2E 还覆盖 bare/simple 下显式 `Write` opt-in：默认 simple 工具池不变，但 `--tools Write --allowedTools Write` 会让 Write 工具可用；mock 返回 Write `tool_use` 后，CLI 会创建 fixture 文件并发送 Write `tool_result`。
 - 同一 CLI E2E 还覆盖 `Read -> Write(existing file) -> final`：mock 先触发 Read 建立读后写状态，再触发 Write 覆盖已有 fixture，CLI 会发送更新成功的 Write `tool_result`，并且磁盘内容实际变更。
+- 同一 CLI E2E 还覆盖 Write 负向保护：未读直接覆盖已有文件会返回 `is_error` tool_result 且文件不变；Read 后 mock 模拟外部修改同一文件会返回 stale-write `is_error` tool_result，磁盘保留外部修改内容。
 - 同一 CLI E2E 还覆盖 bare/simple 下显式 `NotebookEdit` opt-in：默认 simple 工具池不变，但 `--tools Read,NotebookEdit --permission-mode acceptEdits` 会让 NotebookEdit 工具可用；mock 先触发 Read，再触发 NotebookEdit，CLI 会修改 `.ipynb` fixture、清空 code cell outputs，并发送 NotebookEdit `tool_result`。
 - 交互 UI 流式显示回归：`visibleStreamingText` 不再按最后一个换行截断，避免无尾随换行内容必须等最终 message 或键盘 repaint 才出现；`maybeRepinLiveScroll` 会在 streaming 文本更新和 assistant 消息落地时保持 live 区域可见，除非用户最近主动滚动离开；真实 `Messages`/Ink 渲染测试会把无尾随换行的 `streamingText` 渲染到模拟 TTY，并确认输出中包含完整 tail。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
@@ -620,6 +659,6 @@ ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块�
 
 History Snip 的当前风险也要单独看待：它已不再是完全关闭、stub 或简单保守前缀裁剪，而是高可用外部版。它可以按安全 turn 分段删除、按目标 token 收敛、按目标 ID 删除完整安全 turn，并在后续模型视图中投影清理旧消息；但它仍不做官方语义评分、模型摘要、任意单消息精确点删或复杂跨轮调度。
 
-Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链、bare/simple 显式 `Write` 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径，以及 bare/simple 显式 `Read -> NotebookEdit -> final` notebook 替换 cell 路径。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、Write 未读直接拒绝/读后外部修改拒绝/CRLF 或编码边界、NotebookEdit 的 insert/delete/损坏 notebook/超大 notebook/权限拒绝路径、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
+Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链、bare/simple 显式 `Write` 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝，以及 bare/simple 显式 `Read -> NotebookEdit -> final` notebook 替换 cell 路径。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、Write 权限/hook 拒绝、Write CRLF 或编码边界、NotebookEdit 的 insert/delete/损坏 notebook/超大 notebook/权限拒绝路径、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
 
 交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归和真实 `Messages`/Ink 组件渲染回归；`test:cli-e2e` 仍覆盖的是 `--bare --print --output-format json` 非交互路径，完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。
