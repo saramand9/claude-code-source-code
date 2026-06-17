@@ -100,6 +100,14 @@ const writeToolContent = 'write structured tool fixture: willow-2751'
 const writeToolFinalResponse =
   'structured Write tool completed with willow-2751'
 let writeToolFilePath = ''
+const writeUpdatePrompt = 'cli read then write update prompt'
+const writeUpdateOriginalContent =
+  'write update structured tool fixture: before-6219'
+const writeUpdateUpdatedContent =
+  'write update structured tool fixture: after-6219'
+const writeUpdateFinalResponse =
+  'structured Write update tool completed with after-6219'
+let writeUpdateFilePath = ''
 
 const notebookEditPrompt = 'cli read then notebook edit prompt'
 const notebookEditOriginalSource = 'print("before-notebook-4187")'
@@ -774,13 +782,13 @@ function writeStreamingEditToolUse(res, sequence) {
   res.end()
 }
 
-function writeStreamingWriteToolUse(res, sequence) {
+function writeStreamingWriteToolUse(res, sequence, options = {}) {
   const id = `msg_cli_write_tool_use_${sequence}`
-  const toolUseId = `toolu_cli_write_${sequence}`
+  const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_write_'}${sequence}`
   const inputDeltas = splitIntoDeltas(
     JSON.stringify({
-      file_path: writeToolFilePath,
-      content: `${writeToolContent}\n`,
+      file_path: options.filePath ?? writeToolFilePath,
+      content: options.content ?? `${writeToolContent}\n`,
     }),
   )
 
@@ -943,6 +951,34 @@ function responseForBody(body, fallbackIndex) {
       toolUse: true,
       toolOptions: {
         filePath: notebookEditFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeUpdatePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_update_')) {
+      return {
+        index: responses.length + 12,
+        text: writeUpdateFinalResponse,
+      }
+    }
+    if (combinedText.includes(writeUpdateOriginalContent)) {
+      return {
+        index: responses.length + 12,
+        writeToolUse: true,
+        writeToolOptions: {
+          content: `${writeUpdateUpdatedContent}\n`,
+          filePath: writeUpdateFilePath,
+          toolUseIdPrefix: 'toolu_cli_write_update_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 12,
+      toolUse: true,
+      toolOptions: {
+        filePath: writeUpdateFilePath,
       },
       text: '',
     }
@@ -1173,7 +1209,7 @@ function startMockServer() {
           return
         }
         if (response.writeToolUse) {
-          writeStreamingWriteToolUse(res, sequence)
+          writeStreamingWriteToolUse(res, sequence, response.writeToolOptions)
           return
         }
         if (response.notebookEditToolUse) {
@@ -1425,6 +1461,12 @@ async function main() {
   await writeFile(editToolFilePath, `${editToolOriginalContent}\n`, 'utf8')
   writeToolFilePath = join(ARTIFACT_DIR, 'cli-write-tool-create.txt')
   await rm(writeToolFilePath, { force: true })
+  writeUpdateFilePath = join(ARTIFACT_DIR, 'cli-read-then-write-update.txt')
+  await writeFile(
+    writeUpdateFilePath,
+    `${writeUpdateOriginalContent}\n`,
+    'utf8',
+  )
   notebookEditFilePath = join(ARTIFACT_DIR, 'cli-read-then-notebook-edit.ipynb')
   await writeFile(
     notebookEditFilePath,
@@ -2030,6 +2072,77 @@ async function main() {
       'Write tool should create the fixture file on disk',
     )
 
+    const beforeWriteUpdateRequests = server.requests.length
+    const writeUpdateArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,Write',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const writeUpdateRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeUpdateArgs, writeUpdatePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeUpdateRun.is_error,
+      false,
+      'Read then Write update run should succeed',
+    )
+    assert.equal(
+      writeUpdateRun.result,
+      writeUpdateFinalResponse,
+      'Read then Write update final response',
+    )
+    const writeUpdateRequests = server.requests
+      .slice(beforeWriteUpdateRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeUpdateRequests.length,
+      3,
+      'Read then Write update run should make Read, Write, and final requests',
+    )
+    const writeUpdateReadFollowUpTexts = requestTexts(writeUpdateRequests[1])
+    assert(
+      containsText(writeUpdateReadFollowUpTexts, writeUpdateOriginalContent),
+      'Write update follow-up request should include Read file content',
+    )
+    const writeUpdateResultBlocks = requestContentBlocks(
+      writeUpdateRequests[2],
+      'tool_result',
+    )
+    assert(
+      writeUpdateResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_update_') &&
+          typeof block.content === 'string' &&
+          block.content.includes('has been updated successfully')
+        )
+      }),
+      'final follow-up request should include Write update tool_result content',
+    )
+    assert.equal(
+      await readFile(writeUpdateFilePath, 'utf8'),
+      `${writeUpdateUpdatedContent}\n`,
+      'Write tool should update the existing fixture file on disk',
+    )
+
     const beforeNotebookEditRequests = server.requests.length
     const notebookEditArgs = [
       '--bare',
@@ -2122,6 +2235,7 @@ async function main() {
     console.log('ok - Bash side-effect tool writes an artifact fixture file')
     console.log('ok - Read then Edit executes and updates a fixture file')
     console.log('ok - Write tool creates an artifact fixture file')
+    console.log('ok - Read then Write updates an existing artifact file')
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
