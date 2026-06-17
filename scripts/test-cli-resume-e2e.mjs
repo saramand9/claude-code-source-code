@@ -95,6 +95,23 @@ const editToolUpdatedContent = 'edit structured tool fixture: after-1842'
 const editToolFinalResponse =
   'structured Read then Edit tool completed with after-1842'
 let editToolFilePath = ''
+const editUnreadPrompt = 'cli unread edit rejection prompt'
+const editUnreadOriginalContent = 'edit unread rejection fixture: before-7510'
+const editUnreadUpdatedContent = 'edit unread rejection fixture: after-7510'
+const editUnreadFinalResponse = 'structured Edit unread rejection completed'
+let editUnreadFilePath = ''
+const editStalePrompt = 'cli stale edit rejection prompt'
+const editStaleOriginalContent = 'edit stale rejection fixture: before-6302'
+const editStaleExternalContent = 'edit stale rejection fixture: external-6302'
+const editStaleUpdatedContent = 'edit stale rejection fixture: after-6302'
+const editStaleFinalResponse = 'structured Edit stale rejection completed'
+let editStaleFilePath = ''
+let editStaleWasExternallyModified = false
+const editDenyPrompt = 'cli edit permission deny prompt'
+const editDenyOriginalContent = 'edit permission deny fixture: before-9174'
+const editDenyUpdatedContent = 'edit permission deny fixture: after-9174'
+const editDenyFinalResponse = 'structured Edit permission deny completed'
+let editDenyFilePath = ''
 
 const writeToolPrompt = 'cli write tool create prompt'
 const writeToolContent = 'write structured tool fixture: willow-2751'
@@ -785,14 +802,14 @@ function writeStreamingBashSideEffectToolUse(res, sequence) {
   res.end()
 }
 
-function writeStreamingEditToolUse(res, sequence) {
+function writeStreamingEditToolUse(res, sequence, options = {}) {
   const id = `msg_cli_edit_tool_use_${sequence}`
-  const toolUseId = `toolu_cli_edit_${sequence}`
+  const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_edit_'}${sequence}`
   const inputDeltas = splitIntoDeltas(
     JSON.stringify({
-      file_path: editToolFilePath,
-      old_string: editToolOriginalContent,
-      new_string: editToolUpdatedContent,
+      file_path: options.filePath ?? editToolFilePath,
+      old_string: options.oldString ?? editToolOriginalContent,
+      new_string: options.newString ?? editToolUpdatedContent,
     }),
   )
 
@@ -1360,6 +1377,89 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(editUnreadPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_unread_')) {
+      return {
+        index: responses.length + 22,
+        text: editUnreadFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 22,
+      editToolUse: true,
+      editToolOptions: {
+        filePath: editUnreadFilePath,
+        oldString: editUnreadOriginalContent,
+        newString: editUnreadUpdatedContent,
+        toolUseIdPrefix: 'toolu_cli_edit_unread_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editStalePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_stale_')) {
+      return {
+        index: responses.length + 23,
+        text: editStaleFinalResponse,
+      }
+    }
+    if (combinedText.includes(editStaleOriginalContent)) {
+      if (!editStaleWasExternallyModified) {
+        writeFileSync(editStaleFilePath, `${editStaleExternalContent}\n`, 'utf8')
+        const future = new Date(Date.now() + 10_000)
+        utimesSync(editStaleFilePath, future, future)
+        editStaleWasExternallyModified = true
+      }
+      return {
+        index: responses.length + 23,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editStaleFilePath,
+          oldString: editStaleOriginalContent,
+          newString: editStaleUpdatedContent,
+          toolUseIdPrefix: 'toolu_cli_edit_stale_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 23,
+      toolUse: true,
+      toolOptions: {
+        filePath: editStaleFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_deny_')) {
+      return {
+        index: responses.length + 24,
+        text: editDenyFinalResponse,
+      }
+    }
+    if (combinedText.includes(editDenyOriginalContent)) {
+      return {
+        index: responses.length + 24,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editDenyFilePath,
+          oldString: editDenyOriginalContent,
+          newString: editDenyUpdatedContent,
+          toolUseIdPrefix: 'toolu_cli_edit_deny_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 24,
+      toolUse: true,
+      toolOptions: {
+        filePath: editDenyFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(editToolPrompt)) {
     if (
       hasToolResultWithIdPrefix(body, 'toolu_cli_edit_') ||
@@ -1569,7 +1669,7 @@ function startMockServer() {
           return
         }
         if (response.editToolUse) {
-          writeStreamingEditToolUse(res, sequence)
+          writeStreamingEditToolUse(res, sequence, response.editToolOptions)
           return
         }
         if (response.writeToolUse) {
@@ -1827,6 +1927,17 @@ async function main() {
   await rm(bashSideEffectFilePath, { force: true })
   editToolFilePath = join(ARTIFACT_DIR, 'cli-read-then-edit-tool.txt')
   await writeFile(editToolFilePath, `${editToolOriginalContent}\n`, 'utf8')
+  editUnreadFilePath = join(ARTIFACT_DIR, 'cli-unread-edit-rejection.txt')
+  await writeFile(
+    editUnreadFilePath,
+    `${editUnreadOriginalContent}\n`,
+    'utf8',
+  )
+  editStaleFilePath = join(ARTIFACT_DIR, 'cli-stale-edit-rejection.txt')
+  editStaleWasExternallyModified = false
+  await writeFile(editStaleFilePath, `${editStaleOriginalContent}\n`, 'utf8')
+  editDenyFilePath = join(ARTIFACT_DIR, 'cli-edit-permission-deny.txt')
+  await writeFile(editDenyFilePath, `${editDenyOriginalContent}\n`, 'utf8')
   writeToolFilePath = join(ARTIFACT_DIR, 'cli-write-tool-create.txt')
   await rm(writeToolFilePath, { force: true })
   writeUpdateFilePath = join(ARTIFACT_DIR, 'cli-read-then-write-update.txt')
@@ -2567,6 +2678,219 @@ async function main() {
       await readFile(editToolFilePath, 'utf8'),
       `${editToolUpdatedContent}\n`,
       'Edit tool should update the fixture file on disk',
+    )
+
+    const beforeEditUnreadRequests = server.requests.length
+    const editUnreadArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Edit',
+      '--allowedTools',
+      'Edit',
+      '--model',
+      'sonnet',
+    ]
+    const editUnreadRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editUnreadArgs, editUnreadPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editUnreadRun.is_error,
+      false,
+      'Unread Edit rejection run should complete after model final response',
+    )
+    assert.equal(
+      editUnreadRun.result,
+      editUnreadFinalResponse,
+      'Unread Edit rejection final response',
+    )
+    const editUnreadRequests = server.requests
+      .slice(beforeEditUnreadRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editUnreadRequests.length,
+      2,
+      'Unread Edit rejection run should make tool_use and final requests',
+    )
+    const editUnreadResultBlocks = requestContentBlocks(
+      editUnreadRequests[1],
+      'tool_result',
+    )
+    assert(
+      editUnreadResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_unread_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('File has not been read yet')
+        )
+      }),
+      'Unread Edit follow-up should include read-before-write error result',
+    )
+    assert.equal(
+      await readFile(editUnreadFilePath, 'utf8'),
+      `${editUnreadOriginalContent}\n`,
+      'Unread Edit rejection should leave the existing file unchanged',
+    )
+
+    const beforeEditStaleRequests = server.requests.length
+    const editStaleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,Edit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const editStaleRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editStaleArgs, editStalePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editStaleRun.is_error,
+      false,
+      'Stale Edit rejection run should complete after model final response',
+    )
+    assert.equal(
+      editStaleRun.result,
+      editStaleFinalResponse,
+      'Stale Edit rejection final response',
+    )
+    const editStaleRequests = server.requests
+      .slice(beforeEditStaleRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editStaleRequests.length,
+      3,
+      'Stale Edit rejection run should make Read, Edit, and final requests',
+    )
+    const editStaleReadFollowUpTexts = requestTexts(editStaleRequests[1])
+    assert(
+      containsText(editStaleReadFollowUpTexts, editStaleOriginalContent),
+      'Stale Edit follow-up request should include Read file content before external modification',
+    )
+    const editStaleResultBlocks = requestContentBlocks(
+      editStaleRequests[2],
+      'tool_result',
+    )
+    assert(
+      editStaleResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_stale_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('modified since read')
+        )
+      }),
+      'Stale Edit follow-up should include modified-since-read error result',
+    )
+    assert.equal(
+      await readFile(editStaleFilePath, 'utf8'),
+      `${editStaleExternalContent}\n`,
+      'Stale Edit rejection should preserve the external modification',
+    )
+
+    const beforeEditDenyRequests = server.requests.length
+    const editDenyArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,Edit',
+      '--permission-mode',
+      'acceptEdits',
+      '--disallowedTools',
+      'Edit',
+      '--model',
+      'sonnet',
+    ]
+    const editDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editDenyArgs, editDenyPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editDenyRun.is_error,
+      false,
+      'Edit permission deny run should complete after model final response',
+    )
+    assert.equal(
+      editDenyRun.result,
+      editDenyFinalResponse,
+      'Edit permission deny final response',
+    )
+    const editDenyRequests = server.requests
+      .slice(beforeEditDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editDenyRequests.length,
+      3,
+      'Edit permission deny run should make Read, Edit, and final requests',
+    )
+    const editDenyReadFollowUpTexts = requestTexts(editDenyRequests[1])
+    assert(
+      containsText(editDenyReadFollowUpTexts, editDenyOriginalContent),
+      'Edit permission deny follow-up should include Read file content',
+    )
+    const editDenyResultBlocks = requestContentBlocks(
+      editDenyRequests[2],
+      'tool_result',
+    )
+    assert(
+      editDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('No such tool available: Edit')
+        )
+      }),
+      'Edit permission deny follow-up should include disabled-tool error result',
+    )
+    assert.equal(
+      await readFile(editDenyFilePath, 'utf8'),
+      `${editDenyOriginalContent}\n`,
+      'Edit permission deny should leave the file unchanged',
     )
 
     const beforeWriteToolRequests = server.requests.length
@@ -3501,6 +3825,9 @@ async function main() {
     console.log('ok - triple interleaved Read, Bash, and Read blocks follow up')
     console.log('ok - Bash side-effect tool writes an artifact fixture file')
     console.log('ok - Read then Edit executes and updates a fixture file')
+    console.log('ok - Edit rejects updating a file that was not read first')
+    console.log('ok - Edit rejects stale updates after external modification')
+    console.log('ok - Edit respects explicit disallowedTools denial')
     console.log('ok - Write tool creates an artifact fixture file')
     console.log('ok - Read then Write updates an existing artifact file')
     console.log('ok - Write rejects updating a file that was not read first')
