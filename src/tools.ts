@@ -374,6 +374,9 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     if (simpleExtraTools.has(FileWriteTool.name)) {
       simpleTools.push(FileWriteTool)
     }
+    if (simpleExtraTools.has(NotebookEditTool.name)) {
+      simpleTools.push(NotebookEditTool)
+    }
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).

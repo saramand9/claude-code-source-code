@@ -101,6 +101,14 @@ const writeToolFinalResponse =
   'structured Write tool completed with willow-2751'
 let writeToolFilePath = ''
 
+const notebookEditPrompt = 'cli read then notebook edit prompt'
+const notebookEditOriginalSource = 'print("before-notebook-4187")'
+const notebookEditUpdatedSource = 'print("after-notebook-4187")'
+const notebookEditFinalResponse =
+  'structured NotebookEdit tool completed with after-notebook-4187'
+const notebookEditCellId = 'cell-alpha'
+let notebookEditFilePath = ''
+
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -829,6 +837,72 @@ function writeStreamingWriteToolUse(res, sequence) {
   res.end()
 }
 
+function writeStreamingNotebookEditToolUse(res, sequence) {
+  const id = `msg_cli_notebook_edit_tool_use_${sequence}`
+  const toolUseId = `toolu_cli_notebook_edit_${sequence}`
+  const inputDeltas = splitIntoDeltas(
+    JSON.stringify({
+      notebook_path: notebookEditFilePath,
+      cell_id: notebookEditCellId,
+      new_source: notebookEditUpdatedSource,
+      cell_type: 'code',
+      edit_mode: 'replace',
+    }),
+  )
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'request-id': `req_mock_${sequence}`,
+  })
+  writeSseFrame(res, 'message_start', {
+    type: 'message_start',
+    message: {
+      ...makeMessage(id, '', { input_tokens: 174 }),
+      content: [],
+      stop_reason: null,
+      usage: {
+        input_tokens: 174,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+      },
+    },
+  })
+  writeSseFrame(res, 'content_block_start', {
+    type: 'content_block_start',
+    index: 0,
+    content_block: {
+      type: 'tool_use',
+      id: toolUseId,
+      name: 'NotebookEdit',
+      input: {},
+    },
+  })
+  for (const partial_json of inputDeltas) {
+    writeSseFrame(res, 'content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: {
+        type: 'input_json_delta',
+        partial_json,
+      },
+    })
+  }
+  writeSseFrame(res, 'content_block_stop', {
+    type: 'content_block_stop',
+    index: 0,
+  })
+  writeSseFrame(res, 'message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'tool_use', stop_sequence: null },
+    usage: { output_tokens: 10 },
+  })
+  writeSseFrame(res, 'message_stop', { type: 'message_stop' })
+  res.end()
+}
+
 function bodyContentBlocks(body, type) {
   return (body.messages ?? []).flatMap(message => {
     const content = message.content
@@ -850,6 +924,29 @@ function responseForBody(body, fallbackIndex) {
   const combinedText = (body.messages ?? [])
     .map(message => textFromContent(message.content))
     .join('\n')
+  if (combinedText.includes(notebookEditPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_edit_')) {
+      return {
+        index: responses.length + 11,
+        text: notebookEditFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookEditOriginalSource)) {
+      return {
+        index: responses.length + 11,
+        notebookEditToolUse: true,
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 11,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookEditFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeToolPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_')) {
       return {
@@ -1079,6 +1176,10 @@ function startMockServer() {
           writeStreamingWriteToolUse(res, sequence)
           return
         }
+        if (response.notebookEditToolUse) {
+          writeStreamingNotebookEditToolUse(res, sequence)
+          return
+        }
         if (response.toolUse) {
           writeStreamingToolUse(res, sequence, response.toolOptions)
           return
@@ -1175,9 +1276,12 @@ function runCli(args, env, options = {}) {
             [
               `CLI exited with code ${code}`,
               `args: ${args.join(' ')}`,
+              options.describeState ? `state:\n${options.describeState()}` : '',
               `stdout:\n${stdout}`,
               `stderr:\n${stderr}`,
-            ].join('\n'),
+            ]
+              .filter(Boolean)
+              .join('\n'),
           ),
         )
         return
@@ -1204,6 +1308,7 @@ function textFromContent(content) {
       if (!block || typeof block !== 'object') return ''
       if (typeof block.text === 'string') return block.text
       if (typeof block.content === 'string') return block.content
+      if (Array.isArray(block.content)) return textFromContent(block.content)
       return ''
     })
     .join('\n')
@@ -1320,6 +1425,32 @@ async function main() {
   await writeFile(editToolFilePath, `${editToolOriginalContent}\n`, 'utf8')
   writeToolFilePath = join(ARTIFACT_DIR, 'cli-write-tool-create.txt')
   await rm(writeToolFilePath, { force: true })
+  notebookEditFilePath = join(ARTIFACT_DIR, 'cli-read-then-notebook-edit.ipynb')
+  await writeFile(
+    notebookEditFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookEditCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookEditOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
 
   const server = await startMockServer()
   const configDir = await mkdtemp(join(ARTIFACT_DIR, 'cli-e2e-config-'))
@@ -1899,6 +2030,85 @@ async function main() {
       'Write tool should create the fixture file on disk',
     )
 
+    const beforeNotebookEditRequests = server.requests.length
+    const notebookEditArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const notebookEditRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookEditArgs, notebookEditPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookEditRun.is_error,
+      false,
+      'Read then NotebookEdit tool run should succeed',
+    )
+    assert.equal(
+      notebookEditRun.result,
+      notebookEditFinalResponse,
+      'Read then NotebookEdit final response',
+    )
+    const notebookEditRequests = server.requests
+      .slice(beforeNotebookEditRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookEditRequests.length,
+      3,
+      'Read then NotebookEdit run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookReadFollowUpTexts = requestTexts(notebookEditRequests[1])
+    assert(
+      containsText(notebookReadFollowUpTexts, notebookEditOriginalSource),
+      'NotebookEdit follow-up request should include Read notebook content',
+    )
+    const notebookEditResultBlocks = requestContentBlocks(
+      notebookEditRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookEditResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_edit_') &&
+          typeof block.content === 'string' &&
+          block.content.includes(notebookEditUpdatedSource)
+        )
+      }),
+      'final follow-up request should include NotebookEdit tool_result content',
+    )
+    const updatedNotebook = JSON.parse(
+      await readFile(notebookEditFilePath, 'utf8'),
+    )
+    assert.equal(
+      updatedNotebook.cells[0].source,
+      notebookEditUpdatedSource,
+      'NotebookEdit tool should update the fixture notebook cell on disk',
+    )
+    assert.deepEqual(
+      updatedNotebook.cells[0].outputs,
+      [],
+      'NotebookEdit should clear code cell outputs',
+    )
+
     console.log('ok - cli print/resume/continue E2E')
     console.log(`ok - local mock captured ${promptRequests.length} streamed prompt requests`)
     console.log('ok - textual tool-call leak is reported without executing a tool')
@@ -1912,6 +2122,7 @@ async function main() {
     console.log('ok - Bash side-effect tool writes an artifact fixture file')
     console.log('ok - Read then Edit executes and updates a fixture file')
     console.log('ok - Write tool creates an artifact fixture file')
+    console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log(`ok - transcript ${transcripts[0]}`)
   } finally {
     await server.close()
