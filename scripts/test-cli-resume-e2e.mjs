@@ -290,6 +290,16 @@ const writeContentAskFinalResponse =
 const writeContentAskRelativePath =
   'build-src/test-artifacts/cli-write-content-ask-tool.txt'
 const writeContentAskFilePath = join(ROOT, writeContentAskRelativePath)
+const writeHookDenyPrompt = 'cli write pretooluse hook deny prompt'
+const writeHookDenyContent =
+  'write pretooluse hook deny fixture: attempted-3614'
+const writeHookDenyFinalResponse =
+  'structured Write PreToolUse hook deny completed'
+const writeHookDenyReason =
+  'pretooluse hook blocked Write fixture marker 3614'
+const writeHookDenyRelativePath =
+  'build-src/test-artifacts/cli-write-hook-deny-tool.txt'
+const writeHookDenyFilePath = join(ROOT, writeHookDenyRelativePath)
 const userSettingsWriteDenyPrompt =
   'cli user settings write deny prompt'
 const userSettingsWriteDenyContent =
@@ -1911,6 +1921,24 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(writeHookDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_hook_deny_')) {
+      return {
+        index: responses.length + 54,
+        text: writeHookDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 54,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeHookDenyContent}\n`,
+        filePath: writeHookDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_hook_deny_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(userSettingsWriteDenyPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_user_settings_write_deny_')) {
       return {
@@ -2740,6 +2768,29 @@ function startMockServer() {
 
       if (url.pathname.endsWith('/messages/count_tokens')) {
         writeJson(res, { input_tokens: 100 })
+        return
+      }
+
+      if (url.pathname === '/hook/pretooluse-block-write') {
+        assert.equal(
+          body.hook_event_name,
+          'PreToolUse',
+          'PreToolUse hook endpoint should receive a PreToolUse event',
+        )
+        assert.equal(
+          body.tool_name,
+          'Write',
+          'PreToolUse hook endpoint should receive the Write tool name',
+        )
+        assert.equal(
+          body.tool_input?.file_path,
+          writeHookDenyFilePath,
+          'PreToolUse hook endpoint should receive the Write file path',
+        )
+        writeJson(res, {
+          decision: 'block',
+          reason: writeHookDenyReason,
+        })
         return
       }
 
@@ -6228,6 +6279,117 @@ async function main() {
       'Write content-specific ask should not create the unapproved file',
     )
 
+    const writeHookDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-write-hook-deny-config-'),
+    )
+    await writeFile(
+      join(writeHookDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Write',
+                hooks: [
+                  {
+                    type: 'http',
+                    url: `${server.baseUrl}/hook/pretooluse-block-write`,
+                    timeout: 5,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const writeHookDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: writeHookDenyConfigDir,
+    }
+    delete writeHookDenyEnv.CLAUDE_CODE_SIMPLE
+    const writeHookDenyArgs = [
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--allowedTools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    await rm(writeHookDenyFilePath, { force: true })
+    const beforeWriteHookDenyRequests = server.requests.length
+    const writeHookDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeHookDenyArgs, writeHookDenyPrompt],
+          writeHookDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeHookDenyRun.is_error,
+      false,
+      'Write PreToolUse hook deny run should complete after model final response',
+    )
+    assert.equal(
+      writeHookDenyRun.result,
+      writeHookDenyFinalResponse,
+      'Write PreToolUse hook deny final response',
+    )
+    const writeHookDenyRequests = server.requests
+      .slice(beforeWriteHookDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeHookDenyRequests.length,
+      2,
+      'Write PreToolUse hook deny run should make tool_use and final requests',
+    )
+    const writeHookRequests = server.requests
+      .slice(beforeWriteHookDenyRequests)
+      .filter(request => request.path === '/hook/pretooluse-block-write')
+    assert.equal(
+      writeHookRequests.length,
+      1,
+      'Write PreToolUse hook deny run should call the blocking hook once',
+    )
+    const writeHookDenyResultBlocks = requestContentBlocks(
+      writeHookDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeHookDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_hook_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes(writeHookDenyReason)
+        )
+      }),
+      `Write PreToolUse hook deny follow-up should include hook-denied tool_result: ${JSON.stringify(writeHookDenyResultBlocks, null, 2)}`,
+    )
+    const writeHookDenyFileExists = await stat(writeHookDenyFilePath).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeHookDenyFileExists,
+      false,
+      'Write PreToolUse hook deny should not create the blocked file',
+    )
+
     const userSettingsDenyConfigDir = await mkdtemp(
       join(ARTIFACT_DIR, 'cli-user-settings-deny-config-'),
     )
@@ -7516,6 +7678,7 @@ async function main() {
     console.log('ok - Write respects explicit disallowedTools denial')
     console.log('ok - Write respects Edit path-specific deny rules')
     console.log('ok - Write respects Edit path-specific ask rules')
+    console.log('ok - Write respects PreToolUse hook denial')
     console.log('ok - user settings deny removes Write from the tool pool')
     console.log('ok - project settings deny removes Write from the tool pool')
     console.log('ok - managed-only permissions ignore CLI Write allow')

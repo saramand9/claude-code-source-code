@@ -2234,3 +2234,36 @@ NotebookEdit 大文件保护的当前风险：`NotebookEdit` 现在会在解析 
 二进制写入保护的当前风险：普通文本 `Read` 现在会对未知扩展文件做内容 sniff，明显二进制内容会被拒绝，并且不会建立后续 `Write` 覆盖资格；真实 CLI E2E 已覆盖无扩展二进制文件的 `Read` 拒绝、同路径 `Write` 继续被读后写保护拒绝，以及原始字节不变。带 UTF-16LE BOM 的文本为兼容现有编码保留流程仍允许通过；其它无 BOM 多字节文本如果被误判为二进制，需要后续专门编码读取支持。
 
 交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归、真实 `Messages`/Ink 组件渲染回归，以及真实 `dist\cli.js` 子进程的 `stream-json --include-partial-messages` delayed SSE partial flush 回归；完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。
+
+## 2026-06-19 PreToolUse hook denial E2E coverage
+
+This round closes one remaining permission-path risk: user configured
+`PreToolUse` hooks must be able to reject a tool call even when the CLI
+arguments allow that tool.
+
+### Real coverage added
+
+- `scripts/test-cli-resume-e2e.mjs`
+  - Adds `cli write pretooluse hook deny prompt`.
+  - Adds a mock HTTP hook endpoint at `/hook/pretooluse-block-write`.
+  - Creates a temporary `settings.json` with `hooks.PreToolUse` matching
+    `Write` and returning `{"decision":"block","reason":...}`.
+  - Runs real non-bare `dist/cli.js` with `--tools Write --allowedTools Write`.
+  - Deletes `CLAUDE_CODE_SIMPLE` for this scenario because simple mode and
+    `--bare` intentionally skip hooks.
+  - Asserts the hook endpoint is called once, the follow-up `tool_result` is
+    `is_error: true` and includes the hook reason, and the blocked file is not
+    created.
+
+### Verification
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+Expected new output:
+
+```text
+ok - Write respects PreToolUse hook denial
+```
