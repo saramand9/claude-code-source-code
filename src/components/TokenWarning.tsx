@@ -25,7 +25,6 @@ type ContextCollapseModule = {
   subscribe(listener: () => void): () => void;
   isContextCollapseEnabled(): boolean;
 };
-const contextCollapseModulePath: string = '../services/contextCollapse/index.js';
 
 /**
  * Live collapse progress: "x / y summarized". Sub-component so
@@ -40,7 +39,7 @@ function CollapseLabel(t0) {
   } = t0;
   let t1;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t1 = require(contextCollapseModulePath);
+    t1 = require('../services/contextCollapse/index.js');
     $[0] = t1;
   } else {
     t1 = $[0];
@@ -150,7 +149,7 @@ export function TokenWarning(t0) {
   if (feature("CONTEXT_COLLAPSE")) {
     const {
       isContextCollapseEnabled
-    } = require(contextCollapseModulePath) as ContextCollapseModule;
+    } = require('../services/contextCollapse/index.js') as ContextCollapseModule;
     if (isContextCollapseEnabled()) {
       collapseMode = true;
     }

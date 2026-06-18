@@ -61,12 +61,47 @@ type UdsMessagingModule = {
   getDefaultUdsSocketPath(): string
 }
 
-type ContextCollapseModule = {
-  initContextCollapse(): void
-}
-
 type AttributionHooksModule = {
   registerAttributionHooks(): void
+}
+
+const LOGO_PREFETCH_STARTUP_TIMEOUT_MS = 750
+
+async function preloadLogoDataBeforeRender(): Promise<void> {
+  const load = (async () => {
+    const { hasReleaseNotes } = await checkForReleaseNotes(
+      getGlobalConfig().lastReleaseNotesSeen,
+    )
+    if (hasReleaseNotes) {
+      await getRecentActivity()
+    }
+  })()
+
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const timedOut = await Promise.race([
+    load.then(
+      () => false,
+      error => {
+        logError(error)
+        return false
+      },
+    ),
+    new Promise<boolean>(resolve => {
+      timeout = setTimeout(
+        resolve,
+        LOGO_PREFETCH_STARTUP_TIMEOUT_MS,
+        true,
+      )
+    }),
+  ])
+  if (timeout) clearTimeout(timeout)
+
+  if (timedOut) {
+    load.catch(logError)
+    logForDiagnosticsNoPII('info', 'setup_logo_prefetch_deferred', {
+      timeout_ms: LOGO_PREFETCH_STARTUP_TIMEOUT_MS,
+    })
+  }
 }
 
 export async function setup(
@@ -309,14 +344,6 @@ export async function setup(
   // raced ahead and memoized an empty bundledSkills list.
   if (!isBareMode()) {
     initSessionMemory() // Synchronous - registers hook, gate check happens lazily
-    if (feature('CONTEXT_COLLAPSE')) {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const contextCollapseModulePath: string =
-        './services/contextCollapse/index.js'
-      ;(require(contextCollapseModulePath) as ContextCollapseModule)
-        .initContextCollapse()
-      /* eslint-enable @typescript-eslint/no-require-imports */
-    }
   }
   void lockCurrentVersion() // Lock current version to prevent deletion by other processes
   logForDiagnosticsNoPII('info', 'setup_background_jobs_launched')
@@ -398,16 +425,13 @@ export async function setup(
   void prefetchApiKeyFromApiKeyHelperIfSafe(getIsNonInteractiveSession()) // Prefetch safely - only executes if trust already confirmed
   profileCheckpoint('setup_after_prefetch')
 
-  // Pre-fetch data for Logo v2 - await to ensure it's ready before logo renders.
+  // Pre-fetch data for Logo v2, but never let non-critical history/changelog
+  // reads block the first interactive render. Slow proxy or filesystem startup
+  // paths should still show the prompt promptly; the cache warms in background.
   // --bare / SIMPLE: skip — release notes are interactive-UI display data,
   // and getRecentActivity() reads up to 10 session JSONL files.
   if (!isBareMode()) {
-    const { hasReleaseNotes } = await checkForReleaseNotes(
-      getGlobalConfig().lastReleaseNotesSeen,
-    )
-    if (hasReleaseNotes) {
-      await getRecentActivity()
-    }
+    await preloadLogoDataBeforeRender()
   }
 
   // If permission mode is set to bypass, verify we're in a safe environment

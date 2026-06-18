@@ -119,8 +119,6 @@ const tungstenLiveMonitorModulePath: string =
   '../tools/TungstenTool/TungstenLiveMonitor.js';
 const webBrowserPanelModulePath: string =
   '../tools/WebBrowserTool/WebBrowserPanel.js';
-const contextCollapseModulePath: string =
-  '../services/contextCollapse/index.js';
 const TungstenLiveMonitor: React.ComponentType =
   isAntUserType()
     ? (require(tungstenLiveMonitorModulePath).TungstenLiveMonitor as React.ComponentType)
@@ -3748,7 +3746,7 @@ export function REPL({
       // threshold crossing.
       /* eslint-disable @typescript-eslint/no-require-imports */
       ;
-      (require(contextCollapseModulePath) as ContextCollapseModule).resetContextCollapse();
+      (require('../services/contextCollapse/index.js') as ContextCollapseModule).resetContextCollapse();
       /* eslint-enable @typescript-eslint/no-require-imports */
     }
 

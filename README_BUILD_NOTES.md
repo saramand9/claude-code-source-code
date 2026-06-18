@@ -763,7 +763,7 @@ git diff --check
 结果：
 
 - `npm run audit:features` 会列出 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`HISTORY_SNIP` 为 `preserved-default`。
-- `npm run test:build-safety` 通过，当前为 32/32 项，覆盖 `DUMP_SYSTEM_PROMPT` 的构建保留和真实 CLI 快速路径。
+- `npm run test:build-safety` 当时通过全部 32 项，覆盖 `DUMP_SYSTEM_PROMPT` 的构建保留和真实 CLI 快速路径；后续新增测试后的当前统计见下方“已验证”部分。
 - `node dist\cli.js --dump-system-prompt --model sonnet` 不需要真实 API key，也不连接当前代理或模型服务；smoke 检查命中了 `Claude Code` 文本。
 - `npm run check`、`node --check scripts\test-build-safety.mjs`、`node --check dist\cli.js`、`npm run test:cli-e2e` 和 `git diff --check` 均通过；`git diff --check` 仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
 
@@ -819,6 +819,8 @@ fail-fast stub 调用、构造、取属性和数值转换行为
 ContextCollapse 默认关闭、显式 opt-in、恢复状态和 CtxInspectTool 加载
 History Snip 构建保留、分段裁剪、目标 ID 裁剪、boundary replay、投影删除、工具对保护、SnipTool 和 force-snip 加载
 DUMP_SYSTEM_PROMPT 构建保留、真实 dist 快速路径输出、且不触发模型/API 请求
+CC Switch 设置路径启动探针：读取到 settings env 中的 ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL，`setup()` 可完成，不再卡在首屏前 ContextCollapse 初始化
+Windows Node 产物 ripgrep fallback：缺少 `dist/vendor/ripgrep/.../rg.exe` 时自动回退系统 `rg`，并通过 `rg --version`
 Snip 后 transcript resume 过滤、parentUuid 重连、conversation chain 恢复、resume 入口恢复、session-id/continue 恢复、compact+Snip 叠加恢复，以及 recordTranscript 写侧去重接链
 真实 dist/cli.js 子进程 E2E：-p、--resume <session-id>、--continue 三段模型请求和 transcript 落盘恢复
 第三方代理文本化工具调用泄漏检测：`Calling: Read` + JSON 被识别为 tool_use 协议兼容错误，不自动执行工具
@@ -854,7 +856,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 32 项深度检查：
+`npm run test:build-safety` 当前覆盖 33 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -863,6 +865,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 - `CONTEXT_COLLAPSE` 在构建副本中被保留，但 prompt-too-long 兜底仍受 runtime gate 控制。
 - ContextCollapse 外部运行时默认关闭、projection no-op、恢复元数据、显式 opt-in 和 prompt-too-long withholding 行为。
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
+- ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
 - History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
 - Snip 后 resume/transcript 的 JSONL 回放、removedUuids 过滤、parentUuid 重连、leaf 选择、conversation chain 恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复，以及 `recordTranscript()` 写侧去重和 boundary/tail 接链。
@@ -891,10 +894,50 @@ url-handler-napi 缺失由 nativeOptional 包装
 - `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
 - `nativeOptional` 对缺失 native 包的统一错误包装。
 - `modifiers-napi`、`image-processor-napi`、`audio-capture-napi`、`url-handler-napi` 相关 fallback 或保护路径。
+- Node 产物缺少 vendored ripgrep 二进制时，`ripgrepCommand()` 会回退到系统 `rg`，并通过真实 `rg --version` 验证。
 - deep link 合法输入、非法 repo、控制字符和超长输入。
 - `dist/cli.js --version`、`--help`、`doctor --help` 和 `node --check`。
 
 还通过配置好的 Anthropic-compatible 代理完成过真实 `-p` 任务和一组纯推理 smoke test。该代理配置没有写入仓库。
+
+## 2026-06-18 CC Switch 启动卡住专项修复
+
+用户复现路径：两个终端启动同一个构建产物，一个显式设置模型/代理环境变量时正常；另一个不设置环境变量、依赖 CC Switch 写入的 Claude settings 环境变量时，在 `Welcome back` 之前卡住。官方 Claude Code 走同一 CC Switch 配置可正常启动。
+
+### 根因判断
+
+- 这不是 CC Switch 协议本身的问题，也不是 Playwright MCP 是否启用导致。
+- debug 文件显示当前产物能读取 settings env：`ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL=http://127.0.0.1:15721`。
+- 卡点在 `setup()` 的 ContextCollapse 启动期动态加载：`const contextCollapseModulePath = './services/contextCollapse/index.js'; require(contextCollapseModulePath)`。
+- 官方产物的打包/运行时形态能处理这类路径；当前 Node 单文件 esbuild 产物会把变量路径 require 留到运行期，等价于去 `dist/services/contextCollapse/index.js` 找真实文件。该文件不存在，容易在首屏前阻塞或报缺失模块。
+- 同轮启动探针还暴露 `dist/vendor/ripgrep/x64-win32/rg.exe ENOENT`。仓库没有 vendored ripgrep 二进制，Node 产物不应该默认指向不存在的 vendor 路径。
+
+### 本轮真实修复
+
+- 移除 `setup.ts` 中首屏前的 ContextCollapse 初始化。当前 `initContextCollapse()` 只做订阅通知，运行时状态仍由模块自身和 resume/persist 路径维护，不需要阻塞首次渲染。
+- 将 `TokenWarning`、`REPL`、`analyzeContext` 中的 `contextCollapseModulePath` 变量 require 改为静态字面量 require，让构建器能把模块并入单文件产物。
+- 给 Logo v2 的 release notes / recent activity 预取增加 750ms 上限。它属于非关键首屏数据，超时后后台继续暖缓存，不阻塞欢迎界面。
+- `ripgrepCommand()` 在 Node 产物缺少 vendored `rg` 时自动回退系统 `rg`，避免启动或搜索路径直接报 `rg.exe ENOENT`。
+- `scripts/test-build-safety.mjs` 新增断言：ContextCollapse 相关路径不再使用变量 require，`setup()` 不再同步初始化 ContextCollapse，ripgrep fallback 必须指向可执行命令并通过 `rg --version`。
+
+### 本轮 mock/stub/风险说明
+
+- 本修复没有把 ContextCollapse 变成官方完整实现。它仍是 external-conservative：默认关闭、projection no-op、不伪造摘要提交。
+- CC Switch 本身没有写入仓库配置；产物只是读取用户本机 settings/env。
+- 非 TTY 启动探针会因为没有 stdin/prompt 而退出，这是测试环境特性，不代表交互终端退出。
+- 当前仍会看到扫描不存在的全局 commands/agents 目录时产生的 `rg error` debug 日志；它已不是 `rg.exe ENOENT`，不阻塞启动，但后续可继续做目录存在性优化。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+node --check dist\cli.js
+CC Switch settings env 启动探针：setup() completed，读取到 ANTHROPIC_BASE_URL=http://127.0.0.1:15721
+ripgrep 启动探针：Ripgrep first use test PASSED (mode=system, path=rg)，不再出现 dist/vendor/.../rg.exe ENOENT
+```
 
 ## 当前风险边界
 

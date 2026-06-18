@@ -211,6 +211,16 @@ await test('context collapse build gate is preserved but runtime-gated', async (
   const toolsSource = await readFile(join(BUILD, 'src/tools.ts'), 'utf8')
   const commandsSource = await readFile(join(BUILD, 'src/commands.ts'), 'utf8')
   const cliSource = await readFile(join(BUILD, 'src/entrypoints/cli.tsx'), 'utf8')
+  const setupSource = await readFile(join(BUILD, 'src/setup.ts'), 'utf8')
+  const tokenWarningSource = await readFile(
+    join(BUILD, 'src/components/TokenWarning.tsx'),
+    'utf8',
+  )
+  const replSource = await readFile(join(BUILD, 'src/screens/REPL.tsx'), 'utf8')
+  const analyzeContextSource = await readFile(
+    join(BUILD, 'src/utils/analyzeContext.ts'),
+    'utf8',
+  )
   assert.match(
     cliSource,
     /if \(true && args\[0\] === '--dump-system-prompt'\)/,
@@ -246,6 +256,23 @@ await test('context collapse build gate is preserved but runtime-gated', async (
     /contextCollapse\?\.isContextCollapseEnabled\(\) &&\s+isWithheld413/,
     'prompt-too-long fallback must remain runtime-gated',
   )
+  assert.doesNotMatch(
+    setupSource,
+    /initContextCollapse\(\)/,
+    'setup should not block first render on context collapse initialization',
+  )
+  for (const [name, source] of [
+    ['setup', setupSource],
+    ['TokenWarning', tokenWarningSource],
+    ['REPL', replSource],
+    ['analyzeContext', analyzeContextSource],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      /contextCollapseModulePath|require\(contextCollapseModulePath\)/,
+      `${name} should not use runtime variable require for contextCollapse`,
+    )
+  }
   assert.match(
     querySource,
     /const reactiveCompact = false\s+\?\s+\(require\('\.\/services\/compact\/reactiveCompact\.js'\)/,
@@ -1558,6 +1585,35 @@ if (typeof availability.available !== 'boolean' || !Object.prototype.hasOwnPrope
 console.log('voice fallback OK');`,
   )
   assert.equal(output, 'voice fallback OK')
+})
+
+await test('ripgrep command avoids missing vendored binary', async () => {
+  const output = await buildAndRunSnippet(
+    'ripgrep-command-test',
+    `import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { ripgrepCommand, getRipgrepStatus } from './src/utils/ripgrep.ts';
+const { rgPath, rgArgs } = ripgrepCommand();
+if (rgPath.includes('vendor') && !existsSync(rgPath)) {
+  throw new Error('ripgrep points at missing vendor binary: ' + rgPath);
+}
+const result = spawnSync(rgPath, [...rgArgs, '--version'], { encoding: 'utf8' });
+if (result.status !== 0 || !String(result.stdout).startsWith('ripgrep ')) {
+  throw new Error('ripgrep version check failed: ' + JSON.stringify({
+    rgPath,
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error: result.error?.message,
+  }));
+}
+const status = getRipgrepStatus();
+if (status.mode === 'builtin' && !existsSync(status.path)) {
+  throw new Error('builtin ripgrep status points at missing binary: ' + status.path);
+}
+console.log('ripgrep command OK');`,
+  )
+  assert.equal(output, 'ripgrep command OK')
 })
 
 await test('deep link parser accepts valid input and rejects injection-like input', async () => {

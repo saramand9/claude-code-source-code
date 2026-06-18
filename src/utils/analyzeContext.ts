@@ -1124,10 +1124,8 @@ export async function analyzeContextUsage(
     type ContextCollapseModule = {
       isContextCollapseEnabled(): boolean
     }
-    const contextCollapseModulePath: string =
-      '../services/contextCollapse/index.js'
     const { isContextCollapseEnabled } =
-      require(contextCollapseModulePath) as ContextCollapseModule
+      require('../services/contextCollapse/index.js') as ContextCollapseModule
     /* eslint-enable @typescript-eslint/no-require-imports */
     if (isContextCollapseEnabled()) {
       skipReservedBuffer = true
