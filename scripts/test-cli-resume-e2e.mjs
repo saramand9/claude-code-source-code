@@ -50,6 +50,23 @@ const unclosedToolFinalResponse =
   'unclosed structured Read tool completed with birch-5021'
 let unclosedToolReadFilePath = ''
 
+const readContentDenyPrompt = 'cli read content-specific deny prompt'
+const readContentDenyFileContent =
+  'read content-specific deny fixture: blocked-6391'
+const readContentDenyFinalResponse =
+  'structured Read content-specific deny completed'
+const readContentDenyRelativePath =
+  'build-src/test-artifacts/cli-read-content-deny-tool.txt'
+const readContentDenyFilePath = join(ROOT, readContentDenyRelativePath)
+const readContentAskPrompt = 'cli read content-specific ask prompt'
+const readContentAskFileContent =
+  'read content-specific ask fixture: blocked-8274'
+const readContentAskFinalResponse =
+  'structured Read content-specific ask completed'
+const readContentAskRelativePath =
+  'build-src/test-artifacts/cli-read-content-ask-tool.txt'
+const readContentAskFilePath = join(ROOT, readContentAskRelativePath)
+
 const outOfOrderPrompt = 'cli out-of-order stream fallback prompt'
 const outOfOrderFallbackResponse =
   'out-of-order streaming recovered through non-streaming fallback'
@@ -643,7 +660,7 @@ function writeOutOfOrderStreamingMessage(res, sequence) {
 
 function writeStreamingToolUse(res, sequence, options = {}) {
   const id = `msg_cli_tool_use_${sequence}`
-  const toolUseId = `toolu_cli_read_${sequence}`
+  const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_read_'}${sequence}`
   const filePath = options.filePath ?? toolReadFilePath
   const inputJson = JSON.stringify({ file_path: filePath })
   const inputDeltas = options.splitInputDeltas
@@ -2528,6 +2545,40 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(readContentDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_content_deny_')) {
+      return {
+        index: responses.length + 50,
+        text: readContentDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 50,
+      toolUse: true,
+      toolOptions: {
+        filePath: readContentDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_read_content_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(readContentAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_content_ask_')) {
+      return {
+        index: responses.length + 51,
+        text: readContentAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 51,
+      toolUse: true,
+      toolOptions: {
+        filePath: readContentAskFilePath,
+        toolUseIdPrefix: 'toolu_cli_read_content_ask_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(chunkedToolPrompt)) {
     if (combinedText.includes(chunkedToolFileContent)) {
       return {
@@ -2978,6 +3029,16 @@ async function main() {
   await writeFile(
     unclosedToolReadFilePath,
     `${unclosedToolFileContent}\n`,
+    'utf8',
+  )
+  await writeFile(
+    readContentDenyFilePath,
+    `${readContentDenyFileContent}\n`,
+    'utf8',
+  )
+  await writeFile(
+    readContentAskFilePath,
+    `${readContentAskFileContent}\n`,
     'utf8',
   )
   multiToolReadFilePathA = join(
@@ -3620,6 +3681,177 @@ async function main() {
     assert(
       containsText(unclosedFollowUpTexts, unclosedToolFileContent),
       'unclosed follow-up request should include Read tool_result content',
+    )
+
+    const readContentRuleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Read',
+      '--allowedTools',
+      'Read',
+      '--model',
+      'sonnet',
+    ]
+
+    const readContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-read-content-deny-config-'),
+    )
+    await writeFile(
+      join(readContentDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: [`Read(${readContentDenyRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const readContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: readContentDenyConfigDir,
+    }
+    const beforeReadContentDenyRequests = server.requests.length
+    const readContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...readContentRuleArgs, readContentDenyPrompt],
+          readContentDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      readContentDenyRun.is_error,
+      false,
+      'Read content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      readContentDenyRun.result,
+      readContentDenyFinalResponse,
+      'Read content-specific deny final response',
+    )
+    const readContentDenyRequests = server.requests
+      .slice(beforeReadContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      readContentDenyRequests.length,
+      2,
+      'Read content-specific deny run should make tool_use and final requests',
+    )
+    const readContentDenyResultBlocks = requestContentBlocks(
+      readContentDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      readContentDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_read_content_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes(
+            'File is in a directory that is denied by your permission settings',
+          )
+        )
+      }),
+      `Read content-specific deny follow-up should include path-denied tool_result: ${JSON.stringify(readContentDenyResultBlocks, null, 2)}`,
+    )
+    assert(
+      !containsText(requestTexts(readContentDenyRequests[1]), readContentDenyFileContent),
+      'Read content-specific deny follow-up should not include denied file content',
+    )
+    assert.equal(
+      await readFile(readContentDenyFilePath, 'utf8'),
+      `${readContentDenyFileContent}\n`,
+      'Read content-specific deny should leave the fixture unchanged',
+    )
+
+    const readContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-read-content-ask-config-'),
+    )
+    await writeFile(
+      join(readContentAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: [`Read(${readContentAskRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const readContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: readContentAskConfigDir,
+    }
+    const beforeReadContentAskRequests = server.requests.length
+    const readContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...readContentRuleArgs, readContentAskPrompt],
+          readContentAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      readContentAskRun.is_error,
+      false,
+      'Read content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      readContentAskRun.result,
+      readContentAskFinalResponse,
+      'Read content-specific ask final response',
+    )
+    const readContentAskRequests = server.requests
+      .slice(beforeReadContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      readContentAskRequests.length,
+      2,
+      'Read content-specific ask run should make tool_use and final requests',
+    )
+    const readContentAskResultBlocks = requestContentBlocks(
+      readContentAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      readContentAskResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_read_content_ask_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Claude requested permissions to read from') &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `Read content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(readContentAskResultBlocks, null, 2)}`,
+    )
+    assert(
+      !containsText(requestTexts(readContentAskRequests[1]), readContentAskFileContent),
+      'Read content-specific ask follow-up should not include unapproved file content',
+    )
+    assert.equal(
+      await readFile(readContentAskFilePath, 'utf8'),
+      `${readContentAskFileContent}\n`,
+      'Read content-specific ask should leave the fixture unchanged',
     )
 
     const beforeOutOfOrderRequests = server.requests.length
@@ -6938,6 +7170,8 @@ async function main() {
     console.log('ok - structured Read tool_use executes and sends tool_result')
     console.log('ok - chunked tool_use executes despite non-tool stop_reason')
     console.log('ok - unclosed tool_use block is finalized at stream end')
+    console.log('ok - Read respects path-specific deny rules')
+    console.log('ok - Read respects path-specific ask rules')
     console.log('ok - out-of-order stream recovers through non-streaming fallback')
     console.log('ok - reactive compact recovers after prompt-too-long')
     console.log('ok - stream-json partial events flush before final result')
