@@ -105,7 +105,7 @@ export default { coerce, satisfies, valid };
     },
     alias: {
       src: join(BUILD, 'src'),
-      '@ant/claude-for-chrome-mcp': join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
+      '@ant/claude-for-chrome-mcp': join(BUILD, 'src', 'stubs', 'claude-for-chrome-mcp.ts'),
       'color-diff-napi': join(BUILD, 'src', 'native-ts', 'color-diff', 'index.ts'),
       'jsonc-parser/lib/esm/main.js': jsoncStub,
       semver: semverStub,
@@ -133,10 +133,9 @@ await test('stub manifest exists and records current stub kinds', async () => {
   const manifestPath = join(BUILD, 'stub-manifest.json')
   manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   assert.equal(Array.isArray(manifest.entries), true)
-  assert(manifest.entries.length > 0, 'expected at least one stub manifest entry')
 
   const kinds = new Set(manifest.entries.map(entry => entry.kind))
-  assert(kinds.has('private-package-stub'), 'missing private-package-stub')
+  assert(!kinds.has('private-package-stub'), 'private package stubs should be source shims or real modules')
   assert(!kinds.has('empty-asset-stub'), 'empty asset stubs should be restored or made fail-fast')
 
   for (const entry of manifest.entries) {
@@ -1995,14 +1994,39 @@ await test('generated build has no snip variable-path requires', async () => {
   assert.doesNotMatch(text, /snip(?:Projection|Compact|BoundaryMessage)ModulePath\s*=/)
 })
 
-await test('private Chrome MCP package stub is explicit', async () => {
-  const mod = await import(pathToFileURL(join(BUILD, 'stubs/claude-for-chrome-mcp.js')).href)
-  assert.deepEqual(mod.BROWSER_TOOLS, [])
-  await assertThrowsMessage(
-    () => mod.createClaudeForChromeMcpServer(),
-    /Private package unavailable.*@ant\/claude-for-chrome-mcp/,
-    'chrome mcp server creation',
+await test('Chrome MCP external shim starts empty in-process server', async () => {
+  const output = await buildAndRunSnippet(
+    'chrome-mcp-shim-test',
+    `import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { createClaudeForChromeMcpServer, BROWSER_TOOLS } from '@ant/claude-for-chrome-mcp';
+import { createLinkedTransportPair } from './src/services/mcp/InProcessTransport.ts';
+const warnings = [];
+const server = createClaudeForChromeMcpServer({
+  serverName: 'Chrome shim test',
+  logger: { warn(message) { warnings.push(String(message)); } },
+});
+if (!Array.isArray(BROWSER_TOOLS) || BROWSER_TOOLS.length !== 0) throw new Error('shim should expose zero browser tools');
+if (typeof server.connect !== 'function') throw new Error('shim server is not connectable');
+const client = new Client({ name: 'chrome-shim-test-client', version: '0.0.0' }, { capabilities: {} });
+const [clientTransport, serverTransport] = createLinkedTransportPair();
+await server.connect(serverTransport);
+await client.connect(clientTransport);
+const listed = await client.listTools();
+if (!listed || !Array.isArray(listed.tools)) throw new Error('missing tools list');
+if (listed.tools.length !== 0) throw new Error('shim should list zero tools');
+let callError;
+try {
+  await client.callTool({ name: 'browser_snapshot', arguments: {} });
+} catch (error) {
+  callError = error;
+}
+if (!callError || !String(callError.message).includes('browser_snapshot')) throw new Error('missing explicit tool-call error');
+if (!warnings.some(message => message.includes('private package is unavailable'))) throw new Error('missing shim warning');
+await client.close();
+await server.close();
+console.log('chrome mcp shim OK');`,
   )
+  assert.equal(output, 'chrome mcp shim OK')
 })
 
 await test('optional native loader wraps missing modules', async () => {

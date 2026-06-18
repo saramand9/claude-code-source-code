@@ -174,23 +174,6 @@ await writeFile(ENTRY, `#!/usr/bin/env node
 // Copyright (c) Anthropic PBC. All rights reserved.
 import './src/entrypoints/cli.tsx'
 `, 'utf8')
-await mkdir(join(BUILD, 'stubs'), { recursive: true })
-await writeFile(
-  join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
-  `// Auto-generated stub for private @ant/claude-for-chrome-mcp package
-export const BROWSER_TOOLS = []
-export function createClaudeForChromeMcpServer() {
-  throw new Error('Private package unavailable in this source build: @ant/claude-for-chrome-mcp')
-}
-`,
-  'utf8',
-)
-recordStub({
-  kind: 'private-package-stub',
-  module: '@ant/claude-for-chrome-mcp',
-  path: 'build-src/stubs/claude-for-chrome-mcp.js',
-  behavior: 'fail-fast when createClaudeForChromeMcpServer is called',
-})
 console.log('✅ Phase 3: Created entry wrapper')
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -356,7 +339,7 @@ for (let round = 1; round <= MAX_ROUNDS; round++) {
       },
       alias: {
         src: join(BUILD, 'src'),
-        '@ant/claude-for-chrome-mcp': join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
+        '@ant/claude-for-chrome-mcp': join(BUILD, 'src', 'stubs', 'claude-for-chrome-mcp.ts'),
         'color-diff-napi': join(BUILD, 'src', 'native-ts', 'color-diff', 'index.ts'),
         'vscode-jsonrpc/node.js': 'vscode-jsonrpc/node',
       },

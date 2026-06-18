@@ -71,7 +71,7 @@
 | `scripts/audit-features.mjs` / `npm run audit:features` | 尝试修复/真实适配 | 统计 `src/` 中所有 `feature('...')` 调用、默认保留项、环境保留项和当前 stub manifest，作为后续 feature 修复清单。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
-| `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools；server 创建时 fail-fast。 |
+| `@ant/claude-for-chrome-mcp` alias | 混合 | 指向 `src/stubs/claude-for-chrome-mcp.ts` 外部保守 shim；提供空 browser tools 和可连接的空 MCP server，不恢复真实 Chrome browser tools。 |
 | `color-diff-napi` alias 到 `src/native-ts/color-diff` | 尝试修复/真实适配 | 使用已有 TS port 替代 native 包；其中 `BAT_THEME` 支持仍是降级。 |
 | `src/native-ts/file-index` | 尝试修复/真实适配 | 使用已有 TS fuzzy index 替代 Rust NAPI 搜索模块。 |
 | `src/native-ts/yoga-layout` | 尝试修复/真实适配 | 使用已有 TS flex layout 实现覆盖 Ink 实际使用的布局子集。 |
@@ -118,6 +118,7 @@
 - Ant-only `useFrustrationDetection` 和 `useAntOrgWarningNotification` no-op hook，避免 REPL 顶层变量路径 require 指向缺失文件。
 - Resume 入口的 ContextCollapse persist 静态打包路径，以及 `UserTextMessage` 中 GitHub webhook、fork boilerplate、cross-session 三个 gated 用户消息分支的静态打包路径。
 - `REPLTool` / `SuggestBackgroundPRTool` / `agents-platform` 的加载路径不再由生成 stub 兜底；`REPLTool` 不可用时不会隐藏 Read/Bash/Edit 等基础工具。
+- `@ant/claude-for-chrome-mcp` 不再由构建脚本生成 fail-fast private stub；当前 alias 到源码里的外部保守 shim，至少能完成 MCP 初始化、列出空工具集并给出明确不可用错误。
 
 ## mock/stub/降级
 
@@ -125,8 +126,8 @@
 
 - `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
-- 当前 `build-src/stub-manifest.json` 只剩 `@ant/claude-for-chrome-mcp` 私有包 stub；它提供空 browser tools，server 创建时会 fail-fast。
-- 当前 manifest 不再包含 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools`、`tools/TungstenTool`、`tools/REPLTool`、`tools/SuggestBackgroundPRTool` 和 `commands/agents-platform`。
+- 当前 `build-src/stub-manifest.json` 为 0 项；`@ant/claude-for-chrome-mcp` 不再由构建脚本生成 private-package-stub，而是 alias 到源码里的外部保守 shim。该 shim 只提供空 browser tools 和可连接的空 MCP server，不恢复真实 Chrome browser tools。
+- 当前 manifest 不再包含 `@ant/claude-for-chrome-mcp` private-package-stub、`snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools`、`tools/TungstenTool`、`tools/REPLTool`、`tools/SuggestBackgroundPRTool` 和 `commands/agents-platform`。
 - `ink/devtools` 当前只是 no-op，不会连接 `react-devtools-core`。
 - `TungstenTool` 当前默认禁用；只提供明确 unavailable 结果和缓存清理 no-op，不提供真实 tmux/终端会话。
 - `REPLTool` 当前默认禁用，不提供内部 REPL VM 或工具包装执行；工具池会保留直接 Read/Bash/Edit 等基础工具。
@@ -252,8 +253,8 @@ feature('HISTORY_SNIP') -> true
 
 - 新增的若干 `.d.ts` 只解决 TypeScript 编译期缺失声明，不代表对应内部模块已经完整实现。
 - 当时 `feature('...') -> false` 的策略没有变化，内部 feature-gated 能力仍默认关闭；后续已对 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 做选择性保留，见后续记录。
-- 当前构建仍会生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`；这些 stub 是明确失败边界，不是功能恢复。
-- `build-src/stub-manifest.json` 当前显示：14 个 missing modules、0 个 missing exports、13 个生成 stub；manifest 里还包含私有包 stub 和空文本资源 stub 记录。
+- 当时构建仍会生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`；这些 stub 是明确失败边界，不是功能恢复。后续修复已逐步清空当前 manifest。
+- 当时 `build-src/stub-manifest.json` 显示：14 个 missing modules、0 个 missing exports、13 个生成 stub；manifest 里还包含私有包 stub 和空文本资源 stub 记录。
 
 ### 本轮验证结果
 
@@ -919,7 +920,7 @@ REPLTool / SuggestBackgroundPRTool / agents-platform 外部保守加载路径，
 - 同一 CLI E2E 还覆盖 NotebookEdit `cell-N` 索引定位和 markdown replace：`cell_id: "cell-1"` 会定位第二个 cell，替换 markdown source，并保持第一个 code cell 不变。
 - 交互 UI 流式显示回归：`visibleStreamingText` 不再按最后一个换行截断，避免无尾随换行内容必须等最终 message 或键盘 repaint 才出现；`maybeRepinLiveScroll` 会在 streaming 文本更新和 assistant 消息落地时保持 live 区域可见，除非用户最近主动滚动离开；真实 `Messages`/Ink 渲染测试会把无尾随换行的 `streamingText` 渲染到模拟 TTY，并确认输出中包含完整 tail。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
-- `@ant/claude-for-chrome-mcp` 私有包 stub 的空工具列表和 server 创建时报错。
+- `@ant/claude-for-chrome-mcp` 外部保守 shim 的空工具列表、真实 MCP client/server in-process 连接、`tools/list=[]` 和未知 browser tool 的明确不可用错误。
 - `nativeOptional` 对缺失 native 包的统一错误包装。
 - `modifiers-napi`、`image-processor-napi`、`audio-capture-napi`、`url-handler-napi` 相关 fallback 或保护路径。
 - Node 产物缺少 vendored ripgrep 二进制时，`ripgrepCommand()` 会回退到系统 `rg`，并通过真实 `rg --version` 验证。
@@ -1246,11 +1247,54 @@ npm run test:cli-e2e
 - 新增专项确认 `REPLTool`、`SuggestBackgroundPRTool`、`agents-platform` 不再在 manifest 中；`USER_TYPE=ant` + CLI 下工具池包含 Read/Bash/Edit，且不暴露 disabled 的 REPL/SuggestBackgroundPR。
 - `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 
+## 2026-06-18 Chrome MCP 外部保守 shim 修复
+
+本轮继续推进最后一个构建期 private-package-stub：`@ant/claude-for-chrome-mcp`。之前构建脚本会生成 `build-src/stubs/claude-for-chrome-mcp.js`，只导出空 `BROWSER_TOOLS`，但 `createClaudeForChromeMcpServer()` 会 fail-fast。一旦用户启用 Claude in Chrome MCP 或 in-process MCP 路径，运行时会直接报私有包不可用。
+
+### 本轮真实修复
+
+- 新增 `src/stubs/claude-for-chrome-mcp.ts`，作为 source-controlled 外部保守 shim。
+- `scripts/build.mjs` 不再生成 `build-src/stubs/claude-for-chrome-mcp.js`，也不再记录 `private-package-stub`。
+- esbuild alias 改为把 `@ant/claude-for-chrome-mcp` 指向 `build-src/src/stubs/claude-for-chrome-mcp.ts`。
+- shim 导出空 `BROWSER_TOOLS`，因此 `setupClaudeInChrome()` 和 bundled Claude-in-Chrome skill 会得到空 allowed tools，不会伪造 browser tools。
+- shim 使用 MCP SDK 低层 `Server` 创建可连接的空 MCP server：
+  - `tools/list` 返回 `[]`。
+  - `tools/call` 对任意 browser tool 返回明确不可用错误。
+  - 创建时写入 warning，并通过 `trackEvent` 记录 `tengu_chrome_mcp_external_shim_started`。
+- `scripts/test-build-safety.mjs` 更新 manifest 断言：当前不应再出现 `private-package-stub`。
+- 新增 Chrome MCP 专项深度测试：通过项目已有 `createLinkedTransportPair()` 连接真实 MCP `Client` 和 shim server，验证初始化、`listTools()` 空列表、未知 `browser_snapshot` tool 的明确错误，以及 warning 输出。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是官方 `@ant/claude-for-chrome-mcp` 实现，不提供真实 Chrome 连接、页面读取、点击、截图、browser task 或 lightning_turn。
+- 这轮收益是把“启用即 fail-fast”降级为“可初始化但明确无工具”，便于 CLI 和 MCP 管理路径继续运行。
+- Playwright MCP 是独立项目级 MCP server，和这个 Claude-in-Chrome 私有包不是同一个能力；Playwright MCP 可用不代表 Chrome MCP 已恢复。
+- 如果后续要恢复真实浏览器能力，应优先接入公开、可安装、可测试的 MCP server，而不是伪造 `BROWSER_TOOLS`。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run build` 通过，`build-src/stub-manifest.json` 当前为 `entries: []`。
+- `npm run audit:features` 通过，Stub kinds 为空。
+- `npm run test:build-safety` 通过，当前为 41/41 项；Chrome MCP 新专项覆盖真实 MCP client/server in-process 连接。
+- `npm run test:cli-e2e` 串行复跑通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
+- 曾经并行跑 `test:build-safety` 与 `test:cli-e2e` 时出现过一次 CLI e2e 假失败；串行复跑已通过，后续仍建议这两个测试顺序执行。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。当前 manifest 只剩 `@ant/claude-for-chrome-mcp` 私有包 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub / external-conservative 实现。当前 `build-src/stub-manifest.json` 已为 0 项，但这只代表不再由构建脚本生成缺失模块 stub，不代表内部能力都已恢复。Chrome MCP 已不再是 private-package-stub，但仍只是空工具外部保守 shim。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 
