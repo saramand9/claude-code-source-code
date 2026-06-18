@@ -8,7 +8,12 @@ import {
   type ToolResult,
   type ToolUseContext,
 } from '../../Tool.js'
-import { searchSkillIndex } from '../../services/skillSearch/localSearch.js'
+import {
+  normalizeSkillSearchQuery,
+  normalizeSkillSearchOutputText,
+  searchSkillIndex,
+  type SkillSearchResult,
+} from '../../services/skillSearch/localSearch.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { DISCOVER_SKILLS_TOOL_NAME } from './constants.js'
 import { getPrompt } from './prompt.js'
@@ -44,6 +49,9 @@ export const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
+const MAX_OUTPUT_SKILL_NAME_CHARS = 200
+const MAX_OUTPUT_SKILL_DESCRIPTION_CHARS = 1000
+
 function markDiscovered(context: ToolUseContext, names: readonly string[]): void {
   if (!context.discoveredSkillNames) {
     context.discoveredSkillNames = new Set<string>()
@@ -56,6 +64,19 @@ function markDiscovered(context: ToolUseContext, names: readonly string[]): void
 function normalizeMaxResults(maxResults: number): number {
   if (!Number.isFinite(maxResults)) return 5
   return Math.max(1, Math.min(20, Math.floor(maxResults)))
+}
+
+function skillResultToOutput(result: SkillSearchResult): Output['skills'][number] {
+  return {
+    name: normalizeSkillSearchOutputText(
+      result.name,
+      MAX_OUTPUT_SKILL_NAME_CHARS,
+    ),
+    description: normalizeSkillSearchOutputText(
+      result.description,
+      MAX_OUTPUT_SKILL_DESCRIPTION_CHARS,
+    ),
+  }
 }
 
 export const DiscoverSkillsTool = buildTool({
@@ -84,8 +105,9 @@ export const DiscoverSkillsTool = buildTool({
     { query, max_results = 5 },
     context,
   ): Promise<ToolResult<Output>> {
+    const normalizedQuery = normalizeSkillSearchQuery(query)
     const mcpSkills = getMcpSkillCommands(context.getAppState().mcp.commands)
-    const results = await searchSkillIndex(getProjectRoot(), query, {
+    const results = await searchSkillIndex(getProjectRoot(), normalizedQuery, {
       extraCommands: mcpSkills,
       excludeNames: context.discoveredSkillNames,
       maxResults: normalizeMaxResults(max_results),
@@ -96,11 +118,8 @@ export const DiscoverSkillsTool = buildTool({
     )
     return {
       data: {
-        query,
-        skills: results.map(result => ({
-          name: result.name,
-          description: result.description,
-        })),
+        query: normalizedQuery,
+        skills: results.map(skillResultToOutput),
       },
     }
   },
@@ -111,20 +130,31 @@ export const DiscoverSkillsTool = buildTool({
     output: Output,
     toolUseID: string,
   ): ToolResultBlockParam {
+    const query = normalizeSkillSearchOutputText(output.query, 1000)
     if (output.skills.length === 0) {
       return {
         type: 'tool_result',
         tool_use_id: toolUseID,
-        content: `No matching skills found for: ${output.query}`,
+        content: `No matching skills found for: ${query}`,
       }
     }
     return {
       type: 'tool_result',
       tool_use_id: toolUseID,
       content: [
-        `Matching skills for: ${output.query}`,
+        `Matching skills for: ${query}`,
         '',
-        ...output.skills.map(skill => `- ${skill.name}: ${skill.description}`),
+        ...output.skills.map(skill => {
+          const name = normalizeSkillSearchOutputText(
+            skill.name,
+            MAX_OUTPUT_SKILL_NAME_CHARS,
+          )
+          const description = normalizeSkillSearchOutputText(
+            skill.description,
+            MAX_OUTPUT_SKILL_DESCRIPTION_CHARS,
+          )
+          return `- ${name}: ${description}`
+        }),
         '',
         'Invoke a listed skill with the Skill tool to load its full instructions.',
       ].join('\n'),

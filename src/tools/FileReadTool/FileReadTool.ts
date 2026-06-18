@@ -8,7 +8,10 @@ import {
   PDF_EXTRACT_SIZE_THRESHOLD,
   PDF_MAX_PAGES_PER_READ,
 } from '../../constants/apiLimits.js'
-import { hasBinaryExtension } from '../../constants/files.js'
+import {
+  hasBinaryExtension,
+  isBinaryContent,
+} from '../../constants/files.js'
 import { memoryFreshnessNote } from '../../memdir/memoryAge.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { logEvent } from '../../services/analytics/index.js'
@@ -186,6 +189,7 @@ export class MaxFileReadTokenExceededError extends Error {
 
 // Common image extensions
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
+const TEXT_BINARY_SNIFF_BYTES = 8192
 
 /**
  * Detects if a file path is a session-related file for analytics logging.
@@ -1032,6 +1036,18 @@ async function callInner(
   }
 
   // --- Text file (single async read via readFileInRange) ---
+  const binarySniff = await getFsImplementation().readFileBytes(
+    resolvedFilePath,
+    TEXT_BINARY_SNIFF_BYTES,
+  )
+  const hasUtf16LeBom =
+    binarySniff.length >= 2 && binarySniff[0] === 0xff && binarySniff[1] === 0xfe
+  if (!hasUtf16LeBom && isBinaryContent(binarySniff)) {
+    throw new Error(
+      'This tool cannot read binary files. The file appears to contain binary data. Please use appropriate tools for binary file analysis.',
+    )
+  }
+
   const lineOffset = offset === 0 ? 0 : offset - 1
   const { content, lineCount, totalLines, totalBytes, readBytes, mtimeMs } =
     await readFileInRange(

@@ -6,10 +6,17 @@ import { logForDebugging } from '../../utils/debug.js'
 import { getUserMessageText } from '../../utils/messages.js'
 import type { Message } from '../../types/message.js'
 import { isSkillSearchEnabled } from './featureCheck.js'
-import { searchSkillIndex, type SkillSearchResult } from './localSearch.js'
+import {
+  normalizeSkillSearchQuery,
+  normalizeSkillSearchOutputText,
+  searchSkillIndex,
+  type SkillSearchResult,
+} from './localSearch.js'
 
 const TURN_ZERO_MAX_RESULTS = 5
 const PREFETCH_MAX_RESULTS = 3
+const MAX_ATTACHMENT_SKILL_NAME_CHARS = 200
+const MAX_ATTACHMENT_SKILL_DESCRIPTION_CHARS = 1000
 
 type SkillDiscoveryPrefetch = {
   promise: Promise<Attachment[]>
@@ -32,8 +39,14 @@ function skillResultsToAttachment(
     {
       type: 'skill_discovery',
       skills: results.map(result => ({
-        name: result.name,
-        description: result.description,
+        name: normalizeSkillSearchOutputText(
+          result.name,
+          MAX_ATTACHMENT_SKILL_NAME_CHARS,
+        ),
+        description: normalizeSkillSearchOutputText(
+          result.description,
+          MAX_ATTACHMENT_SKILL_DESCRIPTION_CHARS,
+        ),
       })),
       signal,
       source: 'native',
@@ -51,8 +64,8 @@ async function discoverSkillsForSignal(
   maxResults: number,
 ): Promise<Attachment[]> {
   if (!isSkillSearchEnabled()) return []
-  const rawInput = String(input ?? '')
-  if (rawInput.trim().length === 0) return []
+  const rawInput = normalizeSkillSearchQuery(input)
+  if (rawInput.length === 0) return []
   const discovered = getDiscoveredSet(context)
   const results = await searchSkillIndex(getProjectRoot(), rawInput, {
     extraCommands: mcpSkillsForContext(context),

@@ -6,6 +6,13 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as esbuild from 'esbuild'
+import {
+  ALLOW_UNAUDITED_FEATURES_ENV,
+  DEFAULT_PRESERVED_FEATURES,
+  PRESERVE_FEATURES_ENV,
+  getEnvPreservedFeatures,
+  validateFeatureGatePolicy,
+} from './feature-gate-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -60,6 +67,19 @@ async function assertThrowsMessage(fn, pattern, label) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function assertVersionAtLeast(version, minimum, label) {
+  const actual = String(version)
+    .split('.')
+    .map(part => Number.parseInt(part, 10))
+  for (let i = 0; i < minimum.length; i += 1) {
+    const actualPart = Number.isFinite(actual[i]) ? actual[i] : 0
+    if (actualPart > minimum[i]) return
+    if (actualPart < minimum[i]) {
+      assert.fail(`${label} expected >= ${minimum.join('.')}, got ${version}`)
+    }
+  }
 }
 
 async function buildAndRunSnippet(name, contents, options = {}) {
@@ -127,9 +147,136 @@ export default { coerce, satisfies, valid };
   }).trim()
 }
 
+await test('feature gate env preservation requires explicit audit override', async () => {
+  assert.deepEqual(
+    getEnvPreservedFeatures({
+      [PRESERVE_FEATURES_ENV]: 'KAIROS, DAEMON\nHISTORY_SNIP KAIROS',
+    }),
+    ['KAIROS', 'DAEMON', 'HISTORY_SNIP'],
+  )
+
+  const sourceFeatures = [...DEFAULT_PRESERVED_FEATURES, 'KAIROS']
+  const blocked = validateFeatureGatePolicy({
+    sourceFeatures,
+    envPreservedFeatures: ['KAIROS'],
+    allowUnaudited: false,
+  })
+  assert.equal(blocked.ok, false)
+  assert.deepEqual(blocked.unauditedFeatures, ['KAIROS'])
+  assert.match(
+    blocked.errors.join('\n'),
+    new RegExp(ALLOW_UNAUDITED_FEATURES_ENV),
+  )
+
+  const allowed = validateFeatureGatePolicy({
+    sourceFeatures,
+    envPreservedFeatures: ['KAIROS'],
+    allowUnaudited: true,
+  })
+  assert.equal(allowed.ok, true)
+
+  const unknown = validateFeatureGatePolicy({
+    sourceFeatures,
+    envPreservedFeatures: ['DOES_NOT_EXIST'],
+    allowUnaudited: true,
+  })
+  assert.equal(unknown.ok, false)
+  assert.deepEqual(unknown.unknownFeatures, ['DOES_NOT_EXIST'])
+})
+
 await test('build outputs exist before safety tests', async () => {
   assert.equal(await pathExists(BUILD), true, 'build-src missing; run npm run build first')
   assert.equal(await pathExists(DIST_CLI), true, 'dist/cli.js missing; run npm run build first')
+})
+
+await test('dependency overrides keep known npm audit fixes in place', async () => {
+  const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
+  const lock = JSON.parse(await readFile(join(ROOT, 'package-lock.json'), 'utf8'))
+  assert.equal(pkg.engines?.node, '>=18.17.0')
+  assert.equal(pkg.devDependencies?.esbuild, '^0.28.1')
+  assert.equal(pkg.dependencies?.undici, '^6.27.0')
+  assert.equal(pkg.overrides?.tmp, '^0.2.6')
+  assert.equal(pkg.overrides?.['google-auth-library'], '$google-auth-library')
+
+  const packages = lock.packages ?? {}
+  assertVersionAtLeast(
+    packages['node_modules/esbuild']?.version,
+    [0, 28, 1],
+    'esbuild',
+  )
+  assertVersionAtLeast(packages['node_modules/tmp']?.version, [0, 2, 6], 'tmp')
+  assertVersionAtLeast(
+    packages['node_modules/undici']?.version,
+    [6, 27, 0],
+    'undici',
+  )
+  assert.equal(
+    String(packages['node_modules/undici']?.version ?? '').startsWith('8.'),
+    false,
+    'undici 8.x currently requires a newer Node runtime than package engines declare',
+  )
+  assert.match(
+    packages['node_modules/undici']?.engines?.node ?? '',
+    /^>=18\.17$/,
+    'undici should stay compatible with the package Node engine',
+  )
+  assert.equal(
+    packages[
+      'node_modules/@anthropic-ai/vertex-sdk/node_modules/google-auth-library'
+    ],
+    undefined,
+    'vertex-sdk should use the root google-auth-library override',
+  )
+  const uuidPackage = packages['node_modules/uuid']
+  if (uuidPackage) {
+    assertVersionAtLeast(uuidPackage.version, [11, 1, 1], 'uuid')
+  }
+})
+
+await test('undici proxy and mTLS APIs remain available', async () => {
+  const output = await buildAndRunSnippet(
+    'undici-api-test',
+    `import * as undici from 'undici';
+for (const name of ['EnvHttpProxyAgent', 'Agent', 'setGlobalDispatcher']) {
+  if (typeof undici[name] !== 'function') {
+    throw new Error('missing undici API: ' + name);
+  }
+}
+const proxy = new undici.EnvHttpProxyAgent({
+  httpProxy: 'http://127.0.0.1:9',
+  httpsProxy: 'http://127.0.0.1:9',
+  noProxy: '',
+});
+const agent = new undici.Agent({ connect: {}, pipelining: 1 });
+await proxy.close();
+await agent.close();
+console.log('undici API OK');`,
+  )
+  assert.equal(output, 'undici API OK')
+})
+
+await test('vertex SDK still works with google-auth override', async () => {
+  const output = await buildAndRunSnippet(
+    'vertex-sdk-override-test',
+    `const [{ AnthropicVertex }, { GoogleAuth }] = await Promise.all([
+  import('@anthropic-ai/vertex-sdk'),
+  import('google-auth-library'),
+]);
+if (typeof GoogleAuth !== 'function') throw new Error('missing GoogleAuth constructor');
+const client = new AnthropicVertex({
+  region: 'us-east5',
+  projectId: 'test-project',
+  googleAuth: {
+    getClient: async () => ({
+      getRequestHeaders: async () => ({}),
+    }),
+  },
+  fetch: async () => new Response('{}', { status: 200 }),
+});
+if (!client.messages) throw new Error('missing Vertex messages API');
+console.log('vertex SDK OK');`,
+  )
+  assert.equal(output, 'vertex SDK OK')
 })
 
 let manifest
@@ -948,6 +1095,71 @@ delete process.env.CLAUDE_CODE_VERIFY_PLAN;
 console.log('verify plan tool OK');`,
   )
   assert.equal(output, 'verify plan tool OK')
+})
+
+await test('permission sync replaces stale settings-source rules', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-sync-rules-test',
+    `const { syncPermissionRulesFromDisk } = await import('./src/utils/permissions/permissions.ts');
+const baseContext = {
+  mode: 'default',
+  additionalWorkingDirectories: new Map(),
+  alwaysAllowRules: {
+    cliArg: ['Write'],
+    command: ['Read'],
+    session: ['Edit'],
+    userSettings: ['Bash'],
+    flagSettings: ['Glob'],
+    policySettings: ['Read'],
+  },
+  alwaysDenyRules: {
+    flagSettings: ['Edit'],
+    policySettings: ['Write'],
+  },
+  alwaysAskRules: {
+    policySettings: ['Bash'],
+  },
+  isBypassPermissionsModeAvailable: false,
+};
+const updated = syncPermissionRulesFromDisk(baseContext, [
+  {
+    source: 'policySettings',
+    ruleBehavior: 'allow',
+    ruleValue: { toolName: 'NotebookEdit' },
+  },
+  {
+    source: 'flagSettings',
+    ruleBehavior: 'deny',
+    ruleValue: { toolName: 'Bash' },
+  },
+]);
+function rules(kind, source) {
+  return updated[kind][source] ?? [];
+}
+if (JSON.stringify(rules('alwaysAllowRules', 'policySettings')) !== JSON.stringify(['NotebookEdit'])) {
+  throw new Error('policy allow rules were not replaced: ' + JSON.stringify(updated.alwaysAllowRules));
+}
+if (rules('alwaysDenyRules', 'policySettings').length !== 0 || rules('alwaysAskRules', 'policySettings').length !== 0) {
+  throw new Error('stale policy deny/ask rules survived: ' + JSON.stringify(updated));
+}
+if (rules('alwaysAllowRules', 'flagSettings').length !== 0) {
+  throw new Error('stale flag allow rule survived: ' + JSON.stringify(updated.alwaysAllowRules));
+}
+if (JSON.stringify(rules('alwaysDenyRules', 'flagSettings')) !== JSON.stringify(['Bash'])) {
+  throw new Error('flag deny rules were not replaced: ' + JSON.stringify(updated.alwaysDenyRules));
+}
+if (JSON.stringify(rules('alwaysAllowRules', 'cliArg')) !== JSON.stringify(['Write'])) {
+  throw new Error('non-settings cliArg rules should remain in normal sync');
+}
+if (JSON.stringify(rules('alwaysAllowRules', 'command')) !== JSON.stringify(['Read'])) {
+  throw new Error('non-settings command rules should remain in normal sync');
+}
+if (JSON.stringify(rules('alwaysAllowRules', 'session')) !== JSON.stringify(['Edit'])) {
+  throw new Error('non-settings session rules should remain in normal sync');
+}
+console.log('permission sync rules OK');`,
+  )
+  assert.equal(output, 'permission sync rules OK')
 })
 
 await test('verify bundled skill assets are real text', async () => {
@@ -2087,10 +2299,16 @@ await test('skill search is preserved and wired into the tool pool', async () =>
 
   const output = await buildAndRunSnippet(
     'skill-search-tool-pool-test',
-    `import { getTools } from './src/tools.ts';
-import { getEmptyToolPermissionContext } from './src/Tool.ts';
-import { DISCOVER_SKILLS_TOOL_NAME } from './src/tools/DiscoverSkillsTool/prompt.ts';
-import { isSkillSearchEnabled } from './src/services/skillSearch/featureCheck.ts';
+    `import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+process.env.CLAUDE_CONFIG_DIR = join(process.cwd(), 'build-src', 'test-artifacts', 'skill-search-tool-pool-config');
+await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+const { enableConfigs } = await import('./src/utils/config.ts');
+enableConfigs();
+const { getTools } = await import('./src/tools.ts');
+const { getEmptyToolPermissionContext } = await import('./src/Tool.ts');
+const { DISCOVER_SKILLS_TOOL_NAME } = await import('./src/tools/DiscoverSkillsTool/prompt.ts');
+const { isSkillSearchEnabled } = await import('./src/services/skillSearch/featureCheck.ts');
 delete process.env.CLAUDE_CODE_DISABLE_SKILL_SEARCH;
 delete process.env.DISABLE_SKILL_SEARCH;
 delete process.env.CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH;
@@ -2116,14 +2334,36 @@ process.env.CLAUDE_CONFIG_DIR = join(process.cwd(), 'build-src', 'test-artifacts
 await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
 const { enableConfigs } = await import('./src/utils/config.ts');
 enableConfigs();
-const { searchSkillIndex, clearSkillIndexCache } = await import('./src/services/skillSearch/localSearch.ts');
+const { normalizeSkillSearchQuery, normalizeSkillSearchOutputText, searchSkillIndex, clearSkillIndexCache } = await import('./src/services/skillSearch/localSearch.ts');
 const { getTurnZeroSkillDiscovery, startSkillDiscoveryPrefetch } = await import('./src/services/skillSearch/prefetch.ts');
 const { DiscoverSkillsTool } = await import('./src/tools/DiscoverSkillsTool/DiscoverSkillsTool.ts');
+const normalizedSearchQuery = normalizeSkillSearchQuery(' alpha' + String.fromCharCode(10, 0) + 'metrics' + String.fromCharCode(9) + 'x'.repeat(1200));
+if (
+  normalizedSearchQuery.includes(String.fromCharCode(10)) ||
+  normalizedSearchQuery.includes(String.fromCharCode(9)) ||
+  normalizedSearchQuery.includes(String.fromCharCode(0))
+) {
+  throw new Error('skill search query normalization kept control chars');
+}
+if (normalizedSearchQuery.length !== 1000) {
+  throw new Error('skill search query normalization did not cap length: ' + normalizedSearchQuery.length);
+}
+const normalizedOutputText = normalizeSkillSearchOutputText(' alpha' + String.fromCharCode(10, 9, 0) + 'metrics ' + 'x'.repeat(1200), 1000);
+if (
+  normalizedOutputText.includes(String.fromCharCode(10)) ||
+  normalizedOutputText.includes(String.fromCharCode(9)) ||
+  normalizedOutputText.includes(String.fromCharCode(0))
+) {
+  throw new Error('skill search output normalization kept control chars');
+}
+if (normalizedOutputText.length !== 1000) {
+  throw new Error('skill search output normalization did not cap length: ' + normalizedOutputText.length);
+}
 const fakeSkill = {
   type: 'prompt',
   name: 'mcp:alpha-observability',
-  description: 'Inspect alpha observability telemetry pipelines',
-  whenToUse: 'Use for frobnicate latency traces and alpha metrics review',
+  description: 'Inspect alpha' + String.fromCharCode(10, 0) + 'observability telemetry pipelines',
+  whenToUse: 'Use for frobnicate latency traces' + String.fromCharCode(9) + 'and alpha metrics review ' + 'z'.repeat(1200),
   progressMessage: 'Loading alpha skill',
   contentLength: 10,
   source: 'mcp',
@@ -2159,6 +2399,17 @@ if (discovered.length !== 1 || discovered[0].type !== 'skill_discovery') {
 if (discovered[0].skills[0]?.name !== fakeSkill.name) {
   throw new Error('wrong discovered skill: ' + JSON.stringify(discovered[0]));
 }
+const discoveredDescription = discovered[0].skills[0]?.description ?? '';
+if (
+  discoveredDescription.includes(String.fromCharCode(10)) ||
+  discoveredDescription.includes(String.fromCharCode(9)) ||
+  discoveredDescription.includes(String.fromCharCode(0))
+) {
+  throw new Error('skill discovery attachment leaked control chars: ' + JSON.stringify(discoveredDescription));
+}
+if (discoveredDescription.length > 1000) {
+  throw new Error('skill discovery attachment description was not capped: ' + discoveredDescription.length);
+}
 const repeated = await getTurnZeroSkillDiscovery('Need frobnicate latency telemetry', [], context);
 if (repeated.length !== 0) {
   throw new Error('discovered skills should be de-duplicated');
@@ -2172,9 +2423,39 @@ const toolResult = await DiscoverSkillsTool.call({ query: 'alpha metrics review'
 if (toolResult.data.skills[0]?.name !== fakeSkill.name) {
   throw new Error('DiscoverSkills missed fake skill: ' + JSON.stringify(toolResult.data));
 }
+const toolDescription = toolResult.data.skills[0]?.description ?? '';
+if (
+  toolDescription.includes(String.fromCharCode(10)) ||
+  toolDescription.includes(String.fromCharCode(9)) ||
+  toolDescription.includes(String.fromCharCode(0))
+) {
+  throw new Error('DiscoverSkills output leaked control chars: ' + JSON.stringify(toolDescription));
+}
+if (toolDescription.length > 1000) {
+  throw new Error('DiscoverSkills output description was not capped: ' + toolDescription.length);
+}
 const toolBlock = DiscoverSkillsTool.mapToolResultToToolResultBlockParam(toolResult.data, 'toolu_1');
 if (typeof toolBlock.content !== 'string' || !toolBlock.content.includes(fakeSkill.name)) {
   throw new Error('DiscoverSkills tool result did not mention skill');
+}
+if (String(toolBlock.content).includes(String.fromCharCode(9)) || String(toolBlock.content).includes(String.fromCharCode(0))) {
+  throw new Error('DiscoverSkills tool result leaked a control character');
+}
+const noisyQuery = '  alpha' + String.fromCharCode(10, 0) + 'metrics' + String.fromCharCode(9) + 'x'.repeat(1200);
+const noisyResult = await DiscoverSkillsTool.call({ query: noisyQuery, max_results: 1 }, context);
+if (
+  noisyResult.data.query.includes(String.fromCharCode(10)) ||
+  noisyResult.data.query.includes(String.fromCharCode(9)) ||
+  noisyResult.data.query.includes(String.fromCharCode(0))
+) {
+  throw new Error('DiscoverSkills query was not sanitized: ' + JSON.stringify(noisyResult.data.query));
+}
+if (noisyResult.data.query.length !== 1000) {
+  throw new Error('DiscoverSkills query was not capped: ' + noisyResult.data.query.length);
+}
+const noisyBlock = DiscoverSkillsTool.mapToolResultToToolResultBlockParam(noisyResult.data, 'toolu_2');
+if (String(noisyBlock.content).includes(String.fromCharCode(9)) || String(noisyBlock.content).includes(String.fromCharCode(0))) {
+  throw new Error('DiscoverSkills tool result leaked a control character');
 }
 const nullPrefetch = startSkillDiscoveryPrefetch(null, [{
   type: 'user',
@@ -2233,12 +2514,19 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createLinkedTransportPair } from './src/services/mcp/InProcessTransport.ts';
-import { fetchMcpSkillsForClient } from './src/skills/mcpSkills.ts';
+import { fetchMcpSkillsForClient, getMcpSkillCacheKey, getSkillResourceSkipReason } from './src/skills/mcpSkills.ts';
 import { getMcpSkillCommands } from './src/commands.ts';
 
 let listCount = 0;
 let alphaReadCount = 0;
 let blobReadCount = 0;
+let hugeReadCount = 0;
+let betaListCount = 0;
+let betaReadCount = 0;
+if (getSkillResourceSkipReason({ uri: 'skill://alpha/SKILL.md' }) !== null) throw new Error('valid skill uri rejected');
+if (!getSkillResourceSkipReason({ uri: 'skill://' })?.includes('no skill identifier')) throw new Error('empty skill uri accepted');
+if (!getSkillResourceSkipReason({ uri: 'skill://bad\\nname/SKILL.md' })?.includes('control characters')) throw new Error('control char uri accepted');
+if (!getSkillResourceSkipReason({ uri: 'skill://' + 'a'.repeat(2050) })?.includes('exceeds')) throw new Error('long skill uri accepted');
 const server = new Server(
   { name: 'mcp-skill-fixture', version: '0.0.0' },
   { capabilities: { resources: { listChanged: true } } },
@@ -2258,6 +2546,12 @@ server.setRequestHandler(ListResourcesRequestSchema, () => {
         name: 'Blob Skill',
         description: 'blob should be skipped',
         mimeType: 'application/octet-stream',
+      },
+      {
+        uri: 'skill://huge/SKILL.md',
+        name: 'Huge Skill',
+        description: 'oversized text should be skipped',
+        mimeType: 'text/markdown',
       },
       {
         uri: 'file://regular-note.md',
@@ -2282,7 +2576,13 @@ server.setRequestHandler(ReadResourceRequestSchema, request => {
             'description: Run alpha task',
             'allowed-tools:',
             '  - Read',
+            '  - Bash',
             'arguments: target',
+            'model: sonnet',
+            'context: fork',
+            'agent: general-purpose',
+            'effort: high',
+            'shell: powershell',
             'user-invocable: false',
             '---',
             'Use $target to inspect.',
@@ -2301,6 +2601,18 @@ server.setRequestHandler(ReadResourceRequestSchema, request => {
           uri: request.params.uri,
           mimeType: 'application/octet-stream',
           blob: 'AQID',
+        },
+      ],
+    };
+  }
+  if (request.params.uri === 'skill://huge/SKILL.md') {
+    hugeReadCount += 1;
+    return {
+      contents: [
+        {
+          uri: request.params.uri,
+          mimeType: 'text/markdown',
+          text: 'x'.repeat(100001),
         },
       ],
     };
@@ -2329,7 +2641,11 @@ if (skill.userFacingName() !== 'Alpha Display') throw new Error('bad display nam
 if (skill.description !== 'Run alpha task') throw new Error('bad description: ' + skill.description);
 if (skill.loadedFrom !== 'mcp' || skill.source !== 'mcp') throw new Error('bad mcp markers');
 if (!skill.isHidden || skill.userInvocable !== false) throw new Error('user-invocable=false should hide skill');
-if (!skill.allowedTools?.includes('Read')) throw new Error('allowed-tools not parsed');
+if (skill.allowedTools?.length) throw new Error('mcp skills must not grant allowed tools');
+if (skill.model !== undefined) throw new Error('mcp skills must not override model');
+if (skill.context !== undefined || skill.agent !== undefined) throw new Error('mcp skills must not force forked execution');
+if (skill.effort !== undefined) throw new Error('mcp skills must not override effort');
+if (skill.hooks !== undefined) throw new Error('mcp skills must not register hooks');
 if (!getMcpSkillCommands(commands).some(command => command.name === skill.name)) throw new Error('mcp skill filter missed command');
 const prompt = await skill.getPromptForCommand('target-file', {});
 const text = prompt.map(block => block.type === 'text' ? block.text : '').join('\\n');
@@ -2337,14 +2653,76 @@ if (!text.includes('Use target-file to inspect.')) throw new Error('argument sub
 if (!text.includes('should-not-run')) throw new Error('mcp skill shell syntax should remain inert text');
 
 await fetchMcpSkillsForClient(connection);
-if (listCount !== 1 || alphaReadCount !== 1 || blobReadCount !== 1) {
+if (listCount !== 1 || alphaReadCount !== 1 || blobReadCount !== 1 || hugeReadCount !== 1) {
   throw new Error('cache miss unexpectedly repeated list/read calls');
 }
-fetchMcpSkillsForClient.cache.delete('Skill Server');
+const cacheKey = getMcpSkillCacheKey(connection);
+if (cacheKey === connection.name) throw new Error('mcp skill cache key should include config hash');
+fetchMcpSkillsForClient.cache.delete(cacheKey);
 await fetchMcpSkillsForClient(connection);
-if (listCount !== 2 || alphaReadCount !== 2 || blobReadCount !== 2) {
+if (listCount !== 2 || alphaReadCount !== 2 || blobReadCount !== 2 || hugeReadCount !== 2) {
   throw new Error('cache delete did not force refresh');
 }
+
+const server2 = new Server(
+  { name: 'mcp-skill-fixture-2', version: '0.0.0' },
+  { capabilities: { resources: { listChanged: true } } },
+);
+server2.setRequestHandler(ListResourcesRequestSchema, () => {
+  betaListCount += 1;
+  return {
+    resources: [
+      {
+        uri: 'skill://beta/SKILL.md',
+        name: 'Beta Skill',
+        description: 'second server skill',
+        mimeType: 'text/markdown',
+      },
+    ],
+  };
+});
+server2.setRequestHandler(ReadResourceRequestSchema, request => {
+  if (request.params.uri !== 'skill://beta/SKILL.md') {
+    throw new Error('unexpected second resource read: ' + request.params.uri);
+  }
+  betaReadCount += 1;
+  return {
+    contents: [
+      {
+        uri: request.params.uri,
+        mimeType: 'text/markdown',
+        text: [
+          '---',
+          'name: Beta Display',
+          'description: Run beta task',
+          '---',
+          'Use beta skill.',
+        ].join('\\n'),
+      },
+    ],
+  };
+});
+const client2 = new Client({ name: 'mcp-skill-client-2', version: '0.0.0' }, { capabilities: {} });
+const [clientTransport2, serverTransport2] = createLinkedTransportPair();
+await server2.connect(serverTransport2);
+await client2.connect(clientTransport2);
+const connection2 = {
+  name: 'Skill Server',
+  type: 'connected',
+  client: client2,
+  capabilities: { resources: { listChanged: true } },
+  config: { type: 'sdk', name: 'second' },
+  cleanup: async () => {},
+};
+const betaCommands = await fetchMcpSkillsForClient(connection2);
+if (betaCommands[0]?.name !== 'Skill_Server:Beta_Skill') {
+  throw new Error('same-name mcp skill cache reused another server result: ' + betaCommands.map(command => command.name).join(','));
+}
+if (betaListCount !== 1 || betaReadCount !== 1) {
+  throw new Error('same-name mcp skill server was not fetched independently');
+}
+await client2.close();
+await server2.close();
 await client.close();
 await server.close();
 console.log('mcp skills OK');`,
@@ -2470,6 +2848,23 @@ if (status.mode === 'builtin' && !existsSync(status.path)) {
 console.log('ripgrep command OK');`,
   )
   assert.equal(output, 'ripgrep command OK')
+})
+
+await test('markdown config loader preflights missing directories before ripgrep', async () => {
+  const source = await readFile(
+    join(BUILD, 'src/utils/markdownConfigLoader.ts'),
+    'utf8',
+  )
+  assert.match(
+    source,
+    /async function canSearchMarkdownDir/,
+    'markdown loader should have a directory preflight helper',
+  )
+  assert.match(
+    source,
+    /if \(!\(await canSearchMarkdownDir\(dir\)\)\) {\s+return \[\]\s+}/,
+    'markdown loader should skip missing dirs before spawning ripgrep',
+  )
 })
 
 await test('deep link parser accepts valid input and rejects injection-like input', async () => {

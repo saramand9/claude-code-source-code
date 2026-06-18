@@ -468,7 +468,7 @@ node --check dist\cli.js
 
 - 这轮不是 mock。`NotebookEdit` E2E 使用真实构建产物 `dist/cli.js`、真实 `Read` 工具、真实 `NotebookEdit` 工具和真实 `.ipynb` 文件落盘。
 - 本轮只覆盖 `edit_mode=replace`、按 cell id 替换 code cell 的主路径。
-- 仍未覆盖 `insert`、`delete`、按 `cell-N` 索引定位、markdown/raw cell、损坏 notebook JSON、超大 notebook、并发编辑和权限拒绝路径。
+- 当时未覆盖 `insert`、`delete`、按 `cell-N` 索引定位、markdown/raw cell、损坏 notebook JSON、超大 notebook、并发编辑和权限拒绝路径；后续章节已补齐 insert/delete、`cell-N` markdown replace、缺失 cell、损坏 JSON、超大 notebook 拒绝、读后写保护和 deny-list 禁用。
 
 ### 本轮验证结果
 
@@ -505,7 +505,7 @@ git diff --check
 
 - 这轮不是 mock。mock server 只模拟模型 API；工具执行、读后写状态、权限模式和文件落盘都由真实 `dist/cli.js` 完成。
 - 本轮覆盖的是正常 `Read -> Write(existing file) -> final` 主路径。
-- 仍未覆盖未读直接 Write 应拒绝、Read 后文件被外部修改应拒绝、CRLF/编码边界、二进制文件误写、权限拒绝和进程中断后的部分副作用恢复。
+- 当时未覆盖未读直接 Write、Read 后外部修改、CRLF/编码边界、二进制文件误写、权限拒绝和进程中断后的部分副作用恢复；后续章节已补齐未读拒绝、stale-write 拒绝、deny-list 禁用、CRLF 创建文件和二进制 Read/Write 阻断，编码/权限弹窗/强杀恢复仍留作当前风险。
 
 ### 本轮验证结果
 
@@ -542,7 +542,7 @@ git diff --check
 ### 本轮 mock/stub/降级说明
 
 - 这轮不是 mock。mock server 只模拟模型 API；实际的文件读取、写入拒绝、mtime 检查和 tool_result 生成都来自真实 `dist/cli.js`。
-- 仍未覆盖权限显式拒绝、hook 拒绝、编码/CRLF 差异、二进制文件误写、文件系统权限错误，以及工具执行中途进程被强杀后的恢复。
+- 当时未覆盖权限显式拒绝、hook 拒绝、编码/CRLF 差异、二进制文件误写、文件系统权限错误，以及工具执行中途进程被强杀后的恢复；后续章节已补齐 deny-list 禁用、CRLF 创建文件、UTF-16LE BOM、UTF-8 BOM 和二进制 Read/Write 阻断，hook/managed policy、混合换行、文件系统权限错误和强杀恢复仍留作当前风险。
 
 ### 本轮验证结果
 
@@ -582,7 +582,7 @@ git diff --check
 
 - 这轮不是 mock。mock server 只模拟模型 API；实际的 notebook 读取、insert/delete、错误校验、tool_result 生成和文件落盘都来自真实 `dist/cli.js`。
 - 本轮已覆盖 `replace`、`insert`、`delete` 和缺失 cell 拒绝路径。
-- 仍未覆盖损坏 notebook JSON、超大 notebook、markdown replace、按 `cell-N` 直接 replace、权限显式拒绝、hook 拒绝、读后外部修改拒绝和并发编辑。
+- 当时未覆盖损坏 notebook JSON、超大 notebook、markdown replace、按 `cell-N` 直接 replace、权限显式拒绝、hook 拒绝、读后外部修改拒绝和并发编辑；后续章节已补齐损坏 JSON、超大 notebook 拒绝、markdown `cell-N` replace、读后外部修改拒绝和 deny-list 禁用。
 
 ### 本轮验证结果
 
@@ -621,7 +621,7 @@ git diff --check
 ### 本轮 mock/stub/降级说明
 
 - 这轮不是 mock。mock server 只模拟模型 API；实际 notebook 读取、mtime 检查、错误 tool_result 生成和文件保护都来自真实 `dist/cli.js`。
-- 仍未覆盖损坏 notebook JSON、超大 notebook、markdown replace、按 `cell-N` 直接 replace、权限显式拒绝、hook 拒绝和复杂并发编辑。
+- 当时未覆盖损坏 notebook JSON、超大 notebook、markdown replace、按 `cell-N` 直接 replace、权限显式拒绝、hook 拒绝和复杂并发编辑；后续章节已补齐损坏 JSON、超大 notebook 拒绝、markdown `cell-N` replace 和 deny-list 禁用。
 
 ### 本轮验证结果
 
@@ -696,7 +696,7 @@ git diff --check
 ### 本轮 mock/stub/降级说明
 
 - 这轮不是 mock。mock server 只模拟模型 API；实际 notebook 读取、`cell-N` 解析、markdown replace 和文件落盘都来自真实 `dist/cli.js`。
-- 仍未覆盖损坏 notebook JSON、超大 notebook、配置/managed policy deny、hook 拒绝和复杂并发编辑。
+- 当时未覆盖损坏 notebook JSON、超大 notebook、配置/managed policy deny、hook 拒绝和复杂并发编辑；后续章节已补齐损坏 JSON 和超大 notebook 拒绝路径。
 
 ### 本轮验证结果
 
@@ -732,7 +732,7 @@ git diff --check
 ### 本轮 mock/stub/降级说明
 
 - 这轮不是 mock。mock server 只模拟模型 API；实际文件读取、mtime 检查、Edit 校验、deny-list 工具过滤、错误 tool_result 生成和文件保护都来自真实 `dist/cli.js`。
-- 仍未覆盖交互权限弹窗拒绝、hook 拒绝、配置/managed policy deny、CRLF/编码边界、replace_all 多匹配和 Edit 创建新文件路径。
+- 当时未覆盖交互权限弹窗拒绝、hook 拒绝、配置/managed policy deny、CRLF/编码边界、replace_all 多匹配和 Edit 创建新文件路径；后续章节已补齐 `replace_all`、多匹配拒绝、`old_string: ""` 新建文件、CRLF 保留、混合换行保留、UTF-16LE BOM 和 UTF-8 BOM，交互权限与 hook/managed policy 仍留作当前风险。
 
 ### 本轮验证结果
 
@@ -865,11 +865,23 @@ Streaming 乱序 fallback E2E：`content_block_delta` 早于 `content_block_star
 副作用型 Bash E2E：显式 `--allowedTools=Bash` 授权下，Bash 写文件命令会执行并生成 artifact fixture
 写入工具链 E2E：simple 主路径下 `Read -> Edit -> final` 三轮执行通过，Edit 在 `acceptEdits` 下实际更新 fixture 文件
 Edit 负向保护 E2E：未读直接 Edit 会返回 `is_error` tool_result 且文件不变；Read 后外部修改同一文件会返回 stale-write `is_error` tool_result；`--disallowedTools Edit` 会返回 `No such tool available: Edit`
+Edit replace_all / 多匹配 / 新建文件 E2E：`replace_all: true` 会替换全部匹配；默认多匹配会拒绝并提示设置 `replace_all`；`old_string: ""` 可创建不存在的文件
+Edit CRLF 保留 E2E：`Read -> Edit -> final` 修改 CRLF 文件中的单行时，真实落盘仍保留 CRLF 换行
+Edit 混合换行保留 E2E：`Read -> Edit -> final` 修改同时包含 CRLF/LF 的文件时，真实落盘仍保留原有逐行换行分布
+Edit UTF-16LE BOM 保留 E2E：`Read -> Edit -> final` 修改带 `FF FE` BOM 的 UTF-16LE 文件时，真实落盘仍保留 BOM 和 UTF-16LE 编码
+Edit UTF-8 BOM 保留 E2E：`Read -> Edit -> final` 修改带 UTF-8 BOM 的文件时，真实落盘仍保留 `EF BB BF`
 Write 创建文件 E2E：bare/simple 模式显式 `--tools Write --allowedTools Write` 时，Write 会加入工具池、执行并创建 fixture 文件
+Write CRLF 创建文件 E2E：bare/simple 模式显式 `--tools Write --allowedTools Write` 时，Write 创建含 `\r\n` 的 fixture 后会保持 CRLF 内容不变
+Write 混合换行创建文件 E2E：bare/simple 模式显式 `--tools Write --allowedTools Write` 时，Write 创建同时包含 CRLF/LF 的 fixture 后会保持原始 content 不变
 Write 覆盖已有文件 E2E：bare/simple 模式显式 `--tools Read,Write` 且 `acceptEdits` 时，真实 CLI 会先读取已有文件，再覆盖文件并发送更新成功的 `Write` tool_result
+Write UTF-16LE BOM 覆盖 E2E：`Read -> Write(existing UTF-16LE BOM file) -> final` 覆盖已有文件时会保留旧文件 BOM 和 UTF-16LE 编码
+Write UTF-8 BOM 覆盖 E2E：`Read -> Write(existing UTF-8 BOM file) -> final` 覆盖已有文件时会保留旧文件 `EF BB BF`
 Write 拒绝路径 E2E：未读直接覆盖已有文件会返回 `is_error` tool_result 且文件不变；Read 后外部修改同一文件会返回 stale-write `is_error` tool_result 且保留外部修改
+Read 二进制内容拒绝 E2E：无扩展二进制文件会被 `Read` 内容 sniff 拒绝，随后同路径 `Write` 仍因未成功 Read 而拒绝，原始字节不变
 NotebookEdit 写入链路 E2E：bare/simple 模式显式 `--tools Read,NotebookEdit` 且 `acceptEdits` 时，真实 CLI 会先读取 notebook cell，再替换目标 cell source、清空 outputs，并发送 `NotebookEdit` 的 `tool_result`
 NotebookEdit 变体与拒绝路径 E2E：真实 CLI 会执行 `insert` markdown cell、随后按 `cell-1` 删除该 cell；缺失 cell 会返回 `is_error` tool_result 且 notebook 不变
+NotebookEdit 损坏 JSON 拒绝 E2E：Read 成功后 notebook 被破坏但 mtime 调回读取时刻，NotebookEdit 会返回 `Notebook is not valid JSON.` 错误并保持损坏内容不变
+NotebookEdit 超大文件拒绝 E2E：Read 成功后 notebook 被替换成超过默认读取大小上限的合法 JSON 且 mtime 保持不变，NotebookEdit 会在解析前返回 too-large 错误并保持文件不变
 NotebookEdit 读后写保护 E2E：未读直接编辑 notebook 会返回 `is_error` tool_result 且文件不变；Read 后外部修改同一 notebook 会返回 stale-write `is_error` tool_result 且保留外部修改
 disallowedTools 写入工具禁用 E2E：`--disallowedTools Write` 和 `--disallowedTools NotebookEdit` 会让对应工具返回 `No such tool available` 错误 tool_result，且不写入文件
 NotebookEdit cell-N/markdown E2E：真实 CLI 会用 `cell_id: "cell-1"` 定位第二个 cell，替换 markdown source，并保持第一个 code cell 不变
@@ -923,11 +935,19 @@ REPLTool / SuggestBackgroundPRTool / agents-platform 外部保守加载路径，
 - 同一 CLI E2E 还覆盖三工具交错路径：mock 在一个 assistant response 内发 assistant 文本 + `Read` + `Bash` + `Read`，三个工具的 `input_json_delta` 交错到达、`content_block_stop` 打乱到达；follow-up request 必须保留文本并包含三个互不重复的 `tool_result` block。
 - 同一 CLI E2E 还覆盖副作用型 Bash：mock 返回写文件 Bash 命令，CLI 通过 `--allowedTools=Bash` 显式授权后执行命令；测试同时验证 follow-up request 中存在 Bash `tool_result`，以及 artifact 文件确实写入。
 - 同一 CLI E2E 还覆盖 Edit 负向保护：未读直接 Edit 会返回 `is_error` tool_result 且文件不变；Read 后 mock 模拟外部修改同一文件会返回 stale-write `is_error` tool_result，磁盘保留外部修改内容；`--disallowedTools Edit` 下 Edit tool_use 会返回 `No such tool available: Edit`。
+- 同一 CLI E2E 还覆盖 Edit replace_all / 多匹配 / 新建文件：`Read -> Edit(replace_all: true) -> final` 会替换文件中全部匹配；默认 `replace_all` 为 false 时遇到重复 `old_string` 会返回 `is_error` tool_result 且文件不变；`old_string: ""` 对不存在路径会创建新文件。
+- 同一 CLI E2E 还覆盖 Edit CRLF 保留：mock 先触发 Read，再触发 Edit 修改 CRLF fixture 的单行；真实 CLI 写回后，测试确认文件仍保持 CRLF 换行。
+- 同一 CLI E2E 还覆盖 Edit UTF-16LE BOM 保留：fixture 以 `FF FE` BOM 和 UTF-16LE 编码写入，mock 先触发 Read 建立读后写状态，再触发 Edit；测试按 Buffer 检查 BOM 字节，并用 `utf16le` 解码确认内容已更新。
+- 同一 CLI E2E 还覆盖 Edit UTF-8 BOM 保留：fixture 以 `EF BB BF` BOM 写入，mock 先触发 Read，再触发 Edit；测试按 Buffer 检查 BOM 字节，并用 UTF-8 解码确认内容已更新。
 - 同一 CLI E2E 还覆盖 bare/simple 下显式 `Write` opt-in：默认 simple 工具池不变，但 `--tools Write --allowedTools Write` 会让 Write 工具可用；mock 返回 Write `tool_use` 后，CLI 会创建 fixture 文件并发送 Write `tool_result`。
+- 同一 CLI E2E 还覆盖 Write CRLF 创建文件：mock 返回 `content` 中包含 `\r\n` 的 Write tool_use，真实 CLI 创建 fixture 后，测试确认落盘内容仍是 CRLF。
 - 同一 CLI E2E 还覆盖 `Read -> Write(existing file) -> final`：mock 先触发 Read 建立读后写状态，再触发 Write 覆盖已有 fixture，CLI 会发送更新成功的 Write `tool_result`，并且磁盘内容实际变更。
+- 同一 CLI E2E 还覆盖 Write UTF-16LE BOM 覆盖：已有文件以 `FF FE` BOM 和 UTF-16LE 编码写入，mock 先触发 Read，再触发 Write 覆盖；真实 CLI 会保留 BOM 和 UTF-16LE 编码。
+- 同一 CLI E2E 还覆盖 Write UTF-8 BOM 覆盖：已有文件以 `EF BB BF` BOM 写入，mock 先触发 Read，再触发 Write 覆盖；真实 CLI 会保留 UTF-8 BOM。
 - 同一 CLI E2E 还覆盖 Write 负向保护：未读直接覆盖已有文件会返回 `is_error` tool_result 且文件不变；Read 后 mock 模拟外部修改同一文件会返回 stale-write `is_error` tool_result，磁盘保留外部修改内容。
 - 同一 CLI E2E 还覆盖 bare/simple 下显式 `NotebookEdit` opt-in：默认 simple 工具池不变，但 `--tools Read,NotebookEdit --permission-mode acceptEdits` 会让 NotebookEdit 工具可用；mock 先触发 Read，再触发 NotebookEdit，CLI 会修改 `.ipynb` fixture、清空 code cell outputs，并发送 NotebookEdit `tool_result`。
 - 同一 CLI E2E 还覆盖 NotebookEdit 变体和拒绝路径：mock 触发 insert markdown cell 后再触发 delete `cell-1`，最终 notebook 只保留原始 base cell；缺失 cell 的 replace 请求会返回 `is_error` tool_result，notebook 文件不变。
+- 同一 CLI E2E 还覆盖 NotebookEdit 损坏 JSON 拒绝路径：mock 先触发 Read 建立读后写状态，再把 notebook 文件破坏成非法 JSON 并把 mtime 调回读取时刻；NotebookEdit 会返回 `Notebook is not valid JSON.` 错误 tool_result，文件保持损坏内容不变。
 - 同一 CLI E2E 还覆盖 NotebookEdit 读后写保护：未读直接编辑 notebook 会返回 `is_error` tool_result 且文件不变；Read 后 mock 模拟外部修改同一 notebook 会返回 stale-write `is_error` tool_result，磁盘保留外部修改内容。
 - 同一 CLI E2E 还覆盖 CLI deny-list：`--disallowedTools Write` 下 Write tool_use 会返回 `No such tool available: Write`，目标文件不创建；`--disallowedTools NotebookEdit` 下 Read 仍可执行，但 NotebookEdit tool_use 会返回 `No such tool available: NotebookEdit`，notebook 不变。
 - 同一 CLI E2E 还覆盖 NotebookEdit `cell-N` 索引定位和 markdown replace：`cell_id: "cell-1"` 会定位第二个 cell，替换 markdown source，并保持第一个 code cell 不变。
@@ -1438,6 +1458,609 @@ npm run test:cli-e2e
 - `npm run test:build-safety` 通过，当前为 46/46 项；新增 reactive compact 专项覆盖运行时 gate 和熔断边界。
 - `npm run test:cli-e2e` 通过，新增真实 `dist\cli.js` 子进程 prompt-too-long -> compact summary -> retry -> final 的恢复路径。
 
+## 2026-06-18 feature gate 环境变量风险收紧
+
+本轮不恢复新的内部功能，目标是降低误操作风险：之前 `CLAUDE_CODE_PRESERVE_FEATURES` 可以在构建时直接额外保留任意源码里存在的 feature gate。对于这个仓库来说，非默认 gate 往往意味着 Anthropic 内部模块、private package、native 能力或未审计路径，静默打开会把“构建成功”误导成“功能可用”。
+
+### 本轮真实修复
+
+- 新增 `scripts/feature-gate-policy.mjs`，集中维护默认保留 gate 列表、环境变量解析和策略校验。
+- `scripts/build.mjs` 构建前会先扫描 `src/` 中实际存在的 `feature('...')`，再校验 `CLAUDE_CODE_PRESERVE_FEATURES`。
+- 未知 feature gate 会直接阻断构建，避免拼写错误或过期 gate 被静默忽略。
+- 非默认 feature gate 默认也会阻断构建；只有显式设置 `CLAUDE_CODE_ALLOW_UNAUDITED_FEATURES=1` 后才允许继续，并打印 unaudited gate 警告。
+- `scripts/audit-features.mjs` 改为复用同一策略模块，输出 `env preservation policy`，让审计结果和构建行为一致。
+- `scripts/test-build-safety.mjs` 增加策略级测试，覆盖重复解析、非默认 gate 默认阻断、显式 override 放行和未知 gate 永远阻断。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是功能恢复。它只是把高风险 feature gate 从“静默保留”改成“默认拒绝 + 显式确认”。
+- 如果确实要恢复新的内部 feature gate，仍需要补实现、补风险说明、补 `audit:features` / `test:build-safety` / `test:cli-e2e` 验证，而不是只设置 override。
+- `CLAUDE_CODE_ALLOW_UNAUDITED_FEATURES=1` 只是开发期逃生口，不应作为常规构建配置进入发布脚本。
+
+## 2026-06-18 MCP skill 资源输入边界收紧
+
+本轮继续收紧 `MCP_SKILLS` 外部可运行路径的安全边界。MCP server 暴露的 `skill://` resource 属于远端输入，虽然当前只处理 text resource 并把 shell 语法作为普通文本保留，但仍需要限制 URI 和 markdown 大小，避免恶意或异常 server 把超大 skill 文本塞进 prompt command，或暴露异常 URI 干扰解析。
+
+### 本轮真实修复
+
+- `src/skills/mcpSkills.ts` 新增 skill resource URI 校验：跳过缺失 URI、控制字符 URI、超长 URI、不可解析 URI 和没有 skill 标识的 URI。
+- 每个 MCP server 最多加载 50 个 skill resource，超过部分跳过并记录 debug warning。
+- 单个 MCP skill markdown 超过 100000 字符时跳过，不做截断加载，避免半截指令被误认为完整 skill。
+- MCP skill 缓存键改为 server 名称 + 配置 hash，避免同名但配置不同的 MCP 连接复用彼此的 skill 列表；相关重连/资源变更清理点同步改用稳定 key。
+- MCP skill frontmatter 只保留描述性字段；`allowed-tools`、`hooks`、`context: fork`、`agent`、`model`、`effort` 和 `shell` 会在解析前剥离并记录 debug warning，避免远端 skill 扩大本地权限或改变执行形态。
+- `scripts/test-build-safety.mjs` 扩展 MCP skill 专项测试，覆盖合法 URI、空 URI、控制字符 URI、超长 URI、超大 text resource 被跳过、同名不同配置 server 不共享缓存，以及远端 frontmatter 不能授予工具权限或切换 model/fork/effort/hooks。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是完整恢复官方 MCP skill 分发。当前仍只支持 `skill://` text resources 到 prompt command 的外部路径。
+- 超大 skill 当前直接跳过，不做摘要或分段加载；这是保守边界，避免引入半截 skill 语义。
+- 资源数量限制是防御性上限。真正需要大量 skill 的 server 应先在 server 侧做分类或按需暴露。
+- MCP tools/resources/prompts 的原有缓存策略本轮未改；这里仅收紧新接入的 MCP skill resource 路径。
+- MCP skill 不再能通过 frontmatter 自带 `allowed-tools` 授权；如果 skill 内容需要使用工具，仍走普通工具权限和用户/策略授权路径。
+
+## 2026-06-18 DiscoverSkills 查询归一化
+
+本轮继续收紧 `EXPERIMENTAL_SKILL_SEARCH` / `DiscoverSkills` 的模型可调用输入边界。之前 skill 查询会被本地 keyword scorer 使用，并在 tool_result 里回显；如果模型或上游代理传入超长文本、换行或控制字符，会放大日志/结果噪声，也可能干扰后续模型阅读工具结果。
+
+### 本轮真实修复
+
+- `src/services/skillSearch/localSearch.ts` 新增 `normalizeSkillSearchQuery()`：控制字符转空格、连续空白折叠、首尾裁剪、最大 1000 字符。
+- `searchSkillIndex()`、turn-zero/prefetch skill discovery 和 `DiscoverSkillsTool.call()` 共用同一归一化逻辑。
+- `DiscoverSkills` 的输出 `query` 和 tool_result 标题只回显归一化后的查询。
+- `DiscoverSkills` 返回的 skill 名称/描述、tool_result 文本，以及 turn-zero/prefetch skill discovery attachment 都会清理控制字符、折叠空白并限制输出长度。
+- `scripts/test-build-safety.mjs` 扩展 skill search 专项测试，覆盖查询/输出控制字符清理、长度上限和 tool_result 不泄漏控制字符。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是语义检索增强；当前仍是 keyword scoring，不是 embedding/rerank。
+- 超长查询和超长 skill 描述会被截断，可能牺牲少量召回或描述完整性，但避免异常输入污染工具结果和上下文。
+
+## 2026-06-18 markdown 配置目录扫描噪声收敛
+
+本轮继续收敛启动期噪声。之前全局或托管的 `commands` / `agents` / `skills` / `output-styles` 目录不存在时，`loadMarkdownFiles()` 仍会直接调用 ripgrep；虽然调用结果会被当作空列表处理，不阻塞启动，但 debug 日志里会留下无意义的 `rg error`。
+
+### 本轮真实修复
+
+- `src/utils/markdownConfigLoader.ts` 在调用 ripgrep 或 native markdown walker 前先检查目标路径是否是可访问目录。
+- 缺失、不可访问、路径组件不是目录或 symlink 循环等预期文件系统状态直接返回空列表，不再启动 ripgrep。
+- 目录存在时仍使用原有 ripgrep/native 搜索；目录在预检后消失的 TOCTOU 情况继续由原 catch 处理。
+- `src/utils/ripgrep.ts` 的系统 ripgrep fallback 增加直接 `rg --version` 探测；当 `where.exe rg` 找不到但 Node spawn 能正常执行 `rg` 时，不再误回退到缺失的临时 vendor 路径。
+- `scripts/test-build-safety.mjs` 的 skill-search 工具池 snippet 改为先 `enableConfigs()` 再动态导入工具池，避免测试环境在允许读取配置前触发默认模型配置读取。
+- `scripts/test-build-safety.mjs` 增加源码级防退化断言，避免以后删掉目录预检后重新引入启动期 `rg error` 噪声。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是命令、agent、skill 或 output style 功能恢复，只是避免对明确不存在的目录做无意义搜索。
+- 对存在目录的搜索语义不变，仍受当前 ripgrep/native walker 的性能和平台行为影响。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+node scripts/audit-features.mjs
+git diff --check
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，`build-src/stub-manifest.json` 当前为 `entries: []`。
+- `npm run test:build-safety` 通过，当前为 48/48 项；覆盖 feature gate 策略、MCP skill 输入边界、DiscoverSkills 归一化、ripgrep fallback 和 markdown 目录预检。
+- `npm run test:cli-e2e` 通过，真实 `dist\cli.js` 子进程主路径、resume、streaming fallback、reactive compact、结构化工具调用和写入工具链回归未受影响。
+- `node scripts/audit-features.mjs` 通过，env preservation policy 为 `ok`。
+- `git diff --check` 仅报告 Windows 换行提示，没有 whitespace error。
+
+## 2026-06-18 npm dependency audit 收敛
+
+本轮继续处理依赖层风险。`npm audit` 初始结果为 8 项：`esbuild` 低危、`@anthropic-ai/mcpb -> @inquirer/editor -> external-editor -> tmp` 链路中的 `tmp` 高危/低危、以及 `@anthropic-ai/vertex-sdk -> google-auth-library@9 -> gaxios@6 -> uuid@9` 链路中的 moderate。
+
+### 本轮真实修复
+
+- 将 dev dependency `esbuild` 从 `^0.27.4` 升级到 `^0.28.1`，避开 Windows dev server 任意文件读取 advisory 范围。
+- 新增 npm `overrides.tmp = ^0.2.6`，把 `external-editor` 间接依赖的旧 `tmp@0.0.33` 提升到当前 0.2.x 修复线；实际解析为 `tmp@0.2.7`。
+- 新增 npm `overrides.google-auth-library = $google-auth-library`，让 `@anthropic-ai/vertex-sdk` 复用根项目的 `google-auth-library@10.7.0`，移除旧 `google-auth-library@9` / `gaxios@6` / `uuid@9` 嵌套链。
+- 将项目 Node engine 从 `>=18.0.0` 调整为 `>=18.17.0`，并把直接依赖 `undici` 从 `^8.5.0` 收回到 `^6.27.0`，避免本机 Node `22.17.0` 下的 `undici@8` engine warning。
+- `scripts/test-build-safety.mjs` 新增锁文件级断言，防止 `esbuild`、`tmp`、`google-auth-library`、`uuid` 或 `undici` 回退到高风险范围；同时新增 `undici` 代理/mTLS API 和 Vertex SDK + GoogleAuth override 构造烟测。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是业务功能恢复。它只收敛 npm 依赖审计风险。
+- `@anthropic-ai/mcpb` 和 `@anthropic-ai/vertex-sdk` 上游当前没有可直接升级的新版本；本轮使用 npm override 收敛 transitive 风险，因此需要回归测试确认构建和 CLI 主路径不受影响。
+- `undici` 当前使用 6.x 最新修复线并要求 Node `>=18.17`，所以项目 engine 也同步提高到 `>=18.17.0`；这会放弃 Node 18.0-18.16 的声明支持。
+- `undici.EnvHttpProxyAgent` 上游仍标记为 experimental；本轮测试锁定当前导出和构造行为，但不能保证未来 `undici` API 不发生变更。
+
+### 本轮验证结果
+
+```text
+npm --cache .npm-cache install
+npm --cache .npm-cache audit --json
+node --check scripts\test-build-safety.mjs
+npm ls esbuild tmp external-editor @anthropic-ai/vertex-sdk google-auth-library gaxios uuid undici
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm audit` 当前为 0 vulnerabilities。
+- `npm install` 不再提示 `undici@8` 的 Node engine warning。
+- `npm ls` 依赖树无 invalid；`external-editor` 使用 `tmp@0.2.7 overridden`，`@anthropic-ai/vertex-sdk` 复用 `google-auth-library@10.7.0`，`undici` 为 `6.27.0`。
+- `esbuild` 当前为 `0.28.1`，项目 Node engine 当前为 `>=18.17.0`。
+- `node --check scripts\test-build-safety.mjs` 通过。
+- `npm run check`、`npm run build`、`npm run test:build-safety` 和 `npm run test:cli-e2e` 均通过；`test:build-safety` 当前为 51/51 项。
+
+## 2026-06-18 stream-json partial 输出刷新回归
+
+本轮继续处理交互/输出刷新类剩余风险。之前已经在源码和 Ink 组件层确认 streaming preview 不再隐藏未完成行，但真实 CLI E2E 主要覆盖 `--output-format json` 的最终结果，不足以证明 SDK/管道消费者能在 provider 慢速分段输出时及时收到 partial 事件。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增 delayed SSE fixture：mock server 在同一个文本 block 内分三段发送 `content_block_delta`，并在第一段后延迟继续输出。
+- 新增 `runCliStreaming()`，对子进程 stdout 做实时 NDJSON 行解析并记录每条消息的观察时间。
+- 新增真实 `dist\cli.js` 子进程场景：`--bare --print --verbose --output-format stream-json --include-partial-messages`。
+- 测试断言第一条 partial `content_block_delta` 在最终 `result` 前到达，并且距离进程关闭至少 150ms，避免只在进程退出时一次性 flush。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是完整 REPL 伪终端 E2E。它覆盖的是 headless/SDK `stream-json` 输出刷新路径。
+- mock provider 只模拟标准 Anthropic SSE 文本 delta；更复杂的第三方代理事件字段差异仍由现有 out-of-order/fallback 场景和后续专项覆盖。
+- 完整交互终端滚动行为仍需要 PTY 级测试；当前仓库没有 `node-pty` 类依赖，本轮未引入新的重型测试依赖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - stream-json partial events flush before final result`。
+
+## 2026-06-18 Edit replace_all / 多匹配 / 新建文件 E2E
+
+本轮继续收口写入工具边界。之前 `Edit` 已覆盖 `Read -> Edit -> final` 主路径、未读拒绝、读后外部修改拒绝和 `disallowedTools` 禁用，但还没有真实 CLI 子进程覆盖 `replace_all`、重复匹配拒绝和 `old_string: ""` 新建文件。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 将 mock 的 `Edit` SSE 生成函数扩展为可传入 `replace_all`。
+- 新增真实 CLI E2E：`Read -> Edit(replace_all: true) -> final`，确认文件中三个相同 marker 都被替换。
+- 新增真实 CLI E2E：`Read -> Edit(default replace_all false) -> final`，当 `old_string` 在文件中重复出现时，CLI 返回 `is_error: true` 的 tool_result，内容提示 `replace_all is false`，文件保持原样。
+- 新增真实 CLI E2E：`Edit(old_string: "") -> final`，在 `--tools Edit --permission-mode acceptEdits` 下对不存在路径创建新文件，并发送成功的 `Edit` tool_result。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Edit` 工具，mock server 只负责模拟 provider 的标准结构化 tool_use SSE。
+- 当前已覆盖 UTF-8 文本的 LF 与 CRLF fixture；非 UTF-8、BOM、混合换行和超大文件仍需要后续专项覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Edit replace_all updates every matching occurrence`、`ok - Edit rejects ambiguous multi-match updates` 和 `ok - Edit creates a new file when old_string is empty`。
+
+## 2026-06-18 Edit CRLF 保留 E2E
+
+本轮继续收口 `Edit` 的文本写回边界。`Edit` 和 `Write` 不同，它会基于原文件内容做局部替换，因此需要确认读取时记录的换行风格会在写回时保留。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(CRLF file) -> Edit(single line) -> final`。
+- 测试断言 Read follow-up 能看到原始 marker，Edit follow-up 包含成功 tool_result。
+- 测试直接读取 fixture 文件，确认修改后的内容仍与 `editCrlfUpdatedContent` 完全一致，也就是保留 `\r\n`。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 编辑文件。测试使用真实 `dist\cli.js` 子进程和真实 `Edit` 工具，mock server 只模拟 provider 响应。
+- 当前覆盖的是 UTF-8 CRLF 文本、UTF-16LE BOM 文件和 UTF-8 BOM 文件；混合换行保留见后续章节。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Edit preserves CRLF line endings`。
+
+## 2026-06-18 Edit UTF-16LE BOM 保留 E2E
+
+本轮继续收口 `Edit` 的编码边界。源码中 `readFileSyncWithMetadata()` 会识别 `FF FE` 为 `utf16le`，`Edit` 写回时会复用原编码；之前缺少真实 CLI 子进程验证。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(UTF-16LE BOM file) -> Edit(single line) -> final`。
+- fixture 使用 `Buffer.from(text, 'utf16le')` 写入，文本开头包含 `\uFEFF`，因此磁盘以 `FF FE` BOM 开头。
+- mock server 第二轮判断只依赖 `Read` tool_result 的存在，不依赖 Read 输出里的 marker；这是因为普通 Read 文本路径按 UTF-8 展示 UTF-16LE 文件，不适合作字符串 marker。
+- 测试在 Edit 后按 Buffer 检查 `0xff 0xfe` BOM 字节，并用 `toString('utf16le')` 确认内容从 before marker 改成 after marker。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 编辑文件。测试使用真实 `dist\cli.js` 子进程和真实 `Edit` 工具，mock server 只模拟 provider 的 tool_use。
+- 当前覆盖 `Edit` 的 UTF-16LE BOM 保留，后续章节也已覆盖 `Write` 覆盖已有 UTF-16LE BOM 文件、UTF-8 BOM 和混合换行。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Edit preserves UTF-16LE BOM encoding`。
+
+## 2026-06-18 Write CRLF 创建文件 E2E
+
+本轮继续收口写入内容边界。之前 `Write` 已覆盖创建文件、读后覆盖已有文件、未读覆盖拒绝、读后外部修改拒绝和 deny-list 禁用，但还没有确认模型传入 Windows 换行时真实落盘内容是否会被归一化。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Write(content with \r\n) -> final`。
+- 测试使用 `--tools Write --allowedTools Write` 显式启用 Write，mock server 只返回标准结构化 Write tool_use。
+- 测试断言 follow-up request 包含成功的 `Write` tool_result，并直接读取 fixture 文件，确认内容与 `writeCrlfContent` 完全一致。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Write` 工具，mock server 只模拟 provider 响应。
+- 本节覆盖的是 UTF-8 字符串中的 CRLF；UTF-16LE BOM、UTF-8 BOM 和混合换行覆盖见后续章节。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Write tool preserves CRLF content when creating a file`。
+
+## 2026-06-18 Write UTF-16LE BOM 覆盖修复
+
+本轮继续收口 `Write` 覆盖已有文件的编码边界。问题是：`FileWriteTool` 会复用旧文件 encoding，但如果旧文件以 BOM 开头、模型传入的新 `content` 不带 BOM，旧实现会把文件写成同编码但无 BOM。对于 UTF-16LE 文件，这会导致后续编码探测无法再识别 `FF FE`。
+
+### 本轮真实修复
+
+- `src/tools/FileWriteTool/FileWriteTool.ts` 新增写回内容规范化：当旧文件内容以 `\uFEFF` 开头，而模型新 content 没有 BOM 时，写盘前补回 `\uFEFF`。
+- 写盘、LSP `changeFile`、VSCode diff 通知、`readFileState` 缓存、patch 展示和 tool result data 都统一使用补 BOM 后的实际文件内容，避免状态和磁盘不一致。
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(UTF-16LE BOM file) -> Write(existing file) -> final`。
+- 测试断言覆盖后文件仍以 `0xff 0xfe` 开头，并用 `utf16le` 解码确认内容已更新。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Write` 工具，mock server 只模拟 provider 的 tool_use。
+- 当前覆盖 `Write` 覆盖已有 UTF-16LE BOM 文件；后续章节也已覆盖 UTF-8 BOM 和混合换行。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `dist\cli.js`。
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Write preserves UTF-16LE BOM encoding`。
+
+## 2026-06-18 UTF-8 BOM 写入保留 E2E
+
+本轮继续收口 BOM 边界。前面已覆盖 UTF-16LE BOM，本轮补齐 UTF-8 BOM，确认 `Edit` 局部修改和 `Write` 覆盖已有文件都不会丢掉 `EF BB BF`。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增 `Edit` 真实 CLI E2E：`Read(UTF-8 BOM file) -> Edit(single line) -> final`。
+- `scripts/test-cli-resume-e2e.mjs` 新增 `Write` 真实 CLI E2E：`Read(UTF-8 BOM file) -> Write(existing file) -> final`。
+- 两个用例都按 Buffer 检查文件开头仍是 `0xef 0xbb 0xbf`，并用 UTF-8 解码确认内容已更新。
+- `Write` 用例复用本轮 `FileWriteTool` 的通用 BOM 保留逻辑：旧内容以 `\uFEFF` 开头而模型新 content 没带 BOM 时，写盘前补回 BOM。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Edit` / `Write` 工具，mock server 只模拟 provider 的 tool_use。
+- 混合换行和二进制误写边界见后续章节；文件系统权限错误和强杀恢复仍未覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Edit preserves UTF-8 BOM` 和 `ok - Write preserves UTF-8 BOM`。
+
+## 2026-06-19 混合换行写回保留修复
+
+本轮继续收口文本写回边界。旧实现只记录“CRLF 或 LF”的总体换行风格，`Edit` 写回时会按多数风格重写整文件；如果文件本身同时包含 CRLF 和 LF，局部替换也会把未修改行的换行符统一掉。
+
+### 本轮真实修复
+
+- `src/utils/fileRead.ts` 在读取元数据时保留原始文本，并记录完整文件内是否存在混合换行；既有 `lineEndings` 仍保持 `CRLF | LF`，避免影响其它工具的既有写回判断。
+- `src/tools/FileEditTool/FileEditTool.ts` 在混合换行文件上仍用标准化 LF 内容做匹配、diff、stale 检查和 LSP 通知，但写盘前按原文件逐行分隔符重建实际内容，避免局部 Edit 破坏未改行的 CRLF/LF 分布。
+- `scripts/test-cli-resume-e2e.mjs` 新增 `Edit` 真实 CLI E2E：`Read(mixed CRLF/LF file) -> Edit(single line) -> final`，断言写回后 CRLF 行和 LF 行仍保持原位置。
+- `scripts/test-cli-resume-e2e.mjs` 新增 `Write` 真实 CLI E2E：`Write(content with mixed CRLF/LF) -> final`，确认全量写入会按模型传入 content 原样落盘。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Edit` / `Write` 工具，mock server 只模拟 provider 的 tool_use。
+- `Edit` 的混合换行恢复是逐行分隔符映射：单行替换和不改变行结构的局部替换能保持原分布；如果一次 Edit 大量插入/删除行，新插入行仍会使用 LF 作为默认分隔符。
+- 二进制误写边界见后续章节；当前剩余写入风险主要是文件系统权限错误、hook 拒绝、项目级 content-specific Bash ask 和其它工具 content-specific 规则，以及工具执行中途强杀后的副作用恢复。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+npm run test:build-safety
+git diff --check
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `dist\cli.js`。
+- `node --check dist\cli.js` 通过。
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Edit preserves mixed CRLF/LF line endings` 和 `ok - Write tool preserves mixed CRLF/LF content`。
+- `npm run test:build-safety` 通过，51/51。
+- `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
+## 2026-06-19 二进制内容 Read 拒绝与 Write 阻断
+
+本轮继续收口二进制误写风险。旧逻辑只按扩展名拒绝明显二进制文件；无扩展或伪装成文本扩展的二进制内容会进入普通文本读取路径，进而可能建立 `readFileState`，让后续 `Write` 覆盖同一路径。
+
+### 本轮真实修复
+
+- `src/tools/FileReadTool/FileReadTool.ts` 在普通文本读取分支前 sniff 文件前 8KB，并复用已有 `isBinaryContent()` 判断内容是否为二进制。
+- 图片、PDF、notebook 仍走各自专用路径；带 `FF FE` BOM 的 UTF-16LE 文本不按二进制拒绝，避免破坏现有读后写编码保留路径。
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(binary file without extension) -> Write(same file) -> final`。
+- 测试断言 `Read` 返回 `cannot read binary files` 错误 tool_result；随后模型继续尝试 `Write` 时，因为 `Read` 没有成功写入 `readFileState`，`Write` 返回 `File has not been read yet`；最后按 Buffer 确认原始二进制字节未变化。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 写文件。测试使用真实 `dist\cli.js` 子进程和真实 `Read` / `Write` 工具，mock server 只模拟 provider 的 tool_use。
+- 当前保护覆盖“未知扩展但内容明显为二进制”的普通文本 Read 路径；图片/PDF/notebook 仍由专用读取逻辑处理。
+- 带 UTF-16LE BOM 的文本文件为了兼容现有编码保留流程仍允许通过；其它无 BOM UTF-16 文本可能被判为二进制，需要后续如果要完整支持再做专门编码读取。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+npm run test:build-safety
+git diff --check
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `dist\cli.js`。
+- `node --check dist\cli.js` 通过。
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Read rejects binary content and Write stays blocked`。
+- `npm run test:build-safety` 通过，51/51。
+- `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
+## 2026-06-19 NotebookEdit 超大 notebook 拒绝
+
+本轮继续收口 `NotebookEdit` 的大文件风险。`Read` 默认会限制 notebook 内容大小，但 `NotebookEdit` 自己在 validate/call 中还会重新整本读取并解析 `.ipynb`；如果 Read 后文件被替换成超大合法 JSON 且 mtime 被伪装，旧逻辑仍可能进入整本解析和 file history 路径。
+
+### 本轮真实修复
+
+- `src/tools/NotebookEditTool/NotebookEditTool.ts` 新增 stat 级 notebook size guard，默认复用 `Read` 的 `maxSizeBytes`；validate 阶段在 JSON parse 前返回明确 too-large 错误。
+- `NotebookEdit.call()` 也在 `fileHistoryTrackEdit()` 之前做同样的 size guard，避免直接调用绕过 validate 时备份或解析超大 notebook。
+- 错误提示包含实际大小、上限大小，并建议只在读取较小 notebook 后编辑，或用 Bash/jq 提取目标 cells。
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(small notebook) -> replace same path with oversized valid notebook preserving mtime -> NotebookEdit -> final`。
+- 测试断言 NotebookEdit 返回 `too large to edit` 错误 tool_result，文件仍保留 oversized marker，并且没有写入模型尝试的新 source。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 编辑 notebook。测试使用真实 `dist\cli.js` 子进程和真实 `Read` / `NotebookEdit` 工具；mock server 只负责模拟 provider 的 tool_use 和测试用外部文件替换。
+- 当前上限跟随 `Read` 的 fileReadingLimits/default maxSizeBytes；如果调用方显式提高 Read 限制，NotebookEdit 的允许大小也会同步提高。
+- 这轮覆盖的是“超大 notebook 在 NotebookEdit 解析前被拒绝”；复杂并发编辑、hook 拒绝、项目级 content-specific Bash ask 和其它工具 content-specific 规则，以及强杀恢复仍是剩余风险。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+npm run test:build-safety
+git diff --check
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `dist\cli.js`。
+- `node --check dist\cli.js` 通过。
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - NotebookEdit rejects oversized notebooks before parsing`。
+- `npm run test:build-safety` 通过，51/51。
+- `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
+## 2026-06-19 managed-only 权限规则启动同步修复
+
+本轮继续收口配置/managed policy 权限风险。旧实现里 `allowManagedPermissionRulesOnly` 的清理逻辑主要存在于 settings 热更新同步路径；启动初始化时会先把 `--allowedTools` / `--disallowedTools` 写入 `cliArg`，再追加磁盘规则，导致 managed-only 策略有机会在启动阶段保留 CLI allow。另一个同类问题是热更新同步只清理 user/project/local 规则，旧的 `policySettings` / `flagSettings` 规则在被删除后可能继续留在内存上下文。
+
+### 本轮真实修复
+
+- `src/utils/permissions/permissionSetup.ts` 的启动初始化改为复用 `syncPermissionRulesFromDisk()`，让启动路径和 settings 热更新路径使用同一套规则替换/清理语义。
+- `src/utils/permissions/permissions.ts` 扩展 `syncPermissionRulesFromDisk()`：普通同步会清理所有 settings 来源的旧规则（user/project/local/flag/policy）后再应用新规则；managed-only 模式还会清理所有非 policy 来源（cliArg/command/session/flag/user/project/local）。
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：临时写入 managed settings，启用 `allowManagedPermissionRulesOnly`，同时传入 `--tools Write --allowedTools Write`；mock provider 仍尝试 `Write`，真实 `dist\cli.js` 返回写权限未授予的 `is_error` tool_result，目标文件未创建。
+- `scripts/test-build-safety.mjs` 新增模块级回归：直接构造旧权限上下文，验证 `syncPermissionRulesFromDisk()` 会替换 policy/flag 规则并清掉 stale settings-source 规则，同时在普通同步下保留 cliArg/command/session 规则。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 权限执行。E2E 使用真实 `dist\cli.js` 子进程和真实 `Write` 工具权限链路；mock server 只模拟 provider 的 `tool_use`。
+- 当前覆盖的是 managed-only 权限规则对 CLI allow 的启动期压制，以及 settings-source stale rule 清理。user/project settings 工具级 deny 和 Bash content-specific deny/ask 见后续章节；项目级 content-specific Bash ask、其它工具 content-specific 规则、交互权限弹窗拒绝、hook 拒绝和强杀恢复仍需要后续覆盖。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `dist\cli.js`。
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - managed-only permissions ignore CLI Write allow`。
+- `node --check scripts\test-build-safety.mjs` 通过。
+- `npm run test:build-safety` 通过，52/52。
+
+## 2026-06-19 user settings deny 规则 E2E 覆盖
+
+本轮继续收口配置文件 deny 风险。此前已覆盖 `--disallowedTools` 参数 deny-list 和 managed-only 对 CLI allow 的压制，但还缺普通用户配置文件中的 `permissions.deny` 是否真的进入工具池过滤和运行时错误回传。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：为单个子进程创建独立 `CLAUDE_CONFIG_DIR/settings.json`，写入 `{ "permissions": { "deny": ["Write"] } }`。
+- 测试仍传入 `--tools Write`，mock provider 仍返回 `Write` tool_use；真实 `dist\cli.js` 会根据 user settings deny 规则把 `Write` 从工具池移除，并对 provider 的 tool_use 回传 `No such tool available: Write`。
+- 测试断言目标文件没有被创建，证明配置文件 deny 不只是提示文案，而是真实阻断了写入路径。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 权限执行。E2E 使用真实 `dist\cli.js` 子进程、真实 settings 加载、真实工具池过滤和真实 tool_result 回传；mock server 只模拟 provider 的 `tool_use`。
+- 当前覆盖的是 user settings 的工具级 deny。项目级 `.claude/settings.json` 和 Bash content-specific deny/ask 见后续章节；项目级 content-specific Bash ask、其它工具 content-specific 规则和交互权限弹窗拒绝仍需要后续覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - user settings deny removes Write from the tool pool`。
+
+## 2026-06-19 project settings deny 规则 E2E 覆盖
+
+本轮继续补齐配置文件 deny 规则。上一轮覆盖了全局 user settings；本轮验证项目目录里的 `.claude/settings.json` 也会参与真实 CLI 启动时的权限规则加载，并在工具池层移除被 deny 的工具。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 的 `runCli()` / `runCliStreaming()` helper 增加可选 `cwd`，默认仍是仓库根目录；只有项目 settings deny 用例切到临时项目目录。
+- 新增真实 CLI E2E：创建临时 cwd，写入 `.claude/settings.json`，内容为 `{ "permissions": { "deny": ["Write"] } }`。
+- 测试仍传入 `--tools Write`，mock provider 仍返回 `Write` tool_use；真实 `dist\cli.js` 会根据项目 settings deny 规则把 `Write` 从工具池移除，并对 provider 的 tool_use 回传 `No such tool available: Write`。
+- 测试断言目标文件没有被创建，证明项目配置 deny 和 user settings deny 一样会真实阻断写入路径。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 权限执行。E2E 使用真实 `dist\cli.js` 子进程、真实临时 cwd、真实 `.claude/settings.json` 加载、真实工具池过滤和真实 tool_result 回传；mock server 只模拟 provider 的 `tool_use`。
+- 当前覆盖的是项目 settings 的工具级 deny。Bash content-specific deny/ask 见后续章节；项目级 content-specific Bash ask、其它工具 content-specific 规则、交互权限弹窗拒绝和 hook 拒绝仍需要后续覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - project settings deny removes Write from the tool pool`。
+
+## 2026-06-19 Bash content-specific deny/ask 规则 E2E 覆盖
+
+本轮继续补齐权限规则边界。之前已经覆盖 `--disallowedTools`、user settings 工具级 deny、project settings 工具级 deny 和 managed-only 对 CLI allow 的压制；本轮验证“工具仍在工具池里，但具体 Bash 命令命中 `Bash(echo:*)` deny/ask”时，真实 CLI 会在执行前拒绝或要求授权，并把错误作为 `tool_result` 回传给 provider。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs`
+  - 新增 `cli bash content-specific deny prompt` 路径，mock provider 返回真实 `Bash` `tool_use`：`echo <marker> > build-src/test-artifacts/cli-bash-content-deny-tool.txt`。
+  - 新增临时 `CLAUDE_CONFIG_DIR/settings.json`，配置 `permissions.deny: ["Bash(echo:*)"]`，同时 CLI 参数仍显式 `--allowedTools=Bash`，确保验证的是 content-specific deny 覆盖工具级 allow，而不是工具池移除。
+  - 断言 follow-up request 包含 `tool_result`、`is_error: true`、`tool_use_id` 前缀为 `toolu_cli_bash_content_deny_`，内容包含 `Permission to use Bash ... has been denied`，并断言目标文件没有被创建。
+  - 新增 `cli bash content-specific ask prompt` 路径，配置 `permissions.ask: ["Bash(echo:*)"]` 且仍传 `--allowedTools=Bash`，断言真实 CLI 在非交互模式下返回 `Claude requested permissions to use Bash, but you haven't granted it yet.`，并且不会创建目标文件。
+  - 新增 `cli project bash content-specific deny prompt` 路径，在临时 cwd 的 `.claude/settings.json` 中配置 `permissions.deny: ["Bash(echo:*)"]`，验证项目级 content-specific deny 同样会覆盖 CLI `--allowedTools=Bash`，并且不会在项目 cwd 下写入文件。
+  - 将 Bash tool-use SSE 写入函数参数化，复用同一条流式 `input_json_delta` 路径覆盖正向副作用和 deny 场景。
+
+### 本轮 mock/stub/风险说明
+
+- mock server 只模拟 provider 发起 Bash 工具调用；权限加载、`Bash(echo:*)` 匹配、deny 优先级、工具执行前拦截、`tool_result` 回传和磁盘副作用检查都走真实 `dist\cli.js` 子进程。
+- 当前覆盖的是 user settings 中的 Bash content-specific deny/ask 覆盖 CLI `--allowedTools=Bash`，以及 project settings 中的 Bash content-specific deny 覆盖 CLI `--allowedTools=Bash`。项目级 content-specific Bash ask、其它工具的 content-specific 规则、交互权限弹窗拒绝和 hook 拒绝仍需要后续覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - Bash content-specific deny blocks a matching command`、`ok - Bash content-specific ask requires approval` 和 `ok - project Bash content-specific deny blocks a matching command`。
+
+## 2026-06-18 NotebookEdit 损坏 JSON 拒绝 E2E
+
+本轮继续收口 notebook 写入边界。之前 `NotebookEdit` 已覆盖 replace、insert/delete、缺失 cell、未读拒绝、读后外部修改拒绝、deny-list 禁用和 `cell-N` markdown replace，但还没有覆盖 notebook 内容损坏时的解析错误。
+
+### 本轮真实修复
+
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI E2E：`Read(valid notebook) -> NotebookEdit(after notebook is corrupted) -> final`。
+- mock server 在 Read follow-up 到达后，把同一个 `.ipynb` fixture 改成非法 JSON，并把 mtime 调回 Read 时刻，确保测试触发 NotebookEdit 的 JSON 校验，而不是 stale-write 保护。
+- 测试断言 follow-up request 包含 `is_error: true` 的 `NotebookEdit` tool_result，内容包含 `Notebook is not valid JSON.`。
+- 测试断言磁盘文件保持损坏 JSON 内容不变，证明拒绝路径没有继续写盘。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock 编辑 notebook。测试使用真实 `dist\cli.js` 子进程和真实 `NotebookEdit` 工具，mock server 只负责模拟 provider 的 tool_use。
+- 当前覆盖的是小型非法 JSON 文件；超大 notebook 拒绝见后续章节，复杂并发编辑、hook 拒绝、项目级 content-specific Bash ask 和其它工具 content-specific 规则仍未覆盖。
+
+### 本轮验证结果
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+结果：
+
+- `node --check scripts\test-cli-resume-e2e.mjs` 通过。
+- `npm run test:cli-e2e` 通过，新增输出 `ok - NotebookEdit rejects corrupted notebook JSON`。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
@@ -1450,6 +2073,10 @@ Reactive Compact 的当前风险也要单独看待：它已不再是纯 `.d.ts` 
 
 History Snip 的当前风险也要单独看待：它已不再是完全关闭、stub 或简单保守前缀裁剪，而是高可用外部版。它可以按安全 turn 分段删除、按目标 token 收敛、按目标 ID 删除完整安全 turn，并在后续模型视图中投影清理旧消息；但它仍不做官方语义评分、模型摘要、任意单消息精确点删或复杂跨轮调度。
 
-Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、simple 主路径中的 `Read -> Edit -> final` 写入工具链、Edit 未读直接拒绝、Edit 读后外部修改拒绝、Edit deny-list 禁用、bare/simple 显式 `Write` 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝、Write deny-list 禁用、bare/simple 显式 `Read -> NotebookEdit(replace) -> final` notebook 替换 cell 路径、NotebookEdit `insert -> delete` 路径、NotebookEdit 缺失 cell 拒绝路径、NotebookEdit 未读直接编辑拒绝、NotebookEdit 读后外部修改拒绝、NotebookEdit deny-list 禁用，以及 NotebookEdit `cell-N` markdown replace。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、交互权限弹窗拒绝、hook 拒绝、配置/managed policy deny 规则、Edit replace_all/多匹配/创建新文件路径、Write CRLF 或编码边界、NotebookEdit 损坏 notebook/超大 notebook、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
+Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、Bash content-specific deny/ask、project Bash content-specific deny、simple 主路径中的 `Read -> Edit -> final` 写入工具链、Edit 未读直接拒绝、Edit 读后外部修改拒绝、Edit deny-list 禁用、Edit `replace_all: true` 全量替换、Edit 多匹配默认拒绝、Edit `old_string: ""` 创建新文件、Edit CRLF 保留、Edit 混合 CRLF/LF 保留、Edit UTF-16LE BOM 保留、Edit UTF-8 BOM 保留、bare/simple 显式 `Write` 创建文件路径、Write CRLF 创建文件路径、Write 混合 CRLF/LF 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write UTF-16LE BOM 覆盖、Write UTF-8 BOM 覆盖、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝、Write deny-list 禁用、user settings Write deny、project settings Write deny、managed-only 权限规则忽略 CLI Write allow、bare/simple 显式 `Read -> NotebookEdit(replace) -> final` notebook 替换 cell 路径、NotebookEdit `insert -> delete` 路径、NotebookEdit 缺失 cell 拒绝路径、NotebookEdit 损坏 JSON 拒绝路径、NotebookEdit 超大文件拒绝路径、NotebookEdit 未读直接编辑拒绝、NotebookEdit 读后外部修改拒绝、NotebookEdit deny-list 禁用，以及 NotebookEdit `cell-N` markdown replace。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、交互权限弹窗拒绝、hook 拒绝、项目级 content-specific Bash ask、其它工具 content-specific 规则、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
 
-交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归和真实 `Messages`/Ink 组件渲染回归；`test:cli-e2e` 仍覆盖的是 `--bare --print --output-format json` 非交互路径，完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。
+NotebookEdit 大文件保护的当前风险：`NotebookEdit` 现在会在解析 JSON 和 file history 之前按 `Read` 的 size limit 做 stat 级拒绝；真实 CLI E2E 已覆盖 Read 成功后 notebook 被替换成 oversized 合法 JSON 且 mtime 保持不变时，NotebookEdit 返回 too-large 错误并保持文件不变。复杂并发编辑、hook 拒绝、项目级 content-specific Bash ask 和其它工具 content-specific 规则、强杀恢复仍需后续覆盖。
+
+二进制写入保护的当前风险：普通文本 `Read` 现在会对未知扩展文件做内容 sniff，明显二进制内容会被拒绝，并且不会建立后续 `Write` 覆盖资格；真实 CLI E2E 已覆盖无扩展二进制文件的 `Read` 拒绝、同路径 `Write` 继续被读后写保护拒绝，以及原始字节不变。带 UTF-16LE BOM 的文本为兼容现有编码保留流程仍允许通过；其它无 BOM 多字节文本如果被误判为二进制，需要后续专门编码读取支持。
+
+交互 UI 的当前风险：真实用户长任务里观察到过“内容已经产生但终端没有立即刷新，按 Enter 后才显示后续总结”的现象。本轮已修复两个高概率触发点：streaming preview 不再隐藏未完成行，assistant/streaming 更新会在用户未主动滚动时保持 live 区域可见。当前验证已包含源码/构建级回归、真实 `Messages`/Ink 组件渲染回归，以及真实 `dist\cli.js` 子进程的 `stream-json --include-partial-messages` delayed SSE partial flush 回归；完整 REPL 伪终端 E2E 和真实终端滚动行为仍需要后续单独补。

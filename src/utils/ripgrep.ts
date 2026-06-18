@@ -1,5 +1,5 @@
 import type { ChildProcess, ExecFileException } from 'child_process'
-import { execFile, spawn } from 'child_process'
+import { execFile, spawn, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
@@ -31,7 +31,7 @@ type RipgrepConfig = {
 
 function getSystemRipgrepConfig(): RipgrepConfig | null {
   const { cmd: systemPath } = findExecutable('rg', [])
-  if (systemPath === 'rg') {
+  if (systemPath === 'rg' && !canSpawnSystemRipgrep()) {
     return null
   }
 
@@ -39,6 +39,15 @@ function getSystemRipgrepConfig(): RipgrepConfig | null {
   // If we used systemPath, a malicious ./rg.exe in current directory could be executed.
   // Using just 'rg' lets the OS resolve it safely with NoDefaultCurrentDirectoryInExePath protection.
   return { mode: 'system', command: 'rg', args: [] }
+}
+
+function canSpawnSystemRipgrep(): boolean {
+  const result = spawnSync('rg', ['--version'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  })
+  return result.status === 0 && String(result.stdout).startsWith('ripgrep ')
 }
 
 const getRipgrepConfig = memoize((): RipgrepConfig => {

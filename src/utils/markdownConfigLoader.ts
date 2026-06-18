@@ -538,6 +538,15 @@ async function findMarkdownFilesNative(
   return files
 }
 
+async function canSearchMarkdownDir(dir: string): Promise<boolean> {
+  try {
+    return (await stat(dir)).isDirectory()
+  } catch (e: unknown) {
+    if (isFsInaccessible(e)) return false
+    throw e
+  }
+}
+
 /**
  * Generic function to load markdown files from specified directories
  * @param dir Directory (eg. "~/.claude/commands")
@@ -550,6 +559,10 @@ async function loadMarkdownFiles(dir: string): Promise<
     content: string
   }[]
 > {
+  if (!(await canSearchMarkdownDir(dir))) {
+    return []
+  }
+
   // File search strategy:
   // - Default: ripgrep (faster, battle-tested)
   // - Fallback: native Node.js (when CLAUDE_CODE_USE_NATIVE_FILE_SEARCH is set)

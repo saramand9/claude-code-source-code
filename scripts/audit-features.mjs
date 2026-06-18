@@ -3,11 +3,17 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  ALLOW_UNAUDITED_FEATURES_ENV,
+  DEFAULT_PRESERVED_FEATURES,
+  getEnvPreservedFeatures,
+  isTruthyFlag,
+  validateFeatureGatePolicy,
+} from './feature-gate-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const SRC = join(ROOT, 'src')
-const BUILD_SCRIPT = join(ROOT, 'scripts', 'build.mjs')
 const STUB_MANIFEST = join(ROOT, 'build-src', 'stub-manifest.json')
 const FEATURE_RE = /\bfeature\s*\(\s*['"]([A-Z0-9_]+)['"]\s*,?\s*\)/g
 
@@ -33,21 +39,6 @@ async function* walk(dir) {
 
 function repoPath(path) {
   return relative(ROOT, path).replace(/\\/g, '/')
-}
-
-function parsePreservedFromBuildScript(source) {
-  const match = source.match(
-    /const\s+DEFAULT_PRESERVED_FEATURES\s*=\s*\[([\s\S]*?)\]/,
-  )
-  if (!match) return []
-  return Array.from(match[1].matchAll(/['"]([A-Z0-9_]+)['"]/g), item => item[1])
-}
-
-function parseEnvPreserved() {
-  return (process.env.CLAUDE_CODE_PRESERVE_FEATURES ?? '')
-    .split(/[,\s]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
 }
 
 function compactList(values, limit = 3) {
@@ -101,14 +92,16 @@ async function readStubSummary() {
   }
 }
 
-function buildRows(features, defaultPreserved, envPreserved) {
+function buildRows(features, defaultPreserved, envPreserved, blockedEnvPreserved) {
   const defaultSet = new Set(defaultPreserved)
   const envSet = new Set(envPreserved)
+  const blockedEnvSet = new Set(blockedEnvPreserved)
   return [...features.values()]
     .map(feature => {
       const files = [...feature.files.keys()].sort()
       let status = 'off-by-default'
       if (defaultSet.has(feature.name)) status = 'preserved-default'
+      else if (blockedEnvSet.has(feature.name)) status = 'blocked-env'
       else if (envSet.has(feature.name)) status = 'preserved-env'
       return {
         name: feature.name,
@@ -126,11 +119,21 @@ function buildRows(features, defaultPreserved, envPreserved) {
 }
 
 const asJson = process.argv.includes('--json')
-const buildSource = await readFile(BUILD_SCRIPT, 'utf8')
-const defaultPreserved = parsePreservedFromBuildScript(buildSource)
-const envPreserved = parseEnvPreserved()
+const defaultPreserved = [...DEFAULT_PRESERVED_FEATURES]
+const envPreserved = getEnvPreservedFeatures()
 const { features, totalCalls } = await collectFeatureCalls()
-const rows = buildRows(features, defaultPreserved, envPreserved)
+const featurePolicy = validateFeatureGatePolicy({
+  sourceFeatures: [...features.keys()],
+  defaultPreservedFeatures: defaultPreserved,
+  envPreservedFeatures: envPreserved,
+  allowUnaudited: isTruthyFlag(process.env[ALLOW_UNAUDITED_FEATURES_ENV]),
+})
+const rows = buildRows(
+  features,
+  defaultPreserved,
+  envPreserved,
+  featurePolicy.ok ? [] : featurePolicy.unauditedFeatures,
+)
 const stubs = await readStubSummary()
 
 if (asJson) {
@@ -141,6 +144,7 @@ if (asJson) {
         totalCalls,
         defaultPreserved,
         envPreserved,
+        featurePolicy,
         features: rows,
         stubs,
       },
@@ -159,6 +163,18 @@ if (asJson) {
   console.log(
     `- env preserved: ${envPreserved.length ? envPreserved.join(', ') : '(none)'}`,
   )
+  console.log(
+    `- env preservation policy: ${
+      featurePolicy.ok ? 'ok' : 'blocked'
+    }${
+      featurePolicy.unauditedFeatures.length
+        ? `; unaudited=${featurePolicy.unauditedFeatures.join(', ')}`
+        : ''
+    }`,
+  )
+  if (!featurePolicy.ok) {
+    for (const error of featurePolicy.errors) console.log(`  - ${error}`)
+  }
   if (stubs) {
     console.log(
       `- current stub manifest: ${stubs.entries.length} entries, generated ${stubs.generatedAt}`,

@@ -296,13 +296,17 @@ export const FileWriteTool = buildTool({
 
     const enc = meta?.encoding ?? 'utf8'
     const oldContent = meta?.content ?? null
+    const contentForWrite =
+      oldContent?.startsWith('\uFEFF') && !content.startsWith('\uFEFF')
+        ? `\uFEFF${content}`
+        : content
 
     // Write is a full content replacement — the model sent explicit line endings
     // in `content` and meant them. Do not rewrite them. Previously we preserved
     // the old file's line endings (or sampled the repo via ripgrep for new
     // files), which silently corrupted e.g. bash scripts with \r on Linux when
     // overwriting a CRLF file or when binaries in cwd poisoned the repo sample.
-    writeTextContent(fullFilePath, content, enc, 'LF')
+    writeTextContent(fullFilePath, contentForWrite, enc, 'LF')
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()
@@ -310,12 +314,14 @@ export const FileWriteTool = buildTool({
       // Clear previously delivered diagnostics so new ones will be shown
       clearDeliveredDiagnosticsForFile(`file://${fullFilePath}`)
       // didChange: Content has been modified
-      lspManager.changeFile(fullFilePath, content).catch((err: Error) => {
-        logForDebugging(
-          `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
-        )
-        logError(err)
-      })
+      lspManager
+        .changeFile(fullFilePath, contentForWrite)
+        .catch((err: Error) => {
+          logForDebugging(
+            `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
+          )
+          logError(err)
+        })
       // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
       lspManager.saveFile(fullFilePath).catch((err: Error) => {
         logForDebugging(
@@ -326,11 +332,11 @@ export const FileWriteTool = buildTool({
     }
 
     // Notify VSCode about the file change for diff view
-    notifyVscodeFileUpdated(fullFilePath, oldContent, content)
+    notifyVscodeFileUpdated(fullFilePath, oldContent, contentForWrite)
 
     // Update read timestamp, to invalidate stale writes
     readFileState.set(fullFilePath, {
-      content,
+      content: contentForWrite,
       timestamp: getFileModificationTime(fullFilePath),
       offset: undefined,
       limit: undefined,
@@ -363,7 +369,7 @@ export const FileWriteTool = buildTool({
         edits: [
           {
             old_string: oldContent,
-            new_string: content,
+            new_string: contentForWrite,
             replace_all: false,
           },
         ],
@@ -372,7 +378,7 @@ export const FileWriteTool = buildTool({
       const data = {
         type: 'update' as const,
         filePath: file_path,
-        content,
+        content: contentForWrite,
         structuredPatch: patch,
         originalFile: oldContent,
         ...(gitDiff && { gitDiff }),

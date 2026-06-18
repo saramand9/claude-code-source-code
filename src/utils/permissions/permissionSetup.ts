@@ -25,7 +25,7 @@ import {
   type PermissionMode,
   permissionModeFromString,
 } from './PermissionMode.js'
-import { applyPermissionRulesToPermissionContext } from './permissions.js'
+import { syncPermissionRulesFromDisk } from './permissions.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -975,7 +975,7 @@ export async function initializeToolPermissionContext({
     )
   }
 
-  let toolPermissionContext = applyPermissionRulesToPermissionContext(
+  let toolPermissionContext = syncPermissionRulesFromDisk(
     {
       mode: permissionMode,
       additionalWorkingDirectories,

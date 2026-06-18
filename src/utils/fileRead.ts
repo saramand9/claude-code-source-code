@@ -48,7 +48,10 @@ export function detectEncodingForResolvedPath(
   return 'utf8'
 }
 
-export function detectLineEndingsForString(content: string): LineEndingType {
+function countLineEndingsForString(content: string): {
+  crlfCount: number
+  lfCount: number
+} {
   let crlfCount = 0
   let lfCount = 0
 
@@ -62,7 +65,17 @@ export function detectLineEndingsForString(content: string): LineEndingType {
     }
   }
 
+  return { crlfCount, lfCount }
+}
+
+export function detectLineEndingsForString(content: string): LineEndingType {
+  const { crlfCount, lfCount } = countLineEndingsForString(content)
   return crlfCount > lfCount ? 'CRLF' : 'LF'
+}
+
+export function hasMixedLineEndingsForString(content: string): boolean {
+  const { crlfCount, lfCount } = countLineEndingsForString(content)
+  return crlfCount > 0 && lfCount > 0
 }
 
 /**
@@ -74,8 +87,10 @@ export function detectLineEndingsForString(content: string): LineEndingType {
  */
 export function readFileSyncWithMetadata(filePath: string): {
   content: string
+  rawContent: string
   encoding: BufferEncoding
   lineEndings: LineEndingType
+  hasMixedLineEndings: boolean
 } {
   const fs = getFsImplementation()
   const { resolvedPath, isSymlink } = safeResolvePath(fs, filePath)
@@ -89,11 +104,15 @@ export function readFileSyncWithMetadata(filePath: string): {
   // Detect line endings from the raw head before CRLF normalization erases
   // the distinction. 4096 code units is ≥ detectLineEndings's 4096-byte
   // readSync sample (line endings are ASCII, so the unit mismatch is moot).
-  const lineEndings = detectLineEndingsForString(raw.slice(0, 4096))
+  const rawHead = raw.slice(0, 4096)
+  const lineEndings = detectLineEndingsForString(rawHead)
+  const hasMixedLineEndings = hasMixedLineEndingsForString(raw)
   return {
     content: raw.replaceAll('\r\n', '\n'),
+    rawContent: raw,
     encoding,
     lineEndings,
+    hasMixedLineEndings,
   }
 }
 

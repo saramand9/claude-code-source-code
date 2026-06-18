@@ -19,11 +19,14 @@ import type {
 } from './types.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const fetchMcpSkillsForClient = feature('MCP_SKILLS')
+const mcpSkillsModule = feature('MCP_SKILLS')
   ? (
       require('../../skills/mcpSkills.js') as typeof import('../../skills/mcpSkills.js')
-    ).fetchMcpSkillsForClient
+    )
   : null
+const fetchMcpSkillsForClient =
+  mcpSkillsModule?.fetchMcpSkillsForClient ?? null
+const getMcpSkillCacheKey = mcpSkillsModule?.getMcpSkillCacheKey ?? null
 const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (
       require('../skillSearch/localSearch.js') as typeof import('../skillSearch/localSearch.js')
@@ -720,7 +723,9 @@ export function useManageMCPConnections(
                     // Invalidate prompts cache as well: we write commands here,
                     // and a concurrent prompts/list_changed could otherwise have
                     // us stomp its fresh result with our cached stale one.
-                    fetchMcpSkillsForClient!.cache.delete(client.name)
+                    fetchMcpSkillsForClient!.cache.delete(
+                      getMcpSkillCacheKey!(client),
+                    )
                     fetchCommandsForClient.cache.delete(client.name)
                     const [newResources, mcpPrompts, mcpSkills] =
                       await Promise.all([

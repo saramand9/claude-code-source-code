@@ -60,6 +60,14 @@ const reactiveCompactSummary =
 const reactiveCompactFinalResponse =
   'reactive compact recovered after summarizing context'
 
+const partialStreamPrompt = 'cli stream-json partial flush prompt'
+const partialStreamChunks = [
+  'partial-stream-first-2931 ',
+  'partial-stream-second-2931 ',
+  'partial-stream-final-2931',
+]
+const partialStreamFinalResponse = partialStreamChunks.join('')
+
 const multiToolPrompt = 'cli multi structured read tools prompt'
 const multiToolFileContentA = 'multi structured tool fixture: ash-1190'
 const multiToolFileContentB = 'multi structured tool fixture: elm-7734'
@@ -94,6 +102,26 @@ const bashSideEffectFinalResponse =
 const bashSideEffectRelativePath =
   'build-src/test-artifacts/cli-bash-side-effect-tool.txt'
 const bashSideEffectFilePath = join(ROOT, bashSideEffectRelativePath)
+const bashContentDenyPrompt = 'cli bash content-specific deny prompt'
+const bashContentDenyResult = 'bash-content-deny-2604'
+const bashContentDenyFinalResponse = 'Bash content-specific deny completed'
+const bashContentDenyRelativePath =
+  'build-src/test-artifacts/cli-bash-content-deny-tool.txt'
+const bashContentDenyFilePath = join(ROOT, bashContentDenyRelativePath)
+const bashContentAskPrompt = 'cli bash content-specific ask prompt'
+const bashContentAskResult = 'bash-content-ask-7508'
+const bashContentAskFinalResponse = 'Bash content-specific ask completed'
+const bashContentAskRelativePath =
+  'build-src/test-artifacts/cli-bash-content-ask-tool.txt'
+const bashContentAskFilePath = join(ROOT, bashContentAskRelativePath)
+const projectBashContentDenyPrompt =
+  'cli project bash content-specific deny prompt'
+const projectBashContentDenyResult = 'project-bash-content-deny-6915'
+const projectBashContentDenyFinalResponse =
+  'Project Bash content-specific deny completed'
+const projectBashContentDenyRelativePath =
+  'project-bash-content-deny-tool.txt'
+let projectBashContentDenyFilePath = ''
 
 const editToolPrompt = 'cli read then edit tool prompt'
 const editToolOriginalContent = 'edit structured tool fixture: before-1842'
@@ -118,6 +146,55 @@ const editDenyOriginalContent = 'edit permission deny fixture: before-9174'
 const editDenyUpdatedContent = 'edit permission deny fixture: after-9174'
 const editDenyFinalResponse = 'structured Edit permission deny completed'
 let editDenyFilePath = ''
+const editReplaceAllPrompt = 'cli edit replace all prompt'
+const editReplaceAllOriginalContent = 'alpha replace-all-2048 alpha replace-all-2048 alpha replace-all-2048'
+const editReplaceAllUpdatedContent = 'beta replace-all-2048 beta replace-all-2048 beta replace-all-2048'
+const editReplaceAllFinalResponse =
+  'structured Edit replace_all completed'
+let editReplaceAllFilePath = ''
+const editMultiMatchPrompt = 'cli edit multi match rejection prompt'
+const editMultiMatchOriginalContent = 'duplicate-multi-5720 duplicate-multi-5720'
+const editMultiMatchAttemptedContent = 'unique-multi-5720'
+const editMultiMatchFinalResponse =
+  'structured Edit multi-match rejection completed'
+let editMultiMatchFilePath = ''
+const editCreatePrompt = 'cli edit create new file prompt'
+const editCreateContent = 'edit create new file fixture: rose-3386'
+const editCreateFinalResponse =
+  'structured Edit create new file completed'
+let editCreateFilePath = ''
+const editCrlfPrompt = 'cli edit crlf preserve prompt'
+const editCrlfOriginalContent =
+  'edit crlf fixture: before-6142\r\nedit crlf fixture: stable-6142\r\n'
+const editCrlfUpdatedContent =
+  'edit crlf fixture: after-6142\r\nedit crlf fixture: stable-6142\r\n'
+const editCrlfFinalResponse =
+  'structured Edit CRLF preservation completed'
+let editCrlfFilePath = ''
+const editMixedLineEndingsPrompt = 'cli edit mixed line endings preserve prompt'
+const editMixedLineEndingsOriginalContent =
+  'edit mixed fixture: before-3916\r\nedit mixed fixture: stable-lf-3916\nedit mixed fixture: stable-crlf-3916\r\n'
+const editMixedLineEndingsUpdatedContent =
+  'edit mixed fixture: after-3916\r\nedit mixed fixture: stable-lf-3916\nedit mixed fixture: stable-crlf-3916\r\n'
+const editMixedLineEndingsFinalResponse =
+  'structured Edit mixed line ending preservation completed'
+let editMixedLineEndingsFilePath = ''
+const editUtf16Prompt = 'cli edit utf16le bom preserve prompt'
+const editUtf16OriginalContent =
+  '\uFEFFedit utf16 fixture: before-9051\nedit utf16 fixture: stable-9051\n'
+const editUtf16UpdatedContent =
+  '\uFEFFedit utf16 fixture: after-9051\nedit utf16 fixture: stable-9051\n'
+const editUtf16FinalResponse =
+  'structured Edit UTF-16LE BOM preservation completed'
+let editUtf16FilePath = ''
+const editUtf8BomPrompt = 'cli edit utf8 bom preserve prompt'
+const editUtf8BomOriginalContent =
+  '\uFEFFedit utf8 bom fixture: before-1184\nedit utf8 bom fixture: stable-1184\n'
+const editUtf8BomUpdatedContent =
+  '\uFEFFedit utf8 bom fixture: after-1184\nedit utf8 bom fixture: stable-1184\n'
+const editUtf8BomFinalResponse =
+  'structured Edit UTF-8 BOM preservation completed'
+let editUtf8BomFilePath = ''
 
 const writeToolPrompt = 'cli write tool create prompt'
 const writeToolContent = 'write structured tool fixture: willow-2751'
@@ -154,6 +231,65 @@ const writeDenyPrompt = 'cli write permission deny prompt'
 const writeDenyContent = 'write permission deny fixture: attempted-6681'
 const writeDenyFinalResponse = 'structured Write permission deny completed'
 let writeDenyFilePath = ''
+const userSettingsWriteDenyPrompt =
+  'cli user settings write deny prompt'
+const userSettingsWriteDenyContent =
+  'user settings write deny fixture: attempted-9140'
+const userSettingsWriteDenyFinalResponse =
+  'structured user settings Write deny completed'
+let userSettingsWriteDenyFilePath = ''
+const projectSettingsWriteDenyPrompt =
+  'cli project settings write deny prompt'
+const projectSettingsWriteDenyContent =
+  'project settings write deny fixture: attempted-5067'
+const projectSettingsWriteDenyFinalResponse =
+  'structured project settings Write deny completed'
+let projectSettingsWriteDenyFilePath = ''
+const managedOnlyWritePrompt = 'cli managed-only write allow ignored prompt'
+const managedOnlyWriteContent =
+  'managed-only write fixture: attempted-2075'
+const managedOnlyWriteFinalResponse =
+  'structured managed-only Write rejection completed'
+let managedOnlyWriteFilePath = ''
+const binaryReadWritePrompt = 'cli binary read then write rejection prompt'
+const binaryReadWriteOriginalBytes = Buffer.from([
+  0x00, 0x01, 0x02, 0x03, 0xff, 0x10, 0x00, 0x7f,
+])
+const binaryReadWriteAttemptedContent =
+  'binary read write attempted text replacement\n'
+const binaryReadWriteFinalResponse =
+  'structured binary Read and Write rejection completed'
+let binaryReadWriteFilePath = ''
+const writeCrlfPrompt = 'cli write crlf create prompt'
+const writeCrlfContent =
+  'write crlf fixture: first-7851\r\nwrite crlf fixture: second-7851\r\n'
+const writeCrlfFinalResponse = 'structured Write CRLF completed'
+let writeCrlfFilePath = ''
+const writeMixedLineEndingsPrompt =
+  'cli write mixed line endings create prompt'
+const writeMixedLineEndingsContent =
+  'write mixed fixture: first-2468\r\nwrite mixed fixture: second-2468\nwrite mixed fixture: third-2468\r\n'
+const writeMixedLineEndingsFinalResponse =
+  'structured Write mixed line endings completed'
+let writeMixedLineEndingsFilePath = ''
+const writeUtf16Prompt = 'cli write utf16le bom overwrite prompt'
+const writeUtf16OriginalContent =
+  '\uFEFFwrite utf16 fixture: before-4372\nwrite utf16 fixture: stable-4372\n'
+const writeUtf16ModelContent =
+  'write utf16 fixture: after-4372\nwrite utf16 fixture: stable-4372\n'
+const writeUtf16UpdatedContent = `\uFEFF${writeUtf16ModelContent}`
+const writeUtf16FinalResponse =
+  'structured Write UTF-16LE BOM overwrite completed'
+let writeUtf16FilePath = ''
+const writeUtf8BomPrompt = 'cli write utf8 bom overwrite prompt'
+const writeUtf8BomOriginalContent =
+  '\uFEFFwrite utf8 bom fixture: before-2267\nwrite utf8 bom fixture: stable-2267\n'
+const writeUtf8BomModelContent =
+  'write utf8 bom fixture: after-2267\nwrite utf8 bom fixture: stable-2267\n'
+const writeUtf8BomUpdatedContent = `\uFEFF${writeUtf8BomModelContent}`
+const writeUtf8BomFinalResponse =
+  'structured Write UTF-8 BOM overwrite completed'
+let writeUtf8BomFilePath = ''
 
 const notebookEditPrompt = 'cli read then notebook edit prompt'
 const notebookEditOriginalSource = 'print("before-notebook-4187")'
@@ -176,6 +312,26 @@ const notebookRejectAttemptedSource = 'print("notebook-reject-after-9027")'
 const notebookRejectFinalResponse =
   'structured NotebookEdit missing cell rejection completed'
 let notebookRejectFilePath = ''
+const notebookInvalidPrompt = 'cli notebook invalid json rejection prompt'
+const notebookInvalidCellId = 'cell-invalid-json'
+const notebookInvalidOriginalSource = 'print("notebook-invalid-before-2718")'
+const notebookInvalidAttemptedSource = 'print("notebook-invalid-after-2718")'
+const notebookInvalidCorruptContent = '{"cells": ['
+const notebookInvalidFinalResponse =
+  'structured NotebookEdit invalid json rejection completed'
+let notebookInvalidFilePath = ''
+let notebookInvalidStableMtime = new Date(0)
+let notebookInvalidWasCorrupted = false
+const notebookLargePrompt = 'cli notebook too large rejection prompt'
+const notebookLargeCellId = 'cell-large'
+const notebookLargeOriginalSource = 'print("notebook-large-before-6194")'
+const notebookLargeAttemptedSource = 'print("notebook-large-after-6194")'
+const notebookLargeExpandedMarker = 'notebook-large-expanded-6194'
+const notebookLargeFinalResponse =
+  'structured NotebookEdit too-large rejection completed'
+let notebookLargeFilePath = ''
+let notebookLargeStableMtime = new Date(0)
+let notebookLargeWasExpanded = false
 const notebookUnreadPrompt = 'cli unread notebook edit rejection prompt'
 const notebookUnreadCellId = 'cell-unread'
 const notebookUnreadOriginalSource = 'print("notebook-unread-before-5441")'
@@ -274,6 +430,38 @@ function writeSseFrame(res, event, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function makeNotebookContent(cells) {
+  return JSON.stringify(
+    {
+      cells,
+      metadata: {
+        language_info: { name: 'python' },
+      },
+      nbformat: 4,
+      nbformat_minor: 5,
+    },
+    null,
+    1,
+  )
+}
+
+function makeOversizedNotebookContent() {
+  return makeNotebookContent([
+    {
+      cell_type: 'code',
+      execution_count: 1,
+      id: notebookLargeCellId,
+      metadata: {},
+      outputs: [],
+      source: `${notebookLargeExpandedMarker}\n${'x'.repeat(300 * 1024)}`,
+    },
+  ])
+}
+
 function writeStreamingMessage(res, index, sequence, text) {
   const responseText =
     text ?? responses[index] ?? `cli resume e2e extra response ${index + 1}`
@@ -317,6 +505,64 @@ function writeStreamingMessage(res, index, sequence, text) {
     type: 'message_delta',
     delta: { stop_reason: 'end_turn', stop_sequence: null },
     usage: { output_tokens: Math.max(1, Math.ceil(responseText.length / 4)) },
+  })
+  writeSseFrame(res, 'message_stop', { type: 'message_stop' })
+  res.end()
+}
+
+async function writeDelayedStreamingMessage(res, sequence) {
+  const id = `msg_cli_partial_stream_${sequence}`
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'request-id': `req_mock_partial_${sequence}`,
+  })
+  writeSseFrame(res, 'message_start', {
+    type: 'message_start',
+    message: {
+      ...makeMessage(id, '', { input_tokens: 140 }),
+      content: [],
+      stop_reason: null,
+      usage: {
+        input_tokens: 140,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+      },
+    },
+  })
+  writeSseFrame(res, 'content_block_start', {
+    type: 'content_block_start',
+    index: 0,
+    content_block: { type: 'text', text: '' },
+  })
+  writeSseFrame(res, 'content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'text_delta', text: partialStreamChunks[0] },
+  })
+  await sleep(350)
+  writeSseFrame(res, 'content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'text_delta', text: partialStreamChunks[1] },
+  })
+  await sleep(150)
+  writeSseFrame(res, 'content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'text_delta', text: partialStreamChunks[2] },
+  })
+  writeSseFrame(res, 'content_block_stop', {
+    type: 'content_block_stop',
+    index: 0,
+  })
+  writeSseFrame(res, 'message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: Math.max(1, Math.ceil(partialStreamFinalResponse.length / 4)) },
   })
   writeSseFrame(res, 'message_stop', { type: 'message_stop' })
   res.end()
@@ -761,13 +1007,16 @@ function writeStreamingTripleToolUse(res, sequence) {
   res.end()
 }
 
-function writeStreamingBashSideEffectToolUse(res, sequence) {
-  const id = `msg_cli_bash_side_effect_tool_use_${sequence}`
-  const toolUseId = `toolu_cli_bash_side_effect_${sequence}`
+function writeStreamingBashSideEffectToolUse(res, sequence, options = {}) {
+  const id = `${options.messageIdPrefix ?? 'msg_cli_bash_side_effect_tool_use_'}${sequence}`
+  const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_bash_side_effect_'}${sequence}`
   const inputDeltas = splitIntoDeltas(
     JSON.stringify({
-      command: `echo ${bashSideEffectResult} > ${bashSideEffectRelativePath}`,
-      description: 'Write a Bash side-effect fixture marker',
+      command:
+        options.command ??
+        `echo ${bashSideEffectResult} > ${bashSideEffectRelativePath}`,
+      description:
+        options.description ?? 'Write a Bash side-effect fixture marker',
     }),
   )
 
@@ -827,13 +1076,15 @@ function writeStreamingBashSideEffectToolUse(res, sequence) {
 function writeStreamingEditToolUse(res, sequence, options = {}) {
   const id = `msg_cli_edit_tool_use_${sequence}`
   const toolUseId = `${options.toolUseIdPrefix ?? 'toolu_cli_edit_'}${sequence}`
-  const inputDeltas = splitIntoDeltas(
-    JSON.stringify({
-      file_path: options.filePath ?? editToolFilePath,
-      old_string: options.oldString ?? editToolOriginalContent,
-      new_string: options.newString ?? editToolUpdatedContent,
-    }),
-  )
+  const input = {
+    file_path: options.filePath ?? editToolFilePath,
+    old_string: options.oldString ?? editToolOriginalContent,
+    new_string: options.newString ?? editToolUpdatedContent,
+  }
+  if (options.replaceAll !== undefined) {
+    input.replace_all = options.replaceAll
+  }
+  const inputDeltas = splitIntoDeltas(JSON.stringify(input))
 
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -1144,6 +1395,94 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(notebookInvalidPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_invalid_')) {
+      return {
+        index: responses.length + 31,
+        text: notebookInvalidFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookInvalidOriginalSource)) {
+      if (!notebookInvalidWasCorrupted) {
+        writeFileSync(
+          notebookInvalidFilePath,
+          notebookInvalidCorruptContent,
+          'utf8',
+        )
+        utimesSync(
+          notebookInvalidFilePath,
+          notebookInvalidStableMtime,
+          notebookInvalidStableMtime,
+        )
+        notebookInvalidWasCorrupted = true
+      }
+      return {
+        index: responses.length + 31,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookInvalidCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookInvalidAttemptedSource,
+          notebookPath: notebookInvalidFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_invalid_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 31,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookInvalidFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookLargePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_large_')) {
+      return {
+        index: responses.length + 39,
+        text: notebookLargeFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookLargeOriginalSource)) {
+      if (!notebookLargeWasExpanded) {
+        writeFileSync(
+          notebookLargeFilePath,
+          makeOversizedNotebookContent(),
+          'utf8',
+        )
+        utimesSync(
+          notebookLargeFilePath,
+          notebookLargeStableMtime,
+          notebookLargeStableMtime,
+        )
+        notebookLargeWasExpanded = true
+      }
+      return {
+        index: responses.length + 39,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookLargeCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookLargeAttemptedSource,
+          notebookPath: notebookLargeFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_large_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 39,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookLargeFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(notebookUnreadPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_unread_')) {
       return {
@@ -1386,6 +1725,182 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(userSettingsWriteDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_user_settings_write_deny_')) {
+      return {
+        index: responses.length + 40,
+        text: userSettingsWriteDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 40,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${userSettingsWriteDenyContent}\n`,
+        filePath: userSettingsWriteDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_user_settings_write_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(projectSettingsWriteDenyPrompt)) {
+    if (
+      hasToolResultWithIdPrefix(body, 'toolu_cli_project_settings_write_deny_')
+    ) {
+      return {
+        index: responses.length + 41,
+        text: projectSettingsWriteDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 41,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${projectSettingsWriteDenyContent}\n`,
+        filePath: projectSettingsWriteDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_project_settings_write_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(managedOnlyWritePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_managed_write_')) {
+      return {
+        index: responses.length + 39,
+        text: managedOnlyWriteFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 39,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${managedOnlyWriteContent}\n`,
+        filePath: managedOnlyWriteFilePath,
+        toolUseIdPrefix: 'toolu_cli_managed_write_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeCrlfPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_crlf_')) {
+      return {
+        index: responses.length + 30,
+        text: writeCrlfFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 30,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: writeCrlfContent,
+        filePath: writeCrlfFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_crlf_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(binaryReadWritePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_binary_write_')) {
+      return {
+        index: responses.length + 38,
+        text: binaryReadWriteFinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_')) {
+      return {
+        index: responses.length + 38,
+        writeToolUse: true,
+        writeToolOptions: {
+          content: binaryReadWriteAttemptedContent,
+          filePath: binaryReadWriteFilePath,
+          toolUseIdPrefix: 'toolu_cli_binary_write_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 38,
+      toolUse: true,
+      toolOptions: {
+        filePath: binaryReadWriteFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeMixedLineEndingsPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_mixed_eol_')) {
+      return {
+        index: responses.length + 37,
+        text: writeMixedLineEndingsFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 37,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: writeMixedLineEndingsContent,
+        filePath: writeMixedLineEndingsFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_mixed_eol_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeUtf16Prompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_utf16_')) {
+      return {
+        index: responses.length + 34,
+        text: writeUtf16FinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_')) {
+      return {
+        index: responses.length + 34,
+        writeToolUse: true,
+        writeToolOptions: {
+          content: writeUtf16ModelContent,
+          filePath: writeUtf16FilePath,
+          toolUseIdPrefix: 'toolu_cli_write_utf16_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 34,
+      toolUse: true,
+      toolOptions: {
+        filePath: writeUtf16FilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeUtf8BomPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_utf8_bom_')) {
+      return {
+        index: responses.length + 36,
+        text: writeUtf8BomFinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_')) {
+      return {
+        index: responses.length + 36,
+        writeToolUse: true,
+        writeToolOptions: {
+          content: writeUtf8BomModelContent,
+          filePath: writeUtf8BomFilePath,
+          toolUseIdPrefix: 'toolu_cli_write_utf8_bom_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 36,
+      toolUse: true,
+      toolOptions: {
+        filePath: writeUtf8BomFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(writeToolPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_')) {
       return {
@@ -1482,6 +1997,200 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(editReplaceAllPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_replace_all_')) {
+      return {
+        index: responses.length + 27,
+        text: editReplaceAllFinalResponse,
+      }
+    }
+    if (combinedText.includes(editReplaceAllOriginalContent)) {
+      return {
+        index: responses.length + 27,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editReplaceAllFilePath,
+          oldString: 'alpha replace-all-2048',
+          newString: 'beta replace-all-2048',
+          replaceAll: true,
+          toolUseIdPrefix: 'toolu_cli_edit_replace_all_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 27,
+      toolUse: true,
+      toolOptions: {
+        filePath: editReplaceAllFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editMultiMatchPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_multi_match_')) {
+      return {
+        index: responses.length + 28,
+        text: editMultiMatchFinalResponse,
+      }
+    }
+    if (combinedText.includes(editMultiMatchOriginalContent)) {
+      return {
+        index: responses.length + 28,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editMultiMatchFilePath,
+          oldString: 'duplicate-multi-5720',
+          newString: editMultiMatchAttemptedContent,
+          toolUseIdPrefix: 'toolu_cli_edit_multi_match_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 28,
+      toolUse: true,
+      toolOptions: {
+        filePath: editMultiMatchFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editCreatePrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_create_')) {
+      return {
+        index: responses.length + 29,
+        text: editCreateFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 29,
+      editToolUse: true,
+      editToolOptions: {
+        filePath: editCreateFilePath,
+        oldString: '',
+        newString: `${editCreateContent}\n`,
+        toolUseIdPrefix: 'toolu_cli_edit_create_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editCrlfPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_crlf_')) {
+      return {
+        index: responses.length + 32,
+        text: editCrlfFinalResponse,
+      }
+    }
+    if (combinedText.includes('edit crlf fixture: before-6142')) {
+      return {
+        index: responses.length + 32,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editCrlfFilePath,
+          oldString: 'edit crlf fixture: before-6142',
+          newString: 'edit crlf fixture: after-6142',
+          toolUseIdPrefix: 'toolu_cli_edit_crlf_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 32,
+      toolUse: true,
+      toolOptions: {
+        filePath: editCrlfFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editMixedLineEndingsPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_mixed_eol_')) {
+      return {
+        index: responses.length + 36,
+        text: editMixedLineEndingsFinalResponse,
+      }
+    }
+    if (combinedText.includes('edit mixed fixture: before-3916')) {
+      return {
+        index: responses.length + 36,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editMixedLineEndingsFilePath,
+          oldString: 'edit mixed fixture: before-3916',
+          newString: 'edit mixed fixture: after-3916',
+          toolUseIdPrefix: 'toolu_cli_edit_mixed_eol_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 36,
+      toolUse: true,
+      toolOptions: {
+        filePath: editMixedLineEndingsFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editUtf16Prompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_utf16_')) {
+      return {
+        index: responses.length + 33,
+        text: editUtf16FinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_')) {
+      return {
+        index: responses.length + 33,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editUtf16FilePath,
+          oldString: 'edit utf16 fixture: before-9051',
+          newString: 'edit utf16 fixture: after-9051',
+          toolUseIdPrefix: 'toolu_cli_edit_utf16_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 33,
+      toolUse: true,
+      toolOptions: {
+        filePath: editUtf16FilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editUtf8BomPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_utf8_bom_')) {
+      return {
+        index: responses.length + 35,
+        text: editUtf8BomFinalResponse,
+      }
+    }
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_read_')) {
+      return {
+        index: responses.length + 35,
+        editToolUse: true,
+        editToolOptions: {
+          filePath: editUtf8BomFilePath,
+          oldString: 'edit utf8 bom fixture: before-1184',
+          newString: 'edit utf8 bom fixture: after-1184',
+          toolUseIdPrefix: 'toolu_cli_edit_utf8_bom_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 35,
+      toolUse: true,
+      toolOptions: {
+        filePath: editUtf8BomFilePath,
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(editToolPrompt)) {
     if (
       hasToolResultWithIdPrefix(body, 'toolu_cli_edit_') ||
@@ -1535,6 +2244,65 @@ function responseForBody(body, fallbackIndex) {
     return {
       index: responses.length + 9,
       bashSideEffectToolUse: true,
+      text: '',
+    }
+  }
+  if (combinedText.includes(bashContentDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_bash_content_deny_')) {
+      return {
+        index: responses.length + 10,
+        text: bashContentDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 10,
+      bashSideEffectToolUse: true,
+      bashSideEffectOptions: {
+        command: `echo ${bashContentDenyResult} > ${bashContentDenyRelativePath}`,
+        description: 'Attempt to write a denied Bash fixture marker',
+        messageIdPrefix: 'msg_cli_bash_content_deny_tool_use_',
+        toolUseIdPrefix: 'toolu_cli_bash_content_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(bashContentAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_bash_content_ask_')) {
+      return {
+        index: responses.length + 11,
+        text: bashContentAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 11,
+      bashSideEffectToolUse: true,
+      bashSideEffectOptions: {
+        command: `echo ${bashContentAskResult} > ${bashContentAskRelativePath}`,
+        description: 'Attempt to write a Bash fixture requiring approval',
+        messageIdPrefix: 'msg_cli_bash_content_ask_tool_use_',
+        toolUseIdPrefix: 'toolu_cli_bash_content_ask_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(projectBashContentDenyPrompt)) {
+    if (
+      hasToolResultWithIdPrefix(body, 'toolu_cli_project_bash_content_deny_')
+    ) {
+      return {
+        index: responses.length + 12,
+        text: projectBashContentDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 12,
+      bashSideEffectToolUse: true,
+      bashSideEffectOptions: {
+        command: `echo ${projectBashContentDenyResult} > ${projectBashContentDenyRelativePath}`,
+        description: 'Attempt to write a project-denied Bash fixture marker',
+        messageIdPrefix: 'msg_cli_project_bash_content_deny_tool_use_',
+        toolUseIdPrefix: 'toolu_cli_project_bash_content_deny_',
+      },
       text: '',
     }
   }
@@ -1597,6 +2365,13 @@ function responseForBody(body, fallbackIndex) {
       index: responses.length + 25,
       promptTooLong: true,
       text: '',
+    }
+  }
+  if (combinedText.includes(partialStreamPrompt)) {
+    return {
+      index: responses.length + 26,
+      delayedStream: true,
+      text: partialStreamFinalResponse,
     }
   }
   if (combinedText.includes(unclosedToolPrompt)) {
@@ -1704,6 +2479,10 @@ function startMockServer() {
           )
           return
         }
+        if (response.delayedStream && body.stream === true) {
+          await writeDelayedStreamingMessage(res, sequence)
+          return
+        }
         if (response.multiToolUse) {
           writeStreamingMultiToolUse(res, sequence)
           return
@@ -1717,7 +2496,11 @@ function startMockServer() {
           return
         }
         if (response.bashSideEffectToolUse) {
-          writeStreamingBashSideEffectToolUse(res, sequence)
+          writeStreamingBashSideEffectToolUse(
+            res,
+            sequence,
+            response.bashSideEffectOptions,
+          )
           return
         }
         if (response.editToolUse) {
@@ -1782,7 +2565,7 @@ function runCli(args, env, options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = options.timeoutMs ?? 45_000
     const child = spawn(process.execPath, [DIST_CLI, ...args], {
-      cwd: ROOT,
+      cwd: options.cwd ?? ROOT,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -1843,6 +2626,115 @@ function runCli(args, env, options = {}) {
         return
       }
       resolve({ stdout, stderr, code })
+    })
+  })
+}
+
+function runCliStreaming(args, env, options = {}) {
+  return new Promise((resolve, reject) => {
+    const timeoutMs = options.timeoutMs ?? 45_000
+    const child = spawn(process.execPath, [DIST_CLI, ...args], {
+      cwd: options.cwd ?? ROOT,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    let stdout = ''
+    let stderr = ''
+    let lineBuffer = ''
+    const events = []
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => {
+      const observedAt = Date.now()
+      stdout += chunk
+      lineBuffer += chunk
+      const lines = lineBuffer.split(/\r?\n/)
+      lineBuffer = lines.pop() ?? ''
+      for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line) continue
+        try {
+          events.push({
+            observedAt,
+            message: JSON.parse(line),
+            line,
+          })
+        } catch {
+          events.push({
+            observedAt,
+            message: null,
+            line,
+          })
+        }
+      }
+    })
+    child.stderr.on('data', chunk => {
+      stderr += chunk
+    })
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill()
+      reject(
+        new Error(
+          [
+            `CLI timed out after ${timeoutMs}ms`,
+            `args: ${args.join(' ')}`,
+            options.describeState ? `state:\n${options.describeState()}` : '',
+            `stdout:\n${stdout}`,
+            `stderr:\n${stderr}`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        ),
+      )
+    }, timeoutMs)
+    child.on('error', error => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', code => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const closedAt = Date.now()
+      if (lineBuffer.trim()) {
+        const line = lineBuffer.trim()
+        try {
+          events.push({
+            observedAt: closedAt,
+            message: JSON.parse(line),
+            line,
+          })
+        } catch {
+          events.push({
+            observedAt: closedAt,
+            message: null,
+            line,
+          })
+        }
+      }
+      if (code !== 0 && !options.allowNonZero) {
+        reject(
+          new Error(
+            [
+              `CLI exited with code ${code}`,
+              `args: ${args.join(' ')}`,
+              options.describeState ? `state:\n${options.describeState()}` : '',
+              `stdout:\n${stdout}`,
+              `stderr:\n${stderr}`,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          ),
+        )
+        return
+      }
+      resolve({ stdout, stderr, code, events, closedAt })
     })
   })
 }
@@ -1977,6 +2869,8 @@ async function main() {
   await writeFile(tripleToolReadFilePathA, `${tripleToolFileContentA}\n`, 'utf8')
   await writeFile(tripleToolReadFilePathB, `${tripleToolFileContentB}\n`, 'utf8')
   await rm(bashSideEffectFilePath, { force: true })
+  await rm(bashContentDenyFilePath, { force: true })
+  await rm(bashContentAskFilePath, { force: true })
   editToolFilePath = join(ARTIFACT_DIR, 'cli-read-then-edit-tool.txt')
   await writeFile(editToolFilePath, `${editToolOriginalContent}\n`, 'utf8')
   editUnreadFilePath = join(ARTIFACT_DIR, 'cli-unread-edit-rejection.txt')
@@ -1990,6 +2884,41 @@ async function main() {
   await writeFile(editStaleFilePath, `${editStaleOriginalContent}\n`, 'utf8')
   editDenyFilePath = join(ARTIFACT_DIR, 'cli-edit-permission-deny.txt')
   await writeFile(editDenyFilePath, `${editDenyOriginalContent}\n`, 'utf8')
+  editReplaceAllFilePath = join(ARTIFACT_DIR, 'cli-edit-replace-all.txt')
+  await writeFile(
+    editReplaceAllFilePath,
+    `${editReplaceAllOriginalContent}\n`,
+    'utf8',
+  )
+  editMultiMatchFilePath = join(
+    ARTIFACT_DIR,
+    'cli-edit-multi-match-rejection.txt',
+  )
+  await writeFile(
+    editMultiMatchFilePath,
+    `${editMultiMatchOriginalContent}\n`,
+    'utf8',
+  )
+  editCreateFilePath = join(ARTIFACT_DIR, 'cli-edit-create-new-file.txt')
+  await rm(editCreateFilePath, { force: true })
+  editCrlfFilePath = join(ARTIFACT_DIR, 'cli-edit-crlf-preserve.txt')
+  await writeFile(editCrlfFilePath, editCrlfOriginalContent, 'utf8')
+  editMixedLineEndingsFilePath = join(
+    ARTIFACT_DIR,
+    'cli-edit-mixed-line-endings-preserve.txt',
+  )
+  await writeFile(
+    editMixedLineEndingsFilePath,
+    editMixedLineEndingsOriginalContent,
+    'utf8',
+  )
+  editUtf16FilePath = join(ARTIFACT_DIR, 'cli-edit-utf16le-bom-preserve.txt')
+  await writeFile(
+    editUtf16FilePath,
+    Buffer.from(editUtf16OriginalContent, 'utf16le'),
+  )
+  editUtf8BomFilePath = join(ARTIFACT_DIR, 'cli-edit-utf8-bom-preserve.txt')
+  await writeFile(editUtf8BomFilePath, editUtf8BomOriginalContent, 'utf8')
   writeToolFilePath = join(ARTIFACT_DIR, 'cli-write-tool-create.txt')
   await rm(writeToolFilePath, { force: true })
   writeUpdateFilePath = join(ARTIFACT_DIR, 'cli-read-then-write-update.txt')
@@ -2013,6 +2942,46 @@ async function main() {
   )
   writeDenyFilePath = join(ARTIFACT_DIR, 'cli-write-permission-deny.txt')
   await rm(writeDenyFilePath, { force: true })
+  userSettingsWriteDenyFilePath = join(
+    ARTIFACT_DIR,
+    'cli-user-settings-write-deny.txt',
+  )
+  await rm(userSettingsWriteDenyFilePath, { force: true })
+  projectSettingsWriteDenyFilePath = join(
+    ARTIFACT_DIR,
+    'cli-project-settings-write-deny.txt',
+  )
+  await rm(projectSettingsWriteDenyFilePath, { force: true })
+  managedOnlyWriteFilePath = join(
+    ARTIFACT_DIR,
+    'cli-managed-only-write-allow-ignored.txt',
+  )
+  await rm(managedOnlyWriteFilePath, { force: true })
+  binaryReadWriteFilePath = join(
+    ARTIFACT_DIR,
+    'cli-binary-read-write-rejection',
+  )
+  await writeFile(binaryReadWriteFilePath, binaryReadWriteOriginalBytes)
+  writeCrlfFilePath = join(ARTIFACT_DIR, 'cli-write-crlf-create.txt')
+  await rm(writeCrlfFilePath, { force: true })
+  writeMixedLineEndingsFilePath = join(
+    ARTIFACT_DIR,
+    'cli-write-mixed-line-endings-create.txt',
+  )
+  await rm(writeMixedLineEndingsFilePath, { force: true })
+  writeUtf16FilePath = join(
+    ARTIFACT_DIR,
+    'cli-write-utf16le-bom-overwrite.txt',
+  )
+  await writeFile(
+    writeUtf16FilePath,
+    Buffer.from(writeUtf16OriginalContent, 'utf16le'),
+  )
+  writeUtf8BomFilePath = join(
+    ARTIFACT_DIR,
+    'cli-write-utf8-bom-overwrite.txt',
+  )
+  await writeFile(writeUtf8BomFilePath, writeUtf8BomOriginalContent, 'utf8')
   notebookEditFilePath = join(ARTIFACT_DIR, 'cli-read-then-notebook-edit.ipynb')
   await writeFile(
     notebookEditFilePath,
@@ -2096,6 +3065,64 @@ async function main() {
       1,
     ),
     'utf8',
+  )
+  notebookInvalidFilePath = join(
+    ARTIFACT_DIR,
+    'cli-notebook-invalid-json-rejection.ipynb',
+  )
+  notebookInvalidWasCorrupted = false
+  await writeFile(
+    notebookInvalidFilePath,
+    JSON.stringify(
+      {
+        cells: [
+          {
+            cell_type: 'code',
+            execution_count: 1,
+            id: notebookInvalidCellId,
+            metadata: {},
+            outputs: [],
+            source: notebookInvalidOriginalSource,
+          },
+        ],
+        metadata: {
+          language_info: { name: 'python' },
+        },
+        nbformat: 4,
+        nbformat_minor: 5,
+      },
+      null,
+      1,
+    ),
+    'utf8',
+  )
+  notebookInvalidStableMtime = new Date(Date.now() - 20_000)
+  utimesSync(
+    notebookInvalidFilePath,
+    notebookInvalidStableMtime,
+    notebookInvalidStableMtime,
+  )
+  notebookLargeFilePath = join(ARTIFACT_DIR, 'cli-notebook-too-large.ipynb')
+  notebookLargeWasExpanded = false
+  await writeFile(
+    notebookLargeFilePath,
+    makeNotebookContent([
+      {
+        cell_type: 'code',
+        execution_count: 1,
+        id: notebookLargeCellId,
+        metadata: {},
+        outputs: [],
+        source: notebookLargeOriginalSource,
+      },
+    ]),
+    'utf8',
+  )
+  notebookLargeStableMtime = new Date(Date.now() - 20_000)
+  utimesSync(
+    notebookLargeFilePath,
+    notebookLargeStableMtime,
+    notebookLargeStableMtime,
   )
   notebookUnreadFilePath = join(
     ARTIFACT_DIR,
@@ -2519,6 +3546,72 @@ async function main() {
       'reactive compact retry should include compact summary',
     )
 
+    const beforePartialStreamRequests = server.requests.length
+    const partialStreamRun = await runCliStreaming(
+      [
+        '--bare',
+        '--print',
+        '--verbose',
+        '--output-format',
+        'stream-json',
+        '--include-partial-messages',
+        '--max-turns',
+        '1',
+        '--model',
+        'sonnet',
+        partialStreamPrompt,
+      ],
+      env,
+      runCliOptions(),
+    )
+    const partialStreamRequests = server.requests
+      .slice(beforePartialStreamRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      partialStreamRequests.length,
+      1,
+      'stream-json partial run should make one streamed request',
+    )
+    const partialDeltaEvents = partialStreamRun.events.filter(entry => {
+      const message = entry.message
+      return (
+        message?.type === 'stream_event' &&
+        message.event?.type === 'content_block_delta' &&
+        message.event.delta?.type === 'text_delta'
+      )
+    })
+    assert(
+      partialDeltaEvents.some(entry =>
+        String(entry.message.event.delta.text).includes(partialStreamChunks[0]),
+      ),
+      `stream-json output should include first partial delta before completion:\n${partialStreamRun.stdout}`,
+    )
+    const firstPartialDelta = partialDeltaEvents.find(entry =>
+      String(entry.message.event.delta.text).includes(partialStreamChunks[0]),
+    )
+    const finalPartialResult = partialStreamRun.events.find(entry => {
+      const message = entry.message
+      return (
+        message?.type === 'result' &&
+        message.subtype === 'success' &&
+        message.result === partialStreamFinalResponse
+      )
+    })
+    assert(
+      finalPartialResult,
+      `stream-json output missing final result:\n${partialStreamRun.stdout}`,
+    )
+    assert(
+      firstPartialDelta.observedAt < finalPartialResult.observedAt,
+      'first partial delta should be emitted before the final result event',
+    )
+    assert(
+      partialStreamRun.closedAt - firstPartialDelta.observedAt >= 150,
+      'first partial delta should arrive while the process is still streaming, not only at close',
+    )
+
     const beforeMultiToolRequests = server.requests.length
     const multiToolRun = parseJsonOutput(
       (await runCli([...toolArgs, multiToolPrompt], env)).stdout,
@@ -2715,6 +3808,256 @@ async function main() {
       await readFile(bashSideEffectFilePath, 'utf8'),
       new RegExp(bashSideEffectResult),
       'Bash side-effect should write the fixture file on disk',
+    )
+
+    const bashContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-bash-content-deny-config-'),
+    )
+    await writeFile(
+      join(bashContentDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: ['Bash(echo:*)'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const bashContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: bashContentDenyConfigDir,
+    }
+    const beforeBashContentDenyRequests = server.requests.length
+    const bashContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...bashSideEffectArgs, bashContentDenyPrompt],
+          bashContentDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      bashContentDenyRun.is_error,
+      false,
+      'Bash content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      bashContentDenyRun.result,
+      bashContentDenyFinalResponse,
+      'Bash content-specific deny final response',
+    )
+    const bashContentDenyRequests = server.requests
+      .slice(beforeBashContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      bashContentDenyRequests.length,
+      2,
+      'Bash content-specific deny run should make tool_use and final requests',
+    )
+    const bashContentDenyResultBlocks = requestContentBlocks(
+      bashContentDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      bashContentDenyResultBlocks.some(block => {
+        const content = textFromContent(block.content)
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_bash_content_deny_') &&
+          block.is_error === true &&
+          content.includes('Permission to use Bash') &&
+          content.includes('has been denied')
+        )
+      }),
+      `Bash content-specific deny follow-up should include rule-denied tool_result: ${JSON.stringify(bashContentDenyResultBlocks, null, 2)}`,
+    )
+    const bashContentDenyFileExists = await stat(
+      bashContentDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      bashContentDenyFileExists,
+      false,
+      'Bash content-specific deny should not create the denied file',
+    )
+
+    const bashContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-bash-content-ask-config-'),
+    )
+    await writeFile(
+      join(bashContentAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: ['Bash(echo:*)'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const bashContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: bashContentAskConfigDir,
+    }
+    const beforeBashContentAskRequests = server.requests.length
+    const bashContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...bashSideEffectArgs, bashContentAskPrompt],
+          bashContentAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      bashContentAskRun.is_error,
+      false,
+      'Bash content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      bashContentAskRun.result,
+      bashContentAskFinalResponse,
+      'Bash content-specific ask final response',
+    )
+    const bashContentAskRequests = server.requests
+      .slice(beforeBashContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      bashContentAskRequests.length,
+      2,
+      'Bash content-specific ask run should make tool_use and final requests',
+    )
+    const bashContentAskResultBlocks = requestContentBlocks(
+      bashContentAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      bashContentAskResultBlocks.some(block => {
+        const content = textFromContent(block.content)
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_bash_content_ask_') &&
+          block.is_error === true &&
+          content.includes('Claude requested permissions to use Bash') &&
+          content.includes("haven't granted it yet")
+        )
+      }),
+      `Bash content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(bashContentAskResultBlocks, null, 2)}`,
+    )
+    const bashContentAskFileExists = await stat(bashContentAskFilePath).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      bashContentAskFileExists,
+      false,
+      'Bash content-specific ask should not create the unapproved file',
+    )
+
+    const projectBashContentDenyCwd = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-bash-content-deny-cwd-'),
+    )
+    await mkdir(join(projectBashContentDenyCwd, '.claude'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(projectBashContentDenyCwd, '.claude', 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: ['Bash(echo:*)'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    projectBashContentDenyFilePath = join(
+      projectBashContentDenyCwd,
+      projectBashContentDenyRelativePath,
+    )
+    const projectBashContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-bash-content-deny-config-'),
+    )
+    const projectBashContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: projectBashContentDenyConfigDir,
+    }
+    const beforeProjectBashContentDenyRequests = server.requests.length
+    const projectBashContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...bashSideEffectArgs, projectBashContentDenyPrompt],
+          projectBashContentDenyEnv,
+          {
+            ...runCliOptions(),
+            cwd: projectBashContentDenyCwd,
+          },
+        )
+      ).stdout,
+    )
+    assert.equal(
+      projectBashContentDenyRun.is_error,
+      false,
+      'Project Bash content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      projectBashContentDenyRun.result,
+      projectBashContentDenyFinalResponse,
+      'Project Bash content-specific deny final response',
+    )
+    const projectBashContentDenyRequests = server.requests
+      .slice(beforeProjectBashContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      projectBashContentDenyRequests.length,
+      2,
+      'Project Bash content-specific deny run should make tool_use and final requests',
+    )
+    const projectBashContentDenyResultBlocks = requestContentBlocks(
+      projectBashContentDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      projectBashContentDenyResultBlocks.some(block => {
+        const content = textFromContent(block.content)
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith(
+            'toolu_cli_project_bash_content_deny_',
+          ) &&
+          block.is_error === true &&
+          content.includes('Permission to use Bash') &&
+          content.includes('has been denied')
+        )
+      }),
+      `Project Bash content-specific deny follow-up should include rule-denied tool_result: ${JSON.stringify(projectBashContentDenyResultBlocks, null, 2)}`,
+    )
+    const projectBashContentDenyFileExists = await stat(
+      projectBashContentDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      projectBashContentDenyFileExists,
+      false,
+      'Project Bash content-specific deny should not create the denied file',
     )
 
     const beforeEditToolRequests = server.requests.length
@@ -2981,6 +4324,405 @@ async function main() {
       'Edit permission deny should leave the file unchanged',
     )
 
+    const beforeEditReplaceAllRequests = server.requests.length
+    const editReplaceAllRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editReplaceAllPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editReplaceAllRun.is_error,
+      false,
+      'Edit replace_all run should complete after model final response',
+    )
+    assert.equal(
+      editReplaceAllRun.result,
+      editReplaceAllFinalResponse,
+      'Edit replace_all final response',
+    )
+    const editReplaceAllRequests = server.requests
+      .slice(beforeEditReplaceAllRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editReplaceAllRequests.length,
+      3,
+      'Edit replace_all run should make Read, Edit, and final requests',
+    )
+    const editReplaceAllBlocks = requestContentBlocks(
+      editReplaceAllRequests[2],
+      'tool_result',
+    )
+    assert(
+      editReplaceAllBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_replace_all_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit replace_all follow-up should include successful Edit tool_result',
+    )
+    assert.equal(
+      await readFile(editReplaceAllFilePath, 'utf8'),
+      `${editReplaceAllUpdatedContent}\n`,
+      'Edit replace_all should update every occurrence on disk',
+    )
+
+    const beforeEditMultiMatchRequests = server.requests.length
+    const editMultiMatchRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editMultiMatchPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editMultiMatchRun.is_error,
+      false,
+      'Edit multi-match rejection run should complete after model final response',
+    )
+    assert.equal(
+      editMultiMatchRun.result,
+      editMultiMatchFinalResponse,
+      'Edit multi-match rejection final response',
+    )
+    const editMultiMatchRequests = server.requests
+      .slice(beforeEditMultiMatchRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editMultiMatchRequests.length,
+      3,
+      'Edit multi-match rejection should make Read, Edit, and final requests',
+    )
+    const editMultiMatchBlocks = requestContentBlocks(
+      editMultiMatchRequests[2],
+      'tool_result',
+    )
+    assert(
+      editMultiMatchBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_multi_match_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('replace_all is false')
+        )
+      }),
+      'Edit multi-match follow-up should include replace_all guidance error',
+    )
+    assert.equal(
+      await readFile(editMultiMatchFilePath, 'utf8'),
+      `${editMultiMatchOriginalContent}\n`,
+      'Edit multi-match rejection should leave the file unchanged',
+    )
+
+    const beforeEditCreateRequests = server.requests.length
+    const editCreateArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Edit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const editCreateRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editCreateArgs, editCreatePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editCreateRun.is_error,
+      false,
+      'Edit create-file run should complete after model final response',
+    )
+    assert.equal(
+      editCreateRun.result,
+      editCreateFinalResponse,
+      'Edit create-file final response',
+    )
+    const editCreateRequests = server.requests
+      .slice(beforeEditCreateRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editCreateRequests.length,
+      2,
+      'Edit create-file run should make Edit and final requests',
+    )
+    const editCreateBlocks = requestContentBlocks(
+      editCreateRequests[1],
+      'tool_result',
+    )
+    assert(
+      editCreateBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_create_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit create-file follow-up should include successful Edit tool_result',
+    )
+    assert.equal(
+      await readFile(editCreateFilePath, 'utf8'),
+      `${editCreateContent}\n`,
+      'Edit create-file should create the fixture file on disk',
+    )
+
+    const beforeEditCrlfRequests = server.requests.length
+    const editCrlfRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editCrlfPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editCrlfRun.is_error,
+      false,
+      'Edit CRLF preservation run should complete after model final response',
+    )
+    assert.equal(
+      editCrlfRun.result,
+      editCrlfFinalResponse,
+      'Edit CRLF preservation final response',
+    )
+    const editCrlfRequests = server.requests
+      .slice(beforeEditCrlfRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editCrlfRequests.length,
+      3,
+      'Edit CRLF preservation run should make Read, Edit, and final requests',
+    )
+    const editCrlfReadFollowUpTexts = requestTexts(editCrlfRequests[1])
+    assert(
+      containsText(editCrlfReadFollowUpTexts, 'edit crlf fixture: before-6142'),
+      'Edit CRLF preservation follow-up should include Read file content',
+    )
+    const editCrlfBlocks = requestContentBlocks(
+      editCrlfRequests[2],
+      'tool_result',
+    )
+    assert(
+      editCrlfBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_crlf_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit CRLF preservation follow-up should include successful Edit tool_result',
+    )
+    assert.equal(
+      await readFile(editCrlfFilePath, 'utf8'),
+      editCrlfUpdatedContent,
+      'Edit should preserve CRLF line endings on disk',
+    )
+
+    const beforeEditMixedLineEndingsRequests = server.requests.length
+    const editMixedLineEndingsRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editMixedLineEndingsPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editMixedLineEndingsRun.is_error,
+      false,
+      'Edit mixed line ending preservation run should complete after model final response',
+    )
+    assert.equal(
+      editMixedLineEndingsRun.result,
+      editMixedLineEndingsFinalResponse,
+      'Edit mixed line ending preservation final response',
+    )
+    const editMixedLineEndingsRequests = server.requests
+      .slice(beforeEditMixedLineEndingsRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editMixedLineEndingsRequests.length,
+      3,
+      'Edit mixed line ending preservation run should make Read, Edit, and final requests',
+    )
+    const editMixedLineEndingsBlocks = requestContentBlocks(
+      editMixedLineEndingsRequests[2],
+      'tool_result',
+    )
+    assert(
+      editMixedLineEndingsBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_mixed_eol_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit mixed line ending preservation follow-up should include successful Edit tool_result',
+    )
+    assert.equal(
+      await readFile(editMixedLineEndingsFilePath, 'utf8'),
+      editMixedLineEndingsUpdatedContent,
+      'Edit should preserve mixed CRLF/LF line endings on disk',
+    )
+
+    const beforeEditUtf16Requests = server.requests.length
+    const editUtf16Run = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editUtf16Prompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editUtf16Run.is_error,
+      false,
+      'Edit UTF-16LE preservation run should complete after model final response',
+    )
+    assert.equal(
+      editUtf16Run.result,
+      editUtf16FinalResponse,
+      'Edit UTF-16LE preservation final response',
+    )
+    const editUtf16Requests = server.requests
+      .slice(beforeEditUtf16Requests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editUtf16Requests.length,
+      3,
+      'Edit UTF-16LE preservation run should make Read, Edit, and final requests',
+    )
+    const editUtf16Blocks = requestContentBlocks(
+      editUtf16Requests[2],
+      'tool_result',
+    )
+    assert(
+      editUtf16Blocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_utf16_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit UTF-16LE preservation follow-up should include successful Edit tool_result',
+    )
+    const editUtf16Bytes = await readFile(editUtf16FilePath)
+    assert.equal(
+      editUtf16Bytes[0],
+      0xff,
+      'Edit UTF-16LE preservation should keep FF BOM byte',
+    )
+    assert.equal(
+      editUtf16Bytes[1],
+      0xfe,
+      'Edit UTF-16LE preservation should keep FE BOM byte',
+    )
+    assert.equal(
+      editUtf16Bytes.toString('utf16le'),
+      editUtf16UpdatedContent,
+      'Edit should preserve UTF-16LE BOM encoding on disk',
+    )
+
+    const beforeEditUtf8BomRequests = server.requests.length
+    const editUtf8BomRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editToolArgs, editUtf8BomPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editUtf8BomRun.is_error,
+      false,
+      'Edit UTF-8 BOM preservation run should complete after model final response',
+    )
+    assert.equal(
+      editUtf8BomRun.result,
+      editUtf8BomFinalResponse,
+      'Edit UTF-8 BOM preservation final response',
+    )
+    const editUtf8BomRequests = server.requests
+      .slice(beforeEditUtf8BomRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editUtf8BomRequests.length,
+      3,
+      'Edit UTF-8 BOM preservation run should make Read, Edit, and final requests',
+    )
+    const editUtf8BomBlocks = requestContentBlocks(
+      editUtf8BomRequests[2],
+      'tool_result',
+    )
+    assert(
+      editUtf8BomBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_utf8_bom_') &&
+          block.is_error !== true
+        )
+      }),
+      'Edit UTF-8 BOM preservation follow-up should include successful Edit tool_result',
+    )
+    const editUtf8BomBytes = await readFile(editUtf8BomFilePath)
+    assert.equal(
+      editUtf8BomBytes[0],
+      0xef,
+      'Edit UTF-8 BOM preservation should keep EF BOM byte',
+    )
+    assert.equal(
+      editUtf8BomBytes[1],
+      0xbb,
+      'Edit UTF-8 BOM preservation should keep BB BOM byte',
+    )
+    assert.equal(
+      editUtf8BomBytes[2],
+      0xbf,
+      'Edit UTF-8 BOM preservation should keep BF BOM byte',
+    )
+    assert.equal(
+      editUtf8BomBytes.toString('utf8'),
+      editUtf8BomUpdatedContent,
+      'Edit should preserve UTF-8 BOM on disk',
+    )
+
     const beforeWriteToolRequests = server.requests.length
     const writeToolArgs = [
       '--bare',
@@ -3046,6 +4788,106 @@ async function main() {
       await readFile(writeToolFilePath, 'utf8'),
       `${writeToolContent}\n`,
       'Write tool should create the fixture file on disk',
+    )
+
+    const beforeWriteCrlfRequests = server.requests.length
+    const writeCrlfRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeToolArgs, writeCrlfPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeCrlfRun.is_error,
+      false,
+      'Write CRLF create run should succeed',
+    )
+    assert.equal(
+      writeCrlfRun.result,
+      writeCrlfFinalResponse,
+      'Write CRLF final response',
+    )
+    const writeCrlfRequests = server.requests
+      .slice(beforeWriteCrlfRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeCrlfRequests.length,
+      2,
+      'Write CRLF run should make tool_use and follow-up requests',
+    )
+    const writeCrlfResultBlocks = requestContentBlocks(
+      writeCrlfRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeCrlfResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_crlf_') &&
+          block.is_error !== true
+        )
+      }),
+      'Write CRLF follow-up request should include successful Write tool_result',
+    )
+    assert.equal(
+      await readFile(writeCrlfFilePath, 'utf8'),
+      writeCrlfContent,
+      'Write tool should preserve CRLF content on disk',
+    )
+
+    const beforeWriteMixedLineEndingsRequests = server.requests.length
+    const writeMixedLineEndingsRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeToolArgs, writeMixedLineEndingsPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeMixedLineEndingsRun.is_error,
+      false,
+      'Write mixed line endings create run should succeed',
+    )
+    assert.equal(
+      writeMixedLineEndingsRun.result,
+      writeMixedLineEndingsFinalResponse,
+      'Write mixed line endings final response',
+    )
+    const writeMixedLineEndingsRequests = server.requests
+      .slice(beforeWriteMixedLineEndingsRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeMixedLineEndingsRequests.length,
+      2,
+      'Write mixed line endings run should make tool_use and follow-up requests',
+    )
+    const writeMixedLineEndingsResultBlocks = requestContentBlocks(
+      writeMixedLineEndingsRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeMixedLineEndingsResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_mixed_eol_') &&
+          block.is_error !== true
+        )
+      }),
+      'Write mixed line endings follow-up request should include successful Write tool_result',
+    )
+    assert.equal(
+      await readFile(writeMixedLineEndingsFilePath, 'utf8'),
+      writeMixedLineEndingsContent,
+      'Write tool should preserve mixed CRLF/LF content on disk',
     )
 
     const beforeWriteUpdateRequests = server.requests.length
@@ -3117,6 +4959,133 @@ async function main() {
       await readFile(writeUpdateFilePath, 'utf8'),
       `${writeUpdateUpdatedContent}\n`,
       'Write tool should update the existing fixture file on disk',
+    )
+
+    const beforeWriteUtf16Requests = server.requests.length
+    const writeUtf16Run = parseJsonOutput(
+      (
+        await runCli(
+          [...writeUpdateArgs, writeUtf16Prompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeUtf16Run.is_error,
+      false,
+      'Write UTF-16LE overwrite run should complete after model final response',
+    )
+    assert.equal(
+      writeUtf16Run.result,
+      writeUtf16FinalResponse,
+      'Write UTF-16LE overwrite final response',
+    )
+    const writeUtf16Requests = server.requests
+      .slice(beforeWriteUtf16Requests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeUtf16Requests.length,
+      3,
+      'Write UTF-16LE overwrite run should make Read, Write, and final requests',
+    )
+    const writeUtf16ResultBlocks = requestContentBlocks(
+      writeUtf16Requests[2],
+      'tool_result',
+    )
+    assert(
+      writeUtf16ResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_utf16_') &&
+          block.is_error !== true
+        )
+      }),
+      'Write UTF-16LE overwrite follow-up should include successful Write tool_result',
+    )
+    const writeUtf16Bytes = await readFile(writeUtf16FilePath)
+    assert.equal(
+      writeUtf16Bytes[0],
+      0xff,
+      'Write UTF-16LE overwrite should keep FF BOM byte',
+    )
+    assert.equal(
+      writeUtf16Bytes[1],
+      0xfe,
+      'Write UTF-16LE overwrite should keep FE BOM byte',
+    )
+    assert.equal(
+      writeUtf16Bytes.toString('utf16le'),
+      writeUtf16UpdatedContent,
+      'Write should preserve UTF-16LE BOM encoding on disk',
+    )
+
+    const beforeWriteUtf8BomRequests = server.requests.length
+    const writeUtf8BomRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeUpdateArgs, writeUtf8BomPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeUtf8BomRun.is_error,
+      false,
+      'Write UTF-8 BOM overwrite run should complete after model final response',
+    )
+    assert.equal(
+      writeUtf8BomRun.result,
+      writeUtf8BomFinalResponse,
+      'Write UTF-8 BOM overwrite final response',
+    )
+    const writeUtf8BomRequests = server.requests
+      .slice(beforeWriteUtf8BomRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeUtf8BomRequests.length,
+      3,
+      'Write UTF-8 BOM overwrite run should make Read, Write, and final requests',
+    )
+    const writeUtf8BomResultBlocks = requestContentBlocks(
+      writeUtf8BomRequests[2],
+      'tool_result',
+    )
+    assert(
+      writeUtf8BomResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_utf8_bom_') &&
+          block.is_error !== true
+        )
+      }),
+      'Write UTF-8 BOM overwrite follow-up should include successful Write tool_result',
+    )
+    const writeUtf8BomBytes = await readFile(writeUtf8BomFilePath)
+    assert.equal(
+      writeUtf8BomBytes[0],
+      0xef,
+      'Write UTF-8 BOM overwrite should keep EF BOM byte',
+    )
+    assert.equal(
+      writeUtf8BomBytes[1],
+      0xbb,
+      'Write UTF-8 BOM overwrite should keep BB BOM byte',
+    )
+    assert.equal(
+      writeUtf8BomBytes[2],
+      0xbf,
+      'Write UTF-8 BOM overwrite should keep BF BOM byte',
+    )
+    assert.equal(
+      writeUtf8BomBytes.toString('utf8'),
+      writeUtf8BomUpdatedContent,
+      'Write should preserve UTF-8 BOM on disk',
     )
 
     const beforeWriteUnreadRequests = server.requests.length
@@ -3327,6 +5296,364 @@ async function main() {
       writeDenyFileExists,
       false,
       'Write permission deny should not create the denied file',
+    )
+
+    const userSettingsDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-user-settings-deny-config-'),
+    )
+    await writeFile(
+      join(userSettingsDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: ['Write'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const userSettingsDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: userSettingsDenyConfigDir,
+    }
+    const beforeUserSettingsWriteDenyRequests = server.requests.length
+    const userSettingsWriteDenyArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    const userSettingsWriteDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...userSettingsWriteDenyArgs, userSettingsWriteDenyPrompt],
+          userSettingsDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      userSettingsWriteDenyRun.is_error,
+      false,
+      'User settings Write deny run should complete after model final response',
+    )
+    assert.equal(
+      userSettingsWriteDenyRun.result,
+      userSettingsWriteDenyFinalResponse,
+      'User settings Write deny final response',
+    )
+    const userSettingsWriteDenyRequests = server.requests
+      .slice(beforeUserSettingsWriteDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      userSettingsWriteDenyRequests.length,
+      2,
+      'User settings Write deny run should make tool_use and final requests',
+    )
+    const userSettingsWriteDenyResultBlocks = requestContentBlocks(
+      userSettingsWriteDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      userSettingsWriteDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith(
+            'toolu_cli_user_settings_write_deny_',
+          ) &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('No such tool available: Write')
+        )
+      }),
+      `User settings Write deny follow-up should include unavailable tool result: ${JSON.stringify(userSettingsWriteDenyResultBlocks, null, 2)}`,
+    )
+    const userSettingsWriteDenyFileExists = await stat(
+      userSettingsWriteDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      userSettingsWriteDenyFileExists,
+      false,
+      'User settings Write deny should not create the denied file',
+    )
+
+    const projectSettingsDenyCwd = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-settings-deny-cwd-'),
+    )
+    await mkdir(join(projectSettingsDenyCwd, '.claude'), { recursive: true })
+    await writeFile(
+      join(projectSettingsDenyCwd, '.claude', 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: ['Write'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const projectSettingsDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-settings-deny-config-'),
+    )
+    const projectSettingsDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: projectSettingsDenyConfigDir,
+    }
+    const beforeProjectSettingsWriteDenyRequests = server.requests.length
+    const projectSettingsWriteDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...userSettingsWriteDenyArgs, projectSettingsWriteDenyPrompt],
+          projectSettingsDenyEnv,
+          {
+            ...runCliOptions(),
+            cwd: projectSettingsDenyCwd,
+          },
+        )
+      ).stdout,
+    )
+    assert.equal(
+      projectSettingsWriteDenyRun.is_error,
+      false,
+      'Project settings Write deny run should complete after model final response',
+    )
+    assert.equal(
+      projectSettingsWriteDenyRun.result,
+      projectSettingsWriteDenyFinalResponse,
+      'Project settings Write deny final response',
+    )
+    const projectSettingsWriteDenyRequests = server.requests
+      .slice(beforeProjectSettingsWriteDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      projectSettingsWriteDenyRequests.length,
+      2,
+      'Project settings Write deny run should make tool_use and final requests',
+    )
+    const projectSettingsWriteDenyResultBlocks = requestContentBlocks(
+      projectSettingsWriteDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      projectSettingsWriteDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith(
+            'toolu_cli_project_settings_write_deny_',
+          ) &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('No such tool available: Write')
+        )
+      }),
+      `Project settings Write deny follow-up should include unavailable tool result: ${JSON.stringify(projectSettingsWriteDenyResultBlocks, null, 2)}`,
+    )
+    const projectSettingsWriteDenyFileExists = await stat(
+      projectSettingsWriteDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      projectSettingsWriteDenyFileExists,
+      false,
+      'Project settings Write deny should not create the denied file',
+    )
+
+    const managedSettingsDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-managed-settings-'),
+    )
+    await writeFile(
+      join(managedSettingsDir, 'managed-settings.json'),
+      JSON.stringify(
+        {
+          allowManagedPermissionRulesOnly: true,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const managedOnlyEnv = {
+      ...env,
+      CLAUDE_CODE_MANAGED_SETTINGS_PATH: managedSettingsDir,
+      USER_TYPE: 'ant',
+    }
+    const beforeManagedOnlyWriteRequests = server.requests.length
+    const managedOnlyWriteArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--allowedTools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    const managedOnlyWriteRun = parseJsonOutput(
+      (
+        await runCli(
+          [...managedOnlyWriteArgs, managedOnlyWritePrompt],
+          managedOnlyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      managedOnlyWriteRun.is_error,
+      false,
+      'Managed-only Write rejection run should complete after model final response',
+    )
+    assert.equal(
+      managedOnlyWriteRun.result,
+      managedOnlyWriteFinalResponse,
+      'Managed-only Write rejection final response',
+    )
+    const managedOnlyWriteRequests = server.requests
+      .slice(beforeManagedOnlyWriteRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      managedOnlyWriteRequests.length,
+      2,
+      'Managed-only Write rejection run should make tool_use and final requests',
+    )
+    const managedOnlyWriteResultBlocks = requestContentBlocks(
+      managedOnlyWriteRequests[1],
+      'tool_result',
+    )
+    assert(
+      managedOnlyWriteResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_managed_write_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes(
+            "Claude requested permissions to write to",
+          ) &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `Managed-only Write follow-up should include permission denial result: ${JSON.stringify(managedOnlyWriteResultBlocks, null, 2)}`,
+    )
+    const managedOnlyWriteFileExists = await stat(
+      managedOnlyWriteFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      managedOnlyWriteFileExists,
+      false,
+      'Managed-only Write denial should ignore CLI allow and not create the file',
+    )
+
+    const beforeBinaryReadWriteRequests = server.requests.length
+    const binaryReadWriteArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '4',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,Write',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const binaryReadWriteRun = parseJsonOutput(
+      (
+        await runCli(
+          [...binaryReadWriteArgs, binaryReadWritePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      binaryReadWriteRun.is_error,
+      false,
+      'Binary Read then Write rejection run should complete after model final response',
+    )
+    assert.equal(
+      binaryReadWriteRun.result,
+      binaryReadWriteFinalResponse,
+      'Binary Read then Write rejection final response',
+    )
+    const binaryReadWriteRequests = server.requests
+      .slice(beforeBinaryReadWriteRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      binaryReadWriteRequests.length,
+      3,
+      'Binary Read then Write rejection run should make Read, Write, and final requests',
+    )
+    const binaryReadResultBlocks = requestContentBlocks(
+      binaryReadWriteRequests[1],
+      'tool_result',
+    )
+    assert(
+      binaryReadResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_read_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('cannot read binary files')
+        )
+      }),
+      'Binary Read follow-up should include binary-file error result',
+    )
+    const binaryWriteResultBlocks = requestContentBlocks(
+      binaryReadWriteRequests[2],
+      'tool_result',
+    )
+    assert(
+      binaryWriteResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_binary_write_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('File has not been read yet')
+        )
+      }),
+      'Binary Write follow-up should include read-before-write error result',
+    )
+    assert.deepEqual(
+      await readFile(binaryReadWriteFilePath),
+      binaryReadWriteOriginalBytes,
+      'Binary Read/Write rejection should leave original bytes unchanged',
     )
 
     const beforeNotebookEditRequests = server.requests.length
@@ -3585,6 +5912,131 @@ async function main() {
       rejectedNotebook.cells[0].source,
       notebookRejectOriginalSource,
       'NotebookEdit missing-cell rejection should leave notebook unchanged',
+    )
+
+    const beforeNotebookInvalidRequests = server.requests.length
+    const notebookInvalidRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookRejectArgs, notebookInvalidPrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookInvalidRun.is_error,
+      false,
+      'NotebookEdit invalid-json rejection run should complete after model final response',
+    )
+    assert.equal(
+      notebookInvalidRun.result,
+      notebookInvalidFinalResponse,
+      'NotebookEdit invalid-json rejection final response',
+    )
+    const notebookInvalidRequests = server.requests
+      .slice(beforeNotebookInvalidRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookInvalidRequests.length,
+      3,
+      'NotebookEdit invalid-json rejection run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookInvalidReadFollowUpTexts = requestTexts(
+      notebookInvalidRequests[1],
+    )
+    assert(
+      containsText(
+        notebookInvalidReadFollowUpTexts,
+        notebookInvalidOriginalSource,
+      ),
+      'NotebookEdit invalid-json follow-up should include original Read notebook content',
+    )
+    const notebookInvalidResultBlocks = requestContentBlocks(
+      notebookInvalidRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookInvalidResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_invalid_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Notebook is not valid JSON')
+        )
+      }),
+      'NotebookEdit invalid-json follow-up should include parse error tool_result',
+    )
+    assert.equal(
+      await readFile(notebookInvalidFilePath, 'utf8'),
+      notebookInvalidCorruptContent,
+      'NotebookEdit invalid-json rejection should leave corrupted notebook unchanged',
+    )
+
+    const beforeNotebookLargeRequests = server.requests.length
+    const notebookLargeRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookRejectArgs, notebookLargePrompt],
+          env,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookLargeRun.is_error,
+      false,
+      'NotebookEdit too-large rejection run should complete after model final response',
+    )
+    assert.equal(
+      notebookLargeRun.result,
+      notebookLargeFinalResponse,
+      'NotebookEdit too-large rejection final response',
+    )
+    const notebookLargeRequests = server.requests
+      .slice(beforeNotebookLargeRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookLargeRequests.length,
+      3,
+      'NotebookEdit too-large rejection run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookLargeReadFollowUpTexts = requestTexts(
+      notebookLargeRequests[1],
+    )
+    assert(
+      containsText(notebookLargeReadFollowUpTexts, notebookLargeOriginalSource),
+      'NotebookEdit too-large follow-up should include original Read notebook content',
+    )
+    const notebookLargeResultBlocks = requestContentBlocks(
+      notebookLargeRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookLargeResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_large_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('too large to edit')
+        )
+      }),
+      'NotebookEdit too-large follow-up should include size error tool_result',
+    )
+    const notebookLargeContent = await readFile(notebookLargeFilePath, 'utf8')
+    assert(
+      notebookLargeContent.includes(notebookLargeExpandedMarker),
+      'NotebookEdit too-large rejection should leave expanded notebook content intact',
+    )
+    assert(
+      !notebookLargeContent.includes(notebookLargeAttemptedSource),
+      'NotebookEdit too-large rejection should not write attempted source',
     )
 
     const beforeNotebookUnreadRequests = server.requests.length
@@ -3909,22 +6361,43 @@ async function main() {
     console.log('ok - unclosed tool_use block is finalized at stream end')
     console.log('ok - out-of-order stream recovers through non-streaming fallback')
     console.log('ok - reactive compact recovers after prompt-too-long')
+    console.log('ok - stream-json partial events flush before final result')
     console.log('ok - multiple interleaved tool_use blocks execute and follow up')
     console.log('ok - mixed text, Read, and Bash blocks preserve text and results')
     console.log('ok - triple interleaved Read, Bash, and Read blocks follow up')
     console.log('ok - Bash side-effect tool writes an artifact fixture file')
+    console.log('ok - Bash content-specific deny blocks a matching command')
+    console.log('ok - Bash content-specific ask requires approval')
+    console.log('ok - project Bash content-specific deny blocks a matching command')
     console.log('ok - Read then Edit executes and updates a fixture file')
     console.log('ok - Edit rejects updating a file that was not read first')
     console.log('ok - Edit rejects stale updates after external modification')
     console.log('ok - Edit respects explicit disallowedTools denial')
+    console.log('ok - Edit replace_all updates every matching occurrence')
+    console.log('ok - Edit rejects ambiguous multi-match updates')
+    console.log('ok - Edit creates a new file when old_string is empty')
+    console.log('ok - Edit preserves CRLF line endings')
+    console.log('ok - Edit preserves mixed CRLF/LF line endings')
+    console.log('ok - Edit preserves UTF-16LE BOM encoding')
+    console.log('ok - Edit preserves UTF-8 BOM')
     console.log('ok - Write tool creates an artifact fixture file')
+    console.log('ok - Write tool preserves CRLF content when creating a file')
+    console.log('ok - Write tool preserves mixed CRLF/LF content')
     console.log('ok - Read then Write updates an existing artifact file')
+    console.log('ok - Write preserves UTF-16LE BOM encoding')
+    console.log('ok - Write preserves UTF-8 BOM')
     console.log('ok - Write rejects updating a file that was not read first')
     console.log('ok - Write rejects stale updates after external modification')
     console.log('ok - Write respects explicit disallowedTools denial')
+    console.log('ok - user settings deny removes Write from the tool pool')
+    console.log('ok - project settings deny removes Write from the tool pool')
+    console.log('ok - managed-only permissions ignore CLI Write allow')
+    console.log('ok - Read rejects binary content and Write stays blocked')
     console.log('ok - Read then NotebookEdit updates an artifact notebook')
     console.log('ok - NotebookEdit inserts and deletes an artifact notebook cell')
     console.log('ok - NotebookEdit rejects editing a missing notebook cell')
+    console.log('ok - NotebookEdit rejects corrupted notebook JSON')
+    console.log('ok - NotebookEdit rejects oversized notebooks before parsing')
     console.log('ok - NotebookEdit rejects editing a notebook that was not read first')
     console.log('ok - NotebookEdit rejects stale notebook edits after external modification')
     console.log('ok - NotebookEdit respects explicit disallowedTools denial')

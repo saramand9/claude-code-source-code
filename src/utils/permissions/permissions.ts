@@ -1424,13 +1424,9 @@ export function syncPermissionRulesFromDisk(
 
   // When allowManagedPermissionRulesOnly is enabled, clear all non-policy sources
   if (shouldAllowManagedPermissionRulesOnly()) {
-    const sourcesToClear: PermissionUpdateDestination[] = [
-      'userSettings',
-      'projectSettings',
-      'localSettings',
-      'cliArg',
-      'session',
-    ]
+    const sourcesToClear = PERMISSION_RULE_SOURCES.filter(
+      source => source !== 'policySettings',
+    )
     const behaviors: PermissionBehavior[] = ['allow', 'deny', 'ask']
 
     for (const source of sourcesToClear) {
@@ -1439,7 +1435,7 @@ export function syncPermissionRulesFromDisk(
           type: 'replaceRules',
           rules: [],
           behavior,
-          destination: source,
+          destination: source as PermissionUpdateDestination,
         })
       }
     }
@@ -1450,18 +1446,14 @@ export function syncPermissionRulesFromDisk(
   // would leave the old rule in the context because convertRulesToUpdates
   // only generates replaceRules for source:behavior pairs that have rules —
   // an empty group produces no update, so stale rules persist.
-  const diskSources: PermissionUpdateDestination[] = [
-    'userSettings',
-    'projectSettings',
-    'localSettings',
-  ]
+  const diskSources = SETTING_SOURCES
   for (const diskSource of diskSources) {
     for (const behavior of ['allow', 'deny', 'ask'] as PermissionBehavior[]) {
       context = applyPermissionUpdate(context, {
         type: 'replaceRules',
         rules: [],
         behavior,
-        destination: diskSource,
+        destination: diskSource as PermissionUpdateDestination,
       })
     }
   }

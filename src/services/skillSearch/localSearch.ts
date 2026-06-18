@@ -26,6 +26,8 @@ type SearchOptions = {
 
 const DEFAULT_MAX_RESULTS = 5
 const MAX_RESULTS_LIMIT = 20
+const MAX_QUERY_CHARS = 1000
+const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]+/g
 const STOP_WORDS = new Set([
   'a',
   'an',
@@ -51,6 +53,27 @@ const STOP_WORDS = new Set([
 
 function normalizeText(text: string): string {
   return text.toLowerCase().replace(/[_:/.-]+/g, ' ')
+}
+
+export function normalizeSkillSearchQuery(
+  query: string | null | undefined,
+): string {
+  return String(query ?? '')
+    .replace(CONTROL_CHARS_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_QUERY_CHARS)
+}
+
+export function normalizeSkillSearchOutputText(
+  value: string | null | undefined,
+  maxChars: number,
+): string {
+  return String(value ?? '')
+    .replace(CONTROL_CHARS_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, Math.max(0, maxChars))
 }
 
 function tokenize(query: string): string[] {
@@ -173,9 +196,9 @@ export async function searchSkillIndex(
   query: string,
   options: SearchOptions = {},
 ): Promise<SkillSearchResult[]> {
-  const rawQuery = String(query ?? '')
+  const rawQuery = normalizeSkillSearchQuery(query)
   const terms = tokenize(rawQuery)
-  if (terms.length === 0 && rawQuery.trim().length === 0) {
+  if (terms.length === 0 && rawQuery.length === 0) {
     return []
   }
 

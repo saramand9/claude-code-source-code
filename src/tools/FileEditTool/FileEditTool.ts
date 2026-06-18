@@ -443,9 +443,11 @@ export const FileEditTool = buildTool({
     // Please avoid async operations between here and writing to disk to preserve atomicity
     const {
       content: originalFileContents,
+      rawContent: rawOriginalFileContents,
       fileExists,
       encoding,
       lineEndings: endings,
+      hasMixedLineEndings,
     } = readFileForEdit(absoluteFilePath)
 
     if (fileExists) {
@@ -488,7 +490,15 @@ export const FileEditTool = buildTool({
     })
 
     // 5. Write to disk
-    writeTextContent(absoluteFilePath, updatedFile, encoding, endings)
+    const fileContentForWrite = hasMixedLineEndings
+      ? restoreMixedLineEndings(updatedFile, rawOriginalFileContents)
+      : updatedFile
+    writeTextContent(
+      absoluteFilePath,
+      fileContentForWrite,
+      encoding,
+      hasMixedLineEndings ? 'LF' : endings,
+    )
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()
@@ -598,28 +608,58 @@ export const FileEditTool = buildTool({
 
 function readFileForEdit(absoluteFilePath: string): {
   content: string
+  rawContent: string
   fileExists: boolean
   encoding: BufferEncoding
   lineEndings: LineEndingType
+  hasMixedLineEndings: boolean
 } {
   try {
     // eslint-disable-next-line custom-rules/no-sync-fs
     const meta = readFileSyncWithMetadata(absoluteFilePath)
     return {
       content: meta.content,
+      rawContent: meta.rawContent,
       fileExists: true,
       encoding: meta.encoding,
       lineEndings: meta.lineEndings,
+      hasMixedLineEndings: meta.hasMixedLineEndings,
     }
   } catch (e) {
     if (isENOENT(e)) {
       return {
         content: '',
+        rawContent: '',
         fileExists: false,
         encoding: 'utf8',
         lineEndings: 'LF',
+        hasMixedLineEndings: false,
       }
     }
     throw e
   }
+}
+
+function restoreMixedLineEndings(
+  updatedContent: string,
+  originalRawContent: string,
+): string {
+  const separators = Array.from(
+    originalRawContent.matchAll(/\r\n|\n/g),
+    match => match[0],
+  )
+  if (separators.length === 0) return updatedContent
+
+  const normalizedContent = updatedContent.replaceAll('\r\n', '\n')
+  const lines = normalizedContent.split('\n')
+  let restored = ''
+
+  for (let i = 0; i < lines.length; i++) {
+    restored += lines[i]
+    if (i < lines.length - 1) {
+      restored += separators[i] ?? '\n'
+    }
+  }
+
+  return restored
 }

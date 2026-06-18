@@ -122,11 +122,21 @@ type FetchMcpSkillsForClient = ((
   }
 }
 
-const fetchMcpSkillsForClient = feature('MCP_SKILLS')
-  ? (require('../../skills/mcpSkills.js') as {
-      fetchMcpSkillsForClient: FetchMcpSkillsForClient
-    }).fetchMcpSkillsForClient
+type McpSkillsModule = {
+  fetchMcpSkillsForClient: FetchMcpSkillsForClient
+  getMcpSkillCacheKeyForServer: (
+    name: string,
+    config: ScopedMcpServerConfig,
+  ) => string
+}
+
+const mcpSkillsModule = feature('MCP_SKILLS')
+  ? (require('../../skills/mcpSkills.js') as McpSkillsModule)
   : null
+const fetchMcpSkillsForClient =
+  mcpSkillsModule?.fetchMcpSkillsForClient ?? null
+const getMcpSkillCacheKeyForServer =
+  mcpSkillsModule?.getMcpSkillCacheKeyForServer ?? null
 
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { AssistantMessage } from 'src/types/message.js'
@@ -1391,14 +1401,16 @@ export const connectToServer = memoize(
         // Clear the memoization cache so next operation reconnects
         const key = getServerCacheKey(name, serverRef)
 
-        // Also clear fetch caches (keyed by server name). Reconnection
+        // Also clear fetch caches. Reconnection
         // creates a new connection object; without clearing, the next
         // fetch would return stale tools/resources from the old connection.
         fetchToolsForClient.cache.delete(name)
         fetchResourcesForClient.cache.delete(name)
         fetchCommandsForClient.cache.delete(name)
         if (feature('MCP_SKILLS')) {
-          fetchMcpSkillsForClient!.cache.delete(name)
+          fetchMcpSkillsForClient!.cache.delete(
+            getMcpSkillCacheKeyForServer!(name, serverRef),
+          )
         }
 
         connectToServer.cache.delete(key)
@@ -1676,7 +1688,9 @@ export async function clearServerCache(
   fetchResourcesForClient.cache.delete(name)
   fetchCommandsForClient.cache.delete(name)
   if (feature('MCP_SKILLS')) {
-    fetchMcpSkillsForClient!.cache.delete(name)
+    fetchMcpSkillsForClient!.cache.delete(
+      getMcpSkillCacheKeyForServer!(name, serverRef),
+    )
   }
 }
 

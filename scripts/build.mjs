@@ -23,6 +23,13 @@ import { readdir, readFile, writeFile, mkdir, cp, rm, stat } from 'node:fs/promi
 import { join, dirname, relative } from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import {
+  ALLOW_UNAUDITED_FEATURES_ENV,
+  DEFAULT_PRESERVED_FEATURES,
+  getEnvPreservedFeatures,
+  isTruthyFlag,
+  validateFeatureGatePolicy,
+} from './feature-gate-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -30,21 +37,12 @@ const VERSION = '2.1.88'
 const BUILD = join(ROOT, 'build-src')
 const ENTRY = join(BUILD, 'entry.ts')
 const STUB_MANIFEST = join(BUILD, 'stub-manifest.json')
+const FEATURE_RE = /\bfeature\s*\(\s*['"]([A-Z0-9_]+)['"]\s*,?\s*\)/g
 const stubManifest = []
-const DEFAULT_PRESERVED_FEATURES = [
-  'CONTEXT_COLLAPSE',
-  'DUMP_SYSTEM_PROMPT',
-  'EXPERIMENTAL_SKILL_SEARCH',
-  'HISTORY_SNIP',
-  'MCP_SKILLS',
-  'REACTIVE_COMPACT',
-]
+const envPreservedFeatures = getEnvPreservedFeatures()
 const preservedFeatures = new Set([
   ...DEFAULT_PRESERVED_FEATURES,
-  ...(process.env.CLAUDE_CODE_PRESERVE_FEATURES ?? '')
-    .split(/[,\s]+/)
-    .map(name => name.trim())
-    .filter(Boolean),
+  ...envPreservedFeatures,
 ])
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -58,6 +56,16 @@ async function* walk(dir) {
 }
 
 async function exists(p) { try { await stat(p); return true } catch { return false } }
+
+async function collectSourceFeatureNames() {
+  const features = new Set()
+  for await (const file of walk(join(ROOT, 'src'))) {
+    if (!file.match(/\.[tj]sx?$/)) continue
+    const source = await readFile(file, 'utf8')
+    for (const match of source.matchAll(FEATURE_RE)) features.add(match[1])
+  }
+  return [...features].sort()
+}
 
 function toRepoPath(p) {
   return relative(ROOT, p).replace(/\\/g, '/')
@@ -96,6 +104,27 @@ async function ensureEsbuild() {
     console.log('📦 Installing esbuild...')
     execSync('npm install --save-dev esbuild', { cwd: ROOT, stdio: 'inherit' })
   }
+}
+
+const sourceFeatures = await collectSourceFeatureNames()
+const featurePolicy = validateFeatureGatePolicy({
+  sourceFeatures,
+  envPreservedFeatures,
+  allowUnaudited: isTruthyFlag(process.env[ALLOW_UNAUDITED_FEATURES_ENV]),
+})
+
+if (!featurePolicy.ok) {
+  console.error('Feature gate policy violation:')
+  for (const error of featurePolicy.errors) console.error(`- ${error}`)
+  process.exit(1)
+}
+
+if (featurePolicy.unauditedFeatures.length > 0) {
+  console.warn(
+    `Warning: preserving unaudited feature gate(s): ${featurePolicy.unauditedFeatures.join(
+      ', ',
+    )}`,
+  )
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

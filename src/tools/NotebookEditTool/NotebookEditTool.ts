@@ -11,12 +11,15 @@ import { getCwd } from '../../utils/cwd.js'
 import { isENOENT } from '../../utils/errors.js'
 import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
 import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
+import { formatFileSize } from '../../utils/format.js'
+import { getFsImplementation } from '../../utils/fsOperations.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { parseCellId } from '../../utils/notebook.js'
 import { checkWritePermissionForTool } from '../../utils/permissions/filesystem.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
+import { getDefaultFileReadingLimits } from '../FileReadTool/limits.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, PROMPT } from './prompt.js'
 import {
@@ -86,6 +89,48 @@ export const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
+
+function getNotebookEditMaxSizeBytes(context: ToolUseContext): number {
+  return (
+    context.fileReadingLimits?.maxSizeBytes ??
+    getDefaultFileReadingLimits().maxSizeBytes
+  )
+}
+
+function getNotebookEditSizeError(
+  fullPath: string,
+  maxSizeBytes: number,
+): string | null {
+  const { size } = getFsImplementation().statSync(fullPath)
+  if (size <= maxSizeBytes) return null
+  return `Notebook file is too large to edit (${formatFileSize(size)}). Maximum editable notebook size is ${formatFileSize(maxSizeBytes)}. Use ${NOTEBOOK_EDIT_TOOL_NAME} only after reading a smaller notebook or extracting the needed cells with Bash/jq.`
+}
+
+function buildNotebookEditErrorData({
+  new_source,
+  cell_type,
+  cell_id,
+  notebook_path,
+  error,
+}: {
+  new_source: string
+  cell_type?: 'code' | 'markdown'
+  cell_id?: string
+  notebook_path: string
+  error: string
+}): Output {
+  return {
+    new_source,
+    cell_type: cell_type ?? 'code',
+    language: 'python',
+    edit_mode: 'replace',
+    error,
+    cell_id,
+    notebook_path,
+    original_file: '',
+    updated_file: '',
+  }
+}
 
 export const NotebookEditTool = buildTool({
   name: NOTEBOOK_EDIT_TOOL_NAME,
@@ -236,6 +281,18 @@ export const NotebookEditTool = buildTool({
       }
     }
 
+    const sizeError = getNotebookEditSizeError(
+      fullPath,
+      getNotebookEditMaxSizeBytes(toolUseContext),
+    )
+    if (sizeError) {
+      return {
+        result: false,
+        message: sizeError,
+        errorCode: 11,
+      }
+    }
+
     let content: string
     try {
       content = readFileSyncWithMetadata(fullPath).content
@@ -300,13 +357,30 @@ export const NotebookEditTool = buildTool({
       cell_type,
       edit_mode: originalEditMode,
     },
-    { readFileState, updateFileHistoryState },
+    toolUseContext,
     _,
     parentMessage,
   ) {
+    const { readFileState, updateFileHistoryState } = toolUseContext
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path)
+
+    const sizeError = getNotebookEditSizeError(
+      fullPath,
+      getNotebookEditMaxSizeBytes(toolUseContext),
+    )
+    if (sizeError) {
+      return {
+        data: buildNotebookEditErrorData({
+          new_source,
+          cell_type,
+          cell_id,
+          notebook_path: fullPath,
+          error: sizeError,
+        }),
+      }
+    }
 
     if (fileHistoryEnabled()) {
       await fileHistoryTrackEdit(
@@ -334,15 +408,13 @@ export const NotebookEditTool = buildTool({
       } catch {
         return {
           data: {
-            new_source,
-            cell_type: cell_type ?? 'code',
-            language: 'python',
-            edit_mode: 'replace',
-            error: 'Notebook is not valid JSON.',
-            cell_id,
-            notebook_path: fullPath,
-            original_file: '',
-            updated_file: '',
+            ...buildNotebookEditErrorData({
+              new_source,
+              cell_type,
+              cell_id,
+              notebook_path: fullPath,
+              error: 'Notebook is not valid JSON.',
+            }),
           },
         }
       }
@@ -457,30 +529,26 @@ export const NotebookEditTool = buildTool({
     } catch (error) {
       if (error instanceof Error) {
         const data = {
-          new_source,
-          cell_type: cell_type ?? 'code',
-          language: 'python',
-          edit_mode: 'replace',
-          error: error.message,
-          cell_id,
-          notebook_path: fullPath,
-          original_file: '',
-          updated_file: '',
+          ...buildNotebookEditErrorData({
+            new_source,
+            cell_type,
+            cell_id,
+            notebook_path: fullPath,
+            error: error.message,
+          }),
         }
         return {
           data,
         }
       }
       const data = {
-        new_source,
-        cell_type: cell_type ?? 'code',
-        language: 'python',
-        edit_mode: 'replace',
-        error: 'Unknown error occurred while editing notebook',
-        cell_id,
-        notebook_path: fullPath,
-        original_file: '',
-        updated_file: '',
+        ...buildNotebookEditErrorData({
+          new_source,
+          cell_type,
+          cell_id,
+          notebook_path: fullPath,
+          error: 'Unknown error occurred while editing notebook',
+        }),
       }
       return {
         data,
