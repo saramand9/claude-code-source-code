@@ -1240,6 +1240,130 @@ console.log('powershell path rules OK');`,
   assert.equal(output, 'powershell path rules OK')
 })
 
+await test('PreToolUse hook allow does not bypass deny rules', async () => {
+  const output = await buildAndRunSnippet(
+    'pretool-hook-allow-deny-test',
+    `import { resolveHookPermissionDecision } from './src/services/tools/toolHooks.ts';
+
+const input = {
+  file_path: 'build-src/test-artifacts/pretool-hook-allow-deny.txt',
+  content: 'hook allow should not bypass deny rules',
+};
+const hookAllow = {
+  behavior: 'allow',
+  updatedInput: input,
+  decisionReason: {
+    type: 'hook',
+    hookName: 'PreToolUse:Write',
+  },
+};
+const basePermissionContext = {
+  mode: 'default',
+  additionalWorkingDirectories: new Map(),
+  alwaysAllowRules: {},
+  alwaysDenyRules: {},
+  alwaysAskRules: {},
+  isBypassPermissionsModeAvailable: false,
+};
+const assistantMessage = {
+  uuid: 'assistant-test-uuid',
+  message: {
+    id: 'msg_pretool_hook_allow_deny',
+    role: 'assistant',
+    content: [],
+  },
+};
+function makeContext(toolPermissionContext) {
+  return {
+    requireCanUseTool: false,
+    getAppState() {
+      return { toolPermissionContext };
+    },
+  };
+}
+let canUseToolCalls = 0;
+async function canUseTool() {
+  canUseToolCalls += 1;
+  throw new Error('canUseTool should not run when deny rules override hook allow');
+}
+const passthroughTool = {
+  name: 'Write',
+  inputSchema: {
+    parse(value) {
+      return value;
+    },
+  },
+  async checkPermissions() {
+    return { behavior: 'allow', updatedInput: input };
+  },
+};
+const toolWideDeny = await resolveHookPermissionDecision(
+  hookAllow,
+  passthroughTool,
+  input,
+  makeContext({
+    ...basePermissionContext,
+    alwaysDenyRules: { userSettings: ['Write'] },
+  }),
+  canUseTool,
+  assistantMessage,
+  'toolu_pretool_hook_tool_wide_deny',
+);
+if (toolWideDeny.decision.behavior !== 'deny') {
+  throw new Error('tool-wide deny should override hook allow: ' + JSON.stringify(toolWideDeny.decision));
+}
+if (!toolWideDeny.decision.message.includes('Permission to use Write has been denied')) {
+  throw new Error('tool-wide deny should preserve deny message: ' + JSON.stringify(toolWideDeny.decision));
+}
+
+const contentDenyTool = {
+  name: 'Write',
+  inputSchema: {
+    parse(value) {
+      return value;
+    },
+  },
+  async checkPermissions() {
+    return {
+      behavior: 'deny',
+      message: 'content-specific deny marker from tool check',
+      decisionReason: {
+        type: 'rule',
+        rule: {
+          source: 'userSettings',
+          ruleBehavior: 'deny',
+          ruleValue: {
+            toolName: 'Edit',
+            ruleContent: input.file_path,
+          },
+        },
+      },
+    };
+  },
+};
+const contentDeny = await resolveHookPermissionDecision(
+  hookAllow,
+  contentDenyTool,
+  input,
+  makeContext(basePermissionContext),
+  canUseTool,
+  assistantMessage,
+  'toolu_pretool_hook_content_deny',
+);
+if (contentDeny.decision.behavior !== 'deny') {
+  throw new Error('tool-specific deny should override hook allow: ' + JSON.stringify(contentDeny.decision));
+}
+if (contentDeny.decision.message !== 'content-specific deny marker from tool check') {
+  throw new Error('tool-specific deny should preserve tool message: ' + JSON.stringify(contentDeny.decision));
+}
+if (canUseToolCalls !== 0) {
+  throw new Error('canUseTool should not be called for deny overrides: ' + canUseToolCalls);
+}
+console.log('pretool hook allow deny rules OK');`,
+  )
+  assert.equal(output, 'pretool hook allow deny rules OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

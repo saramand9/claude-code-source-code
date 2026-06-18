@@ -2272,3 +2272,31 @@ Expected new output:
 ok - Write respects PreToolUse hook denial
 ok - Write hook approval does not bypass ask rules
 ```
+
+## 2026-06-19 PreToolUse allow deny override build-safety coverage
+
+CLI E2E cannot express every deny override after a PreToolUse approval because
+some denies happen before hooks run, for example Write `validateInput` rejects
+path-level `Edit(path)` deny rules before PreToolUse. This round adds a direct
+build-safety regression for the shared resolver.
+
+- `scripts/test-build-safety.mjs`
+  - Imports real `resolveHookPermissionDecision` from `src/services/tools`.
+  - Asserts hook `behavior: "allow"` is still overridden by a tool-wide deny
+    rule.
+  - Asserts hook `behavior: "allow"` is still overridden by a tool-specific
+    deny returned from `checkPermissions`.
+  - Asserts the denial path does not call `canUseTool`.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PreToolUse hook allow does not bypass deny rules
+```
