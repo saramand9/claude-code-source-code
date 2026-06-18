@@ -95,6 +95,8 @@
 | `src/ink/devtools.ts` | 混合 | 补齐 React DevTools 开发态导入路径；当前为 no-op 外部保守实现，不连接真实 devtools。 |
 | `src/tools/TungstenTool/*` | 混合 | 补齐 Tungsten 工具和 live monitor 加载路径；工具默认禁用并返回 unavailable，不恢复内部终端会话。 |
 | `src/components/FeedbackSurvey/useFrustrationDetection.ts` / `src/hooks/notifs/useAntOrgWarningNotification.ts` | 混合 | 补齐 ant-only REPL 顶层 no-op hook，避免变量路径 require 在外部源码包中运行期缺失。 |
+| `src/components/messages/UserGitHubWebhookMessage.tsx` / `UserForkBoilerplateMessage.tsx` / `UserCrossSessionMessage.tsx` | 混合 | 补齐 gated 用户消息渲染组件，并把 `UserTextMessage` 中对应变量路径 require 改为静态路径；组件为外部保守摘要渲染，不恢复内部完整 UI。 |
+| `src/screens/ResumeConversation.tsx` ContextCollapse persist require | 尝试修复/真实适配 | 将 resume 入口的 ContextCollapse 持久化恢复从变量路径 require 改为静态字面量 require，避免单文件产物运行期查找不存在的相对文件。 |
 
 ## 尝试修复/真实适配
 
@@ -113,6 +115,7 @@
 - Ant-only `AntModelSwitchCallout` 和 `UndercoverAutoCallout` 的外部保守 UI 加载路径，避免 `USER_TYPE=ant` 时 REPL 动态加载缺失模块。
 - `ink/devtools` 和 `TungstenTool` 的外部保守加载路径，避免开发态 Ink 或 `USER_TYPE=ant` 下相关 import 直接触发 fail-fast stub。
 - Ant-only `useFrustrationDetection` 和 `useAntOrgWarningNotification` no-op hook，避免 REPL 顶层变量路径 require 指向缺失文件。
+- Resume 入口的 ContextCollapse persist 静态打包路径，以及 `UserTextMessage` 中 GitHub webhook、fork boilerplate、cross-session 三个 gated 用户消息分支的静态打包路径。
 
 ## mock/stub/降级
 
@@ -128,6 +131,7 @@
 - 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools` 和 `tools/TungstenTool`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
 - `ink/devtools` 当前只是 no-op，不会连接 `react-devtools-core`。
 - `TungstenTool` 当前默认禁用；只提供明确 unavailable 结果和缓存清理 no-op，不提供真实 tmux/终端会话。
+- `UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 是外部保守摘要渲染组件，只保证 gated 分支启用后不因缺失模块崩溃；它们不恢复内部完整 GitHub webhook、fork 子会话或 UDS inbox UI 语义。
 - `ULTRAPLAN` feature 仍未恢复：提示词资源是真实文本，但远程 CCR 会话、轮询和执行选择依然依赖内部/线上能力。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
@@ -861,6 +865,7 @@ audio-capture-napi 缺失时语音依赖检查 fallback
 url-handler-napi 缺失由 nativeOptional 包装
 VerifyPlanExecutionTool 默认关闭、显式 opt-in、工具池加载、保守状态记录和非官方 verifier 警告
 verify bundled skill 文档资产不再是空文本 stub
+ResumeConversation 的 ContextCollapse persist 静态打包路径，以及 UserTextMessage 的 GitHub webhook / fork boilerplate / cross-session gated 分支静态打包和真实 Ink 渲染
 ```
 
 版本输出：
@@ -869,7 +874,7 @@ verify bundled skill 文档资产不再是空文本 stub
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 39 项深度检查：
+`npm run test:build-safety` 当前覆盖 40 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -884,6 +889,7 @@ verify bundled skill 文档资产不再是空文本 stub
 - `protectedNamespace` 不再由 fail-fast stub 代替；测试覆盖本地无信号、homespace、开放命名空间、未知命名空间、production 命名空间、ASL3 override 和只有 cluster 信号的保守路径。
 - Ant-only callout 不再由 fail-fast stub 代替；测试覆盖默认关闭、显式 env opt-in 可见，以及 `AntModelSwitchCallout` / `UndercoverAutoCallout` 真实 Ink 渲染输出。
 - `ink/devtools` 和 `TungstenTool` 不再由 fail-fast stub 代替；测试覆盖 devtools no-op 状态、Tungsten 默认禁用、unavailable 结果、缓存清理 no-op 状态、live monitor 组件加载、ant-only no-op hook，以及 REPL 构建副本不再保留相关变量路径 require。
+- Resume/UserTextMessage 变量路径 require 收敛：构建副本和 `dist/cli.js` 不再保留 `contextCollapsePersistModulePath` 或 `user*ModulePath`；三个 gated 用户消息组件会通过真实 Ink 渲染输出 GitHub activity、Fork context 和 Cross-session 摘要。
 - ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
 - History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
@@ -1155,15 +1161,55 @@ npm run test:cli-e2e
 结果：
 
 - `npm run build` 通过，stub manifest 从 6 项降到 4 项；`ink/devtools` 和 `tools/TungstenTool` 不再在 manifest 中。
-- `npm run test:build-safety` 通过，当前为 39/39 项。
+- `npm run test:build-safety` 通过，当时为 39/39 项；后续 Resume/UserTextMessage 变量路径专项补测后为 40/40 项。
 - `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 - `npm run audit:features` 通过，当前 stub kinds 只剩 `feature-gated-module-stub: 3` 和 `private-package-stub: 1`。
+
+## 2026-06-18 Resume/UserTextMessage 变量路径修复
+
+本轮继续处理“源码能构建，但单文件产物运行到 gated 分支时仍按磁盘相对路径找 `.js` 文件”的风险。上一轮已经修了 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 和 Snip 相关路径；本轮收口 `ResumeConversation` 与 `UserTextMessage` 中剩余的变量路径 require。
+
+### 本轮真实修复
+
+- `src/screens/ResumeConversation.tsx` 的 ContextCollapse persist 恢复路径从 `require(contextCollapsePersistModulePath)` 改为 `require('../services/contextCollapse/persist.js')` 字面量路径。
+- `src/components/messages/UserTextMessage.tsx` 中 `KAIROS_GITHUB_WEBHOOKS`、`FORK_SUBAGENT`、`UDS_INBOX` 三个 gated 分支从 `require(user*ModulePath)` 改为静态字面量 require。
+- 新增 `src/components/messages/UserGitHubWebhookMessage.tsx`，用于保守展示 `<github-webhook-activity>` 内容摘要。
+- 新增 `src/components/messages/UserForkBoilerplateMessage.tsx`，用于保守折叠并展示 fork 子会话 boilerplate 摘要。
+- 新增 `src/components/messages/UserCrossSessionMessage.tsx`，用于保守展示 `<cross-session-message>` 来源和正文摘要。
+- `scripts/test-build-safety.mjs` 新增专项测试，检查构建副本和 `dist/cli.js` 不再保留上述变量路径，并通过真实 Ink 渲染三个新增消息组件。
+
+### 本轮 mock/stub/风险说明
+
+- 三个新增用户消息组件是 **external-conservative** 渲染器，不是 Anthropic 内部原版 UI。
+- GitHub webhook 只展示活动文本摘要，不恢复内部订阅、PR 事件结构化展示或通知策略。
+- Fork boilerplate 只折叠展示指令摘要，不恢复完整 fork 子会话 UX。
+- Cross-session message 只解析常见 `source` / `sender` / `from` / `agent` 属性和正文，不恢复 UDS inbox 的完整消息编排。
+- 这轮的核心收益是消除运行期 `Cannot find module ...User*Message.js` / ContextCollapse persist 变量路径缺失风险；不代表这些 feature gate 已默认启用。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run build` 通过，stub manifest 仍为 4 项：`feature-gated-module-stub: 3`、`private-package-stub: 1`。
+- `npm run test:build-safety` 通过，当前为 40/40 项。
+- 新增专项确认构建副本和 `dist/cli.js` 不再包含 `contextCollapsePersistModulePath`、`userGitHubWebhookModulePath`、`userForkBoilerplateModulePath`、`userCrossSessionModulePath`。
+- 新增专项真实渲染 `UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage`，确认终端输出包含预期摘要。
+- `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 

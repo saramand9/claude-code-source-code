@@ -413,6 +413,135 @@ console.log('devtools tungsten fallback OK');`,
   assert.equal(output, 'devtools tungsten fallback OK')
 })
 
+await test('resume and user text feature modules use static bundled requires', async () => {
+  const resumeSource = await readFile(
+    join(BUILD, 'src/screens/ResumeConversation.tsx'),
+    'utf8',
+  )
+  const userTextSource = await readFile(
+    join(BUILD, 'src/components/messages/UserTextMessage.tsx'),
+    'utf8',
+  )
+  const distSource = await readFile(DIST_CLI, 'utf8')
+
+  assert.doesNotMatch(
+    resumeSource,
+    /contextCollapsePersistModulePath|require\(contextCollapsePersistModulePath\)/,
+    'ResumeConversation should not use variable-path ContextCollapse persist require',
+  )
+  assert.doesNotMatch(
+    userTextSource,
+    /user(?:GitHubWebhook|ForkBoilerplate|CrossSession)ModulePath|require\(user(?:GitHubWebhook|ForkBoilerplate|CrossSession)ModulePath\)/,
+    'UserTextMessage feature branches should not use variable-path requires',
+  )
+  assert.doesNotMatch(
+    distSource,
+    /contextCollapsePersistModulePath|user(?:GitHubWebhook|ForkBoilerplate|CrossSession)ModulePath/,
+    'dist bundle should not retain these runtime variable require paths',
+  )
+
+  const output = await buildAndRunSnippet(
+    'user-text-feature-renderers-test',
+    `import React from 'react';
+import { PassThrough, Writable } from 'node:stream';
+import { getStats } from './src/services/contextCollapse/index.ts';
+import { restoreFromEntries } from './src/services/contextCollapse/persist.ts';
+import { Box } from './src/ink.ts';
+import { renderSync } from './src/ink/root.ts';
+import { UserGitHubWebhookMessage } from './src/components/messages/UserGitHubWebhookMessage.tsx';
+import { UserForkBoilerplateMessage } from './src/components/messages/UserForkBoilerplateMessage.tsx';
+import { UserCrossSessionMessage } from './src/components/messages/UserCrossSessionMessage.tsx';
+
+if (typeof restoreFromEntries !== 'function') {
+  throw new Error('restoreFromEntries should be callable');
+}
+restoreFromEntries([], undefined);
+if (getStats().hasRestoredState !== false) {
+  throw new Error('empty restore should remain conservative');
+}
+
+class CaptureStream extends Writable {
+  constructor() {
+    super();
+    this.chunks = [];
+    this.columns = 120;
+    this.rows = 30;
+    this.isTTY = true;
+  }
+  _write(chunk, _encoding, callback) {
+    this.chunks.push(Buffer.from(chunk).toString('utf8'));
+    callback();
+  }
+  get output() {
+    return this.chunks.join('');
+  }
+}
+function createStdin() {
+  const stdin = new PassThrough();
+  stdin.isTTY = true;
+  stdin.setRawMode = () => stdin;
+  stdin.ref = () => stdin;
+  stdin.unref = () => stdin;
+  stdin.setEncoding('utf8');
+  return stdin;
+}
+function normalizeOutput(output) {
+  return output
+    .replace(/\\x1b\\[(\\d+)C/g, (_, count) => ' '.repeat(Number(count)))
+    .replace(/\\x1b\\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\\r/g, '');
+}
+function param(text) {
+  return { type: 'text', text };
+}
+const element = React.createElement(
+  Box,
+  { flexDirection: 'column' },
+  React.createElement(UserGitHubWebhookMessage, {
+    addMargin: false,
+    param: param('<github-webhook-activity>review requested on PR 42</github-webhook-activity>'),
+  }),
+  React.createElement(UserForkBoilerplateMessage, {
+    addMargin: false,
+    param: param('<fork-boilerplate>Use the child session context only.</fork-boilerplate>'),
+  }),
+  React.createElement(UserCrossSessionMessage, {
+    addMargin: false,
+    param: param('<cross-session-message source="worker-7">handoff is ready</cross-session-message>'),
+  }),
+);
+const stdout = new CaptureStream();
+const stderr = new CaptureStream();
+const instance = renderSync(element, {
+  stdout,
+  stderr,
+  stdin: createStdin(),
+  exitOnCtrlC: false,
+  patchConsole: false,
+});
+await new Promise(resolve => setTimeout(resolve, 50));
+instance.unmount();
+instance.cleanup();
+const rendered = normalizeOutput(stdout.output);
+for (const needle of [
+  'GitHub activity review requested on PR 42',
+  'Fork context Use the child session context only.',
+  'Cross-session worker-7: handoff is ready',
+]) {
+  if (!rendered.includes(needle)) {
+    throw new Error('missing rendered text ' + JSON.stringify(needle) + ': ' + JSON.stringify(rendered));
+  }
+}
+console.log('user text feature renderers OK');`,
+    {
+      banner: {
+        js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      },
+    },
+  )
+  assert.match(output, /user text feature renderers OK$/)
+})
+
 await test('context collapse build gate is preserved but runtime-gated', async () => {
   const querySource = await readFile(join(BUILD, 'src/query.ts'), 'utf8')
   const toolsSource = await readFile(join(BUILD, 'src/tools.ts'), 'utf8')

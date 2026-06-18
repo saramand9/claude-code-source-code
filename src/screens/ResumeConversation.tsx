@@ -33,11 +33,6 @@ import { adoptResumedSessionFile, enrichLogs, isCustomTitleEnabled, loadAllProje
 import type { ThinkingConfig } from '../utils/thinking.js';
 import type { ContentReplacementRecord } from '../utils/toolResultStorage.js';
 import { REPL } from './REPL.js';
-type ContextCollapsePersistModule = {
-  restoreFromEntries(entries: unknown[], snapshot: unknown): void;
-};
-const contextCollapsePersistModulePath: string =
-  '../services/contextCollapse/persist.js';
 function parsePrIdentifier(value: string): number | null {
   const directNumber = parseInt(value, 10);
   if (!isNaN(directNumber) && directNumber > 0) {
@@ -268,8 +263,10 @@ export function ResumeConversation({
       }
       if (feature('CONTEXT_COLLAPSE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
-        ;
-        (require(contextCollapsePersistModulePath) as ContextCollapsePersistModule).restoreFromEntries(result_3.contextCollapseCommits ?? [], result_3.contextCollapseSnapshot);
+        const {
+          restoreFromEntries
+        } = require('../services/contextCollapse/persist.js') as typeof import('../services/contextCollapse/persist.js');
+        restoreFromEntries(result_3.contextCollapseCommits ?? [], result_3.contextCollapseSnapshot);
         /* eslint-enable @typescript-eslint/no-require-imports */
       }
       logEvent('tengu_session_resumed', {
