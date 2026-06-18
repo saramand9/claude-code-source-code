@@ -1540,6 +1540,130 @@ console.log('permission request headless hook OK');`,
   assert.equal(output, 'permission request headless hook OK')
 })
 
+await test('PostToolUseFailure hooks attach additional context', async () => {
+  const output = await buildAndRunSnippet(
+    'post-tool-use-failure-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-failure-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { runPostToolUseFailureHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/services/tools/toolHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const input = { file_path: 'build-src/test-artifacts/missing-post-failure.txt' };
+const failureMessage = 'ENOENT missing-post-failure marker 4318';
+const additionalContext = 'post failure hook context marker 4318';
+let calls = 0;
+registerHookCallbacks({
+  PostToolUseFailure: [
+    {
+      matcher: 'Read',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'PostToolUseFailure') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.tool_name !== 'Read') {
+              throw new Error('unexpected hook tool: ' + hookInput.tool_name);
+            }
+            if (hookInput.tool_use_id !== 'toolu_post_failure_hook') {
+              throw new Error('unexpected tool use id: ' + hookInput.tool_use_id);
+            }
+            if (hookInput.tool_input.file_path !== input.file_path) {
+              throw new Error('unexpected tool input: ' + JSON.stringify(hookInput.tool_input));
+            }
+            if (!String(hookInput.error).includes(failureMessage)) {
+              throw new Error('missing failure message in hook input: ' + hookInput.error);
+            }
+            if (hookInput.is_interrupt !== false) {
+              throw new Error('unexpected interrupt flag: ' + hookInput.is_interrupt);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PostToolUseFailure',
+                additionalContext,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const tool = { name: 'Read', isMcp: false };
+const updates = [];
+for await (const update of runPostToolUseFailureHooks(
+  context,
+  tool,
+  'toolu_post_failure_hook',
+  'msg_post_failure_hook',
+  input,
+  failureMessage,
+  false,
+  'req_post_failure_hook',
+  undefined,
+  undefined,
+)) {
+  updates.push(update);
+}
+if (calls !== 1) {
+  throw new Error('PostToolUseFailure hook should run once, got ' + calls);
+}
+const contextAttachment = updates.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_additional_context' &&
+    attachment.hookEvent === 'PostToolUseFailure' &&
+    attachment.hookName === 'PostToolUseFailure:Read' &&
+    Array.isArray(attachment.content) &&
+    attachment.content.includes(additionalContext)
+  );
+});
+if (!contextAttachment) {
+  throw new Error('missing PostToolUseFailure additional context attachment: ' + JSON.stringify(updates));
+}
+
+console.log('post tool use failure hook OK');`,
+  )
+  assert.equal(output, 'post tool use failure hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

@@ -2405,3 +2405,36 @@ Expected new output:
 ```text
 ok - Bash respects PreToolUse command hook exit 2 denial
 ```
+
+## 2026-06-19 PostToolUseFailure hook context build-safety coverage
+
+This round covers a different hook lifecycle: hooks that run after a tool call
+fails. The new build-safety test validates that the real registered hook
+plumbing receives the failed tool metadata and that service-layer wrapping
+preserves hook-provided additional context for the next model turn.
+
+- `scripts/test-build-safety.mjs`
+  - Imports real `runPostToolUseFailureHooks`.
+  - Registers a callback hook for `PostToolUseFailure` matching `Read`.
+  - Asserts the hook input includes the event name, tool name, tool use id,
+    original tool input, failure message, and interrupt flag.
+  - Asserts `additionalContext` from the hook is emitted as a
+    `hook_additional_context` attachment with `PostToolUseFailure:Read`.
+
+Risk boundary update: post-failure hook context propagation now has direct
+build-safety coverage. Remaining hook gaps are mainly full CLI E2E for
+PostToolUse/PostToolUseFailure side effects, interactive PermissionRequest UI,
+and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PostToolUseFailure hooks attach additional context
+```
