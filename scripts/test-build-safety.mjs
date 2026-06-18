@@ -670,9 +670,85 @@ await test('context collapse build gate is preserved but runtime-gated', async (
   }
   assert.match(
     querySource,
-    /const reactiveCompact = false\s+\?\s+\(require\('\.\/services\/compact\/reactiveCompact\.js'\)/,
-    'unrestored feature gates should still be compiled out',
+    /const reactiveCompact = true\s+\?\s+\(require\('\.\/services\/compact\/reactiveCompact\.js'\)/,
+    'REACTIVE_COMPACT should stay bundled',
   )
+})
+
+await test('reactive compact runtime is loadable and guarded', async () => {
+  const output = await buildAndRunSnippet(
+    'reactive-compact-runtime-test',
+    `delete process.env.DISABLE_COMPACT;
+delete process.env.DISABLE_AUTO_COMPACT;
+delete process.env.DISABLE_REACTIVE_COMPACT;
+delete process.env.CLAUDE_CODE_DISABLE_REACTIVE_COMPACT;
+delete process.env.CLAUDE_CODE_REACTIVE_COMPACT;
+delete process.env.CLAUDE_CODE_REACTIVE_COMPACT_ONLY;
+const reactive = await import('./src/services/compact/reactiveCompact.ts');
+const { createAssistantAPIErrorMessage } = await import('./src/utils/messages.ts');
+const { PROMPT_TOO_LONG_ERROR_MESSAGE } = await import('./src/services/api/errors.ts');
+
+if (!reactive.isReactiveCompactEnabled()) throw new Error('reactive compact should default on');
+if (reactive.isReactiveOnlyMode()) throw new Error('reactive-only mode should default off');
+process.env.CLAUDE_CODE_REACTIVE_COMPACT_ONLY = '1';
+if (!reactive.isReactiveOnlyMode()) throw new Error('reactive-only env should enable compatibility mode');
+delete process.env.CLAUDE_CODE_REACTIVE_COMPACT_ONLY;
+process.env.DISABLE_AUTO_COMPACT = '1';
+if (reactive.isReactiveCompactEnabled()) throw new Error('DISABLE_AUTO_COMPACT should disable reactive compact');
+delete process.env.DISABLE_AUTO_COMPACT;
+process.env.CLAUDE_CODE_REACTIVE_COMPACT = '0';
+if (reactive.isReactiveCompactEnabled()) throw new Error('explicit false should disable reactive compact');
+process.env.CLAUDE_CODE_REACTIVE_COMPACT = '1';
+if (!reactive.isReactiveCompactEnabled()) throw new Error('explicit true should enable reactive compact');
+
+const ptl = createAssistantAPIErrorMessage({
+  content: PROMPT_TOO_LONG_ERROR_MESSAGE,
+  error: 'invalid_request',
+  errorDetails: 'prompt is too long: 137500 tokens > 135000 maximum',
+});
+if (!reactive.isWithheldPromptTooLong(ptl)) throw new Error('prompt-too-long should be withheld');
+const media = createAssistantAPIErrorMessage({
+  content: 'Image was too large',
+  error: 'invalid_request',
+  errorDetails: 'image exceeds maximum size',
+});
+if (!reactive.isWithheldMediaSizeError(media)) throw new Error('media size error should be withheld');
+const normal = createAssistantAPIErrorMessage({ content: 'API Error: ordinary failure' });
+if (reactive.isWithheldPromptTooLong(normal)) throw new Error('ordinary API error should not be withheld');
+
+const context = {
+  abortController: new AbortController(),
+  options: { querySource: 'repl_main_thread', mainLoopModel: 'claude-sonnet-4-6' },
+};
+const cacheSafeParams = {
+  systemPrompt: [],
+  userContext: {},
+  systemContext: {},
+  toolUseContext: context,
+  forkContextMessages: [],
+};
+const skippedAttempt = await reactive.tryReactiveCompact({
+  hasAttempted: true,
+  querySource: 'repl_main_thread',
+  aborted: false,
+  messages: [],
+  cacheSafeParams,
+});
+if (skippedAttempt !== null) throw new Error('hasAttempted should skip retry');
+const skippedRecursive = await reactive.tryReactiveCompact({
+  hasAttempted: false,
+  querySource: 'compact',
+  aborted: false,
+  messages: [],
+  cacheSafeParams,
+});
+if (skippedRecursive !== null) throw new Error('compact querySource should skip retry');
+context.abortController.abort();
+const aborted = await reactive.reactiveCompactOnPromptTooLong([], cacheSafeParams);
+if (aborted.ok || aborted.reason !== 'aborted') throw new Error('aborted compact should return aborted outcome');
+console.log('reactive compact runtime OK');`,
+  )
+  assert.equal(output, 'reactive compact runtime OK')
 })
 
 await test('dump system prompt fast path runs without a model request', async () => {

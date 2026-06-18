@@ -54,6 +54,12 @@ const outOfOrderPrompt = 'cli out-of-order stream fallback prompt'
 const outOfOrderFallbackResponse =
   'out-of-order streaming recovered through non-streaming fallback'
 
+const reactiveCompactPrompt = 'cli reactive compact prompt too long prompt'
+const reactiveCompactSummary =
+  'reactive compact summary marker with the important task details'
+const reactiveCompactFinalResponse =
+  'reactive compact recovered after summarizing context'
+
 const multiToolPrompt = 'cli multi structured read tools prompt'
 const multiToolFileContentA = 'multi structured tool fixture: ash-1190'
 const multiToolFileContentB = 'multi structured tool fixture: elm-7734'
@@ -227,6 +233,22 @@ function writeJson(res, data) {
     'request-id': `req_mock_${Date.now()}`,
   })
   res.end(JSON.stringify(data))
+}
+
+function writeApiError(res, status, message) {
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'request-id': `req_mock_error_${Date.now()}`,
+  })
+  res.end(
+    JSON.stringify({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message,
+      },
+    }),
+  )
 }
 
 function makeMessage(id, text, usage = {}) {
@@ -1555,6 +1577,28 @@ function responseForBody(body, fallbackIndex) {
       text: outOfOrderFallbackResponse,
     }
   }
+  if (combinedText.includes(reactiveCompactSummary)) {
+    return {
+      index: responses.length + 25,
+      text: reactiveCompactFinalResponse,
+    }
+  }
+  if (
+    combinedText.includes(reactiveCompactPrompt) &&
+    combinedText.includes('Your task is to create a detailed summary')
+  ) {
+    return {
+      index: responses.length + 25,
+      text: reactiveCompactSummary,
+    }
+  }
+  if (combinedText.includes(reactiveCompactPrompt)) {
+    return {
+      index: responses.length + 25,
+      promptTooLong: true,
+      text: '',
+    }
+  }
   if (combinedText.includes(unclosedToolPrompt)) {
     if (combinedText.includes(unclosedToolFileContent)) {
       return {
@@ -1650,6 +1694,14 @@ function startMockServer() {
         const response = responseForBody(body, sequence - 1)
         if (response.outOfOrderStream && body.stream === true) {
           writeOutOfOrderStreamingMessage(res, sequence)
+          return
+        }
+        if (response.promptTooLong) {
+          writeApiError(
+            res,
+            400,
+            'prompt is too long: 137500 tokens > 135000 maximum',
+          )
           return
         }
         if (response.multiToolUse) {
@@ -2429,6 +2481,42 @@ async function main() {
       outOfOrderRequests[1].body.stream,
       true,
       'out-of-order second request should be non-streaming fallback',
+    )
+
+    const beforeReactiveCompactRequests = server.requests.length
+    const reactiveCompactRun = parseJsonOutput(
+      (await runCli([...baseArgs, reactiveCompactPrompt], env, runCliOptions())).stdout,
+    )
+    assert.equal(
+      reactiveCompactRun.is_error,
+      false,
+      'reactive compact should recover from prompt-too-long',
+    )
+    assert.equal(
+      reactiveCompactRun.result,
+      reactiveCompactFinalResponse,
+      'reactive compact final response',
+    )
+    const reactiveCompactRequests = server.requests
+      .slice(beforeReactiveCompactRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      reactiveCompactRequests.length,
+      3,
+      'reactive compact should make original, compact, and retry requests',
+    )
+    assert(
+      containsText(
+        requestTexts(reactiveCompactRequests[1]),
+        'Your task is to create a detailed summary',
+      ),
+      'reactive compact second request should be the compact summary request',
+    )
+    assert(
+      containsText(requestTexts(reactiveCompactRequests[2]), reactiveCompactSummary),
+      'reactive compact retry should include compact summary',
     )
 
     const beforeMultiToolRequests = server.requests.length
@@ -3820,6 +3908,7 @@ async function main() {
     console.log('ok - chunked tool_use executes despite non-tool stop_reason')
     console.log('ok - unclosed tool_use block is finalized at stream end')
     console.log('ok - out-of-order stream recovers through non-streaming fallback')
+    console.log('ok - reactive compact recovers after prompt-too-long')
     console.log('ok - multiple interleaved tool_use blocks execute and follow up')
     console.log('ok - mixed text, Read, and Bash blocks preserve text and results')
     console.log('ok - triple interleaved Read, Bash, and Read blocks follow up')

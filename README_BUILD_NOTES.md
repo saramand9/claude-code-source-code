@@ -25,7 +25,7 @@
 2. **混合**：处理 Bun 编译期能力
 
    - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
-   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，MCP_SKILLS 是 `skill://` 文本资源到 prompt command 的外部实现，EXPERIMENTAL_SKILL_SEARCH 是本地 keyword skill discovery 和 DiscoverSkills 工具外部实现，它们都不等同于官方完整内部实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，Reactive Compact 是 prompt-too-long 后置恢复的外部实现，MCP_SKILLS 是 `skill://` 文本资源到 prompt command 的外部实现，EXPERIMENTAL_SKILL_SEARCH 是本地 keyword skill discovery 和 DiscoverSkills 工具外部实现，它们都不等同于官方完整内部实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -67,7 +67,7 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 与 `EXPERIMENTAL_SKILL_SEARCH`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 与 `EXPERIMENTAL_SKILL_SEARCH`，其它内部 gate 仍按外部构建关闭。 |
 | `scripts/audit-features.mjs` / `npm run audit:features` | 尝试修复/真实适配 | 统计 `src/` 中所有 `feature('...')` 调用、默认保留项、环境保留项和当前 stub manifest，作为后续 feature 修复清单。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
@@ -84,6 +84,7 @@
 | `src/services/contextCollapse/*` | 混合 | 替换原 `.d.ts` 占位，提供可加载的保守外部运行时；不做真实摘要、投影删除或 ctx-agent 调度。 |
 | `src/tools/CtxInspectTool/CtxInspectTool.ts` | 混合 | 补齐工具加载路径和只读检查输出；默认隐藏，仅显式设置 collapse 环境变量时启用。 |
 | `src/services/compact/snipCompact.ts` / `snipProjection.ts` | 混合 | 提供高可用 History Snip 运行时、分段裁剪、目标 ID 裁剪、投影删除、工具对保护和运行时阈值；不是官方完整语义 snip。 |
+| `src/services/compact/reactiveCompact.ts` | 混合 | 恢复 `REACTIVE_COMPACT` 的 prompt-too-long/media-size 后置压缩重试路径；复用现有 compactConversation，不恢复官方内部实验策略。 |
 | `src/tools/SnipTool/SnipTool.ts` / `src/commands/force-snip.ts` | 混合 | Snip 工具与内部 force-snip 命令可加载、可执行；支持自动分段裁剪、目标 ID 和目标 token 参数。 |
 | `src/components/messages/SnipBoundaryMessage.tsx` | 尝试修复/真实适配 | UI 可渲染 snip 边界摘要，避免历史裁剪事件不可见。 |
 | `src/tools/VerifyPlanExecutionTool/*` | 混合 | `CLAUDE_CODE_VERIFY_PLAN=true` 时可加载、可进入工具池、可记录验证请求；不是官方后台 verifier。 |
@@ -113,6 +114,7 @@
 - 已存在的纯 TypeScript native 替代实现会被构建使用，例如 `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout`。
 - 验证报告模板的数据校验、过滤、搜索和后置清理逻辑。
 - History Snip 的高可用分段裁剪、目标 ID 裁剪、投影删除、工具对保护、SnipTool 和内部 force-snip 命令加载路径。
+- Reactive Compact 的后置恢复路径：主请求遇到 prompt-too-long 后可自动 compact 并重试；媒体尺寸错误可以被识别为可恢复错误并进入同一压缩路径。
 - VerifyPlanExecution 外部保守工具加载路径、计划退出后的验证提示 gate、pending plan verification 状态记录，以及 verify bundled skill 文档资产。
 - `protectedNamespace` 外部保守运行时，避免 `USER_TYPE=ant` 或内部遥测路径触发 fail-fast stub。
 - `ultraplan` 的远程规划提示词资源，构建时不再生成空文本 asset stub。
@@ -129,7 +131,7 @@
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - 当前 `build-src/stub-manifest.json` 为 0 项；`@ant/claude-for-chrome-mcp` 不再由构建脚本生成 private-package-stub，而是 alias 到源码里的外部保守 shim。该 shim 只提供空 browser tools 和可连接的空 MCP server，不恢复真实 Chrome browser tools。
 - 当前 manifest 不再包含 `@ant/claude-for-chrome-mcp` private-package-stub、`snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools`、`tools/TungstenTool`、`tools/REPLTool`、`tools/SuggestBackgroundPRTool` 和 `commands/agents-platform`。
@@ -147,6 +149,7 @@
   - 不把历史消息投影成 `<collapsed id="...">` 占位。
   - 不启动或调度官方 ctx-agent。
   - 默认不接管 AutoCompact/ReactiveCompact，避免假启用后压制真实可用的压缩路径。
+- `REACTIVE_COMPACT` 当前恢复的是外部后置恢复主路径，不包含官方内部 statsig 实验策略、复杂分组剥离策略或 reactive-only manual compact 的完整语义；manual `/compact` 默认仍走传统 compact 路径。
 - 下列 native 包仍作为 external 保留；当前通过 `src/utils/nativeOptional.ts` 统一包装缺失错误，触发对应路径时会 fallback、返回不可用状态或记录明确 debug 信息：
   - `audio-capture-napi`
   - `image-processor-napi`
@@ -175,9 +178,10 @@ feature('DUMP_SYSTEM_PROMPT') -> true
 feature('HISTORY_SNIP') -> true
 feature('MCP_SKILLS') -> true
 feature('EXPERIMENTAL_SKILL_SEARCH') -> true
+feature('REACTIVE_COMPACT') -> true
 ```
 
-这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行，`MCP_SKILLS` 只在已连接 MCP server 暴露 `skill://` text resources 时生效，`EXPERIMENTAL_SKILL_SEARCH` 可被 `CLAUDE_CODE_DISABLE_SKILL_SEARCH` / `DISABLE_SKILL_SEARCH` 关闭，或由 `CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH` 显式控制。其它 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，Reactive Compact 由 `DISABLE_COMPACT` / `DISABLE_AUTO_COMPACT` / `DISABLE_REACTIVE_COMPACT` / `CLAUDE_CODE_DISABLE_REACTIVE_COMPACT` 控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行，`MCP_SKILLS` 只在已连接 MCP server 暴露 `skill://` text resources 时生效，`EXPERIMENTAL_SKILL_SEARCH` 可被 `CLAUDE_CODE_DISABLE_SKILL_SEARCH` / `DISABLE_SKILL_SEARCH` 关闭，或由 `CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH` 显式控制。其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
@@ -185,7 +189,7 @@ feature('EXPERIMENTAL_SKILL_SEARCH') -> true
 
 1. feature gate 替换仍是最大风险
 
-   除当前选择性保留的 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH` 外，这仍会关闭大量内部或实验功能，例如：
+   除当前选择性保留的 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH` 外，这仍会关闭大量内部或实验功能，例如：
 
    ```text
    KAIROS
@@ -1390,13 +1394,59 @@ npm run test:cli-e2e
 - `npm run test:build-safety` 通过，当前为 45/45 项；新增技能发现专项覆盖本地/MCP skill 检索、DiscoverSkills 工具接入和坏输入防护。
 - `npm run test:cli-e2e` 通过，真实 `dist\cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 
+## 2026-06-18 REACTIVE_COMPACT 后置恢复路径修复
+
+本轮继续推进上下文可靠性，但不是继续修 ContextCollapse 本身，而是恢复 `REACTIVE_COMPACT`。它影响“已经发起模型请求后，API 返回 prompt-too-long 或媒体过大错误”的恢复路径。之前源码里只有 `src/services/compact/reactiveCompact.d.ts` 类型占位，构建默认把 feature 裁掉；遇到真实 413/400 prompt-too-long 时只能提前阻断或直接报错，无法走 query 里已经写好的压缩后重试分支。
+
+### 本轮真实修复
+
+- 删除 `src/services/compact/reactiveCompact.d.ts`，新增 `src/services/compact/reactiveCompact.ts`。
+- `scripts/build.mjs` 默认保留 `REACTIVE_COMPACT`，`npm run audit:features` 会把它列为 `preserved-default`。
+- 实现 `isReactiveCompactEnabled()`，支持 `DISABLE_COMPACT`、`DISABLE_AUTO_COMPACT`、`DISABLE_REACTIVE_COMPACT`、`CLAUDE_CODE_DISABLE_REACTIVE_COMPACT` 和 `CLAUDE_CODE_REACTIVE_COMPACT`。
+- 实现 prompt-too-long 与 media-size error 的 withheld 判断，避免 query loop 在可恢复错误上过早把错误吐给用户。
+- 实现 `tryReactiveCompact()`：仅在未尝试过、未 abort、非 compact/session_memory 递归 querySource、且 auto compact 允许时触发。
+- 复用现有 `compactConversation()` 生成摘要，不另写一套总结逻辑；成功后清理 compact 后缓存，并让 query loop 用 `buildPostCompactMessages()` 进入下一轮模型重试。
+- 保留旧导出 `isReactiveOnlyMode()` 和 `reactiveCompactOnPromptTooLong()`，兼容 `/compact` 中已有引用；manual reactive-only 默认不启用。
+- `scripts/test-build-safety.mjs` 新增模块级专项，覆盖默认启用、env 禁用、reactive-only 默认关闭/显式开启、prompt-too-long/media-size withheld、普通错误不 withheld、hasAttempted/递归/abort 熔断。
+- `scripts/test-cli-resume-e2e.mjs` 新增真实 CLI 子进程 E2E：本地 mock provider 第一次返回 HTTP 400 `prompt is too long`，CLI 触发 compact summary 请求，随后用 compact summary 重试并返回最终结果。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是完整恢复官方内部 reactive compact 实验。当前没有 statsig 分桶策略、内部指标策略、复杂 token-gap 分组剥离策略或官方 reactive-only manual compact 语义。
+- 当前恢复重点是后置恢复主路径：API 已经返回 prompt-too-long/media-size 后，尽量 compact 并重试。普通 proactive autocompact 和 History Snip 仍各自按既有路径工作。
+- 如果 compact 请求本身也连续 prompt-too-long，仍会交给 `compactConversation()` 内已有的 PTL retry；耗尽后会返回原错误，不会无限重试。
+- `ImageSizeError` / `ImageResizeError` 这类本地预校验抛错目前仍走现有直接错误路径；本轮 media-size recovery 主要覆盖 API 返回的媒体尺寸错误消息。
+- manual `/compact` 默认仍走传统 compact；只有显式 `CLAUDE_CODE_REACTIVE_COMPACT_ONLY` 时才进入兼容 reactive-only 分支。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check scripts\test-build-safety.mjs
+node --check scripts\test-cli-resume-e2e.mjs
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run audit:features` 通过，默认保留项为 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`EXPERIMENTAL_SKILL_SEARCH`、`HISTORY_SNIP`、`MCP_SKILLS`、`REACTIVE_COMPACT`。
+- `build-src/stub-manifest.json` 仍为 `entries: []`。
+- `npm run test:build-safety` 通过，当前为 46/46 项；新增 reactive compact 专项覆盖运行时 gate 和熔断边界。
+- `npm run test:cli-e2e` 通过，新增真实 `dist\cli.js` 子进程 prompt-too-long -> compact summary -> retry -> final 的恢复路径。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub / external-conservative 实现。当前 `build-src/stub-manifest.json` 已为 0 项，但这只代表不再由构建脚本生成缺失模块 stub，不代表内部能力都已恢复。Chrome MCP 已不再是 private-package-stub，但仍只是空工具外部保守 shim。`MCP_SKILLS` 已不再是缺失实现，但当前只支持 `skill://` text resources 到 prompt command 的外部路径，不代表恢复完整内部 MCP skill 分发。`EXPERIMENTAL_SKILL_SEARCH` 已不再是缺失实现，但当前只是本地/MCP prompt skill 的 keyword discovery 和 `DiscoverSkills` 工具，不代表恢复官方 AKI/GCS remote skill marketplace、canonical skill 下载或语义向量检索。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub / external-conservative 实现。当前 `build-src/stub-manifest.json` 已为 0 项，但这只代表不再由构建脚本生成缺失模块 stub，不代表内部能力都已恢复。Chrome MCP 已不再是 private-package-stub，但仍只是空工具外部保守 shim。`MCP_SKILLS` 已不再是缺失实现，但当前只支持 `skill://` text resources 到 prompt command 的外部路径，不代表恢复完整内部 MCP skill 分发。`EXPERIMENTAL_SKILL_SEARCH` 已不再是缺失实现，但当前只是本地/MCP prompt skill 的 keyword discovery 和 `DiscoverSkills` 工具，不代表恢复官方 AKI/GCS remote skill marketplace、canonical skill 下载或语义向量检索。`REACTIVE_COMPACT` 已不再是缺失实现，但当前只是基于现有 `compactConversation()` 的 prompt-too-long/media-size 后置恢复路径，不代表恢复官方内部 reactive compact 实验或所有上下文压缩策略。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
+
+Reactive Compact 的当前风险也要单独看待：它已不再是纯 `.d.ts` 占位或被构建期关闭，可以在真实 CLI 子进程里处理 prompt-too-long 后的 compact-and-retry；但它仍复用传统 `compactConversation()`，没有恢复官方内部 reactive compact 的实验分桶、语义裁剪策略或复杂 token-gap 选择。它是后置恢复兜底，不是替代 AutoCompact、History Snip 或 ContextCollapse 的统一上下文管理器。
 
 History Snip 的当前风险也要单独看待：它已不再是完全关闭、stub 或简单保守前缀裁剪，而是高可用外部版。它可以按安全 turn 分段删除、按目标 token 收敛、按目标 ID 删除完整安全 turn，并在后续模型视图中投影清理旧消息；但它仍不做官方语义评分、模型摘要、任意单消息精确点删或复杂跨轮调度。
 
