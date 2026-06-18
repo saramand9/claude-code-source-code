@@ -239,6 +239,22 @@ const writeDenyPrompt = 'cli write permission deny prompt'
 const writeDenyContent = 'write permission deny fixture: attempted-6681'
 const writeDenyFinalResponse = 'structured Write permission deny completed'
 let writeDenyFilePath = ''
+const writeContentDenyPrompt = 'cli write content-specific deny prompt'
+const writeContentDenyContent =
+  'write content-specific deny fixture: attempted-5492'
+const writeContentDenyFinalResponse =
+  'structured Write content-specific deny completed'
+const writeContentDenyRelativePath =
+  'build-src/test-artifacts/cli-write-content-deny-tool.txt'
+const writeContentDenyFilePath = join(ROOT, writeContentDenyRelativePath)
+const writeContentAskPrompt = 'cli write content-specific ask prompt'
+const writeContentAskContent =
+  'write content-specific ask fixture: attempted-7136'
+const writeContentAskFinalResponse =
+  'structured Write content-specific ask completed'
+const writeContentAskRelativePath =
+  'build-src/test-artifacts/cli-write-content-ask-tool.txt'
+const writeContentAskFilePath = join(ROOT, writeContentAskRelativePath)
 const userSettingsWriteDenyPrompt =
   'cli user settings write deny prompt'
 const userSettingsWriteDenyContent =
@@ -1733,6 +1749,42 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(writeContentDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_content_deny_')) {
+      return {
+        index: responses.length + 46,
+        text: writeContentDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 46,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeContentDenyContent}\n`,
+        filePath: writeContentDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_content_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeContentAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_content_ask_')) {
+      return {
+        index: responses.length + 47,
+        text: writeContentAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 47,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeContentAskContent}\n`,
+        filePath: writeContentAskFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_content_ask_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(userSettingsWriteDenyPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_user_settings_write_deny_')) {
       return {
@@ -2971,6 +3023,8 @@ async function main() {
   )
   writeDenyFilePath = join(ARTIFACT_DIR, 'cli-write-permission-deny.txt')
   await rm(writeDenyFilePath, { force: true })
+  await rm(writeContentDenyFilePath, { force: true })
+  await rm(writeContentAskFilePath, { force: true })
   userSettingsWriteDenyFilePath = join(
     ARTIFACT_DIR,
     'cli-user-settings-write-deny.txt',
@@ -5421,6 +5475,180 @@ async function main() {
       'Write permission deny should not create the denied file',
     )
 
+    const writeContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-write-content-deny-config-'),
+    )
+    await writeFile(
+      join(writeContentDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: [`Edit(${writeContentDenyRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const writeContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: writeContentDenyConfigDir,
+    }
+    const writeContentRuleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Write',
+      '--allowedTools',
+      'Write',
+      '--model',
+      'sonnet',
+    ]
+    const beforeWriteContentDenyRequests = server.requests.length
+    const writeContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeContentRuleArgs, writeContentDenyPrompt],
+          writeContentDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeContentDenyRun.is_error,
+      false,
+      'Write content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      writeContentDenyRun.result,
+      writeContentDenyFinalResponse,
+      'Write content-specific deny final response',
+    )
+    const writeContentDenyRequests = server.requests
+      .slice(beforeWriteContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeContentDenyRequests.length,
+      2,
+      'Write content-specific deny run should make tool_use and final requests',
+    )
+    const writeContentDenyResultBlocks = requestContentBlocks(
+      writeContentDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeContentDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_content_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes(
+            'File is in a directory that is denied by your permission settings',
+          )
+        )
+      }),
+      `Write content-specific deny follow-up should include path-denied tool_result: ${JSON.stringify(writeContentDenyResultBlocks, null, 2)}`,
+    )
+    const writeContentDenyFileExists = await stat(
+      writeContentDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeContentDenyFileExists,
+      false,
+      'Write content-specific deny should not create the denied file',
+    )
+
+    const writeContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-write-content-ask-config-'),
+    )
+    await writeFile(
+      join(writeContentAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: [`Edit(${writeContentAskRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const writeContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: writeContentAskConfigDir,
+    }
+    const beforeWriteContentAskRequests = server.requests.length
+    const writeContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeContentRuleArgs, writeContentAskPrompt],
+          writeContentAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeContentAskRun.is_error,
+      false,
+      'Write content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      writeContentAskRun.result,
+      writeContentAskFinalResponse,
+      'Write content-specific ask final response',
+    )
+    const writeContentAskRequests = server.requests
+      .slice(beforeWriteContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeContentAskRequests.length,
+      2,
+      'Write content-specific ask run should make tool_use and final requests',
+    )
+    const writeContentAskResultBlocks = requestContentBlocks(
+      writeContentAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeContentAskResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_content_ask_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Claude requested permissions to write to') &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `Write content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(writeContentAskResultBlocks, null, 2)}`,
+    )
+    const writeContentAskFileExists = await stat(
+      writeContentAskFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeContentAskFileExists,
+      false,
+      'Write content-specific ask should not create the unapproved file',
+    )
+
     const userSettingsDenyConfigDir = await mkdtemp(
       join(ARTIFACT_DIR, 'cli-user-settings-deny-config-'),
     )
@@ -6513,6 +6741,8 @@ async function main() {
     console.log('ok - Write rejects updating a file that was not read first')
     console.log('ok - Write rejects stale updates after external modification')
     console.log('ok - Write respects explicit disallowedTools denial')
+    console.log('ok - Write respects Edit path-specific deny rules')
+    console.log('ok - Write respects Edit path-specific ask rules')
     console.log('ok - user settings deny removes Write from the tool pool')
     console.log('ok - project settings deny removes Write from the tool pool')
     console.log('ok - managed-only permissions ignore CLI Write allow')
