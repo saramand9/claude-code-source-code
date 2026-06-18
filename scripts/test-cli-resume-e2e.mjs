@@ -407,6 +407,33 @@ const notebookStaleFinalResponse =
   'structured NotebookEdit stale rejection completed'
 let notebookStaleFilePath = ''
 let notebookStaleWasExternallyModified = false
+const notebookContentDenyPrompt =
+  'cli notebook edit content-specific deny prompt'
+const notebookContentDenyCellId = 'cell-notebook-content-deny'
+const notebookContentDenyOriginalSource =
+  'print("notebook-content-deny-before-6319")'
+const notebookContentDenyAttemptedSource =
+  'print("notebook-content-deny-after-6319")'
+const notebookContentDenyFinalResponse =
+  'structured NotebookEdit content-specific deny completed'
+const notebookContentDenyRelativePath =
+  'build-src/test-artifacts/cli-notebook-content-deny-tool.ipynb'
+const notebookContentDenyFilePath = join(
+  ROOT,
+  notebookContentDenyRelativePath,
+)
+const notebookContentAskPrompt =
+  'cli notebook edit content-specific ask prompt'
+const notebookContentAskCellId = 'cell-notebook-content-ask'
+const notebookContentAskOriginalSource =
+  'print("notebook-content-ask-before-4726")'
+const notebookContentAskAttemptedSource =
+  'print("notebook-content-ask-after-4726")'
+const notebookContentAskFinalResponse =
+  'structured NotebookEdit content-specific ask completed'
+const notebookContentAskRelativePath =
+  'build-src/test-artifacts/cli-notebook-content-ask-tool.ipynb'
+const notebookContentAskFilePath = join(ROOT, notebookContentAskRelativePath)
 const notebookDenyPrompt = 'cli notebook edit permission deny prompt'
 const notebookDenyCellId = 'cell-deny'
 const notebookDenyOriginalSource = 'print("notebook-deny-before-1186")'
@@ -1620,6 +1647,70 @@ function responseForBody(body, fallbackIndex) {
       toolUse: true,
       toolOptions: {
         filePath: notebookStaleFilePath,
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookContentDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_content_deny_')) {
+      return {
+        index: responses.length + 52,
+        text: notebookContentDenyFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookContentDenyOriginalSource)) {
+      return {
+        index: responses.length + 52,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookContentDenyCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookContentDenyAttemptedSource,
+          notebookPath: notebookContentDenyFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_content_deny_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 52,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookContentDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_read_notebook_content_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(notebookContentAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_notebook_content_ask_')) {
+      return {
+        index: responses.length + 53,
+        text: notebookContentAskFinalResponse,
+      }
+    }
+    if (combinedText.includes(notebookContentAskOriginalSource)) {
+      return {
+        index: responses.length + 53,
+        notebookEditToolUse: true,
+        notebookEditToolOptions: {
+          cellId: notebookContentAskCellId,
+          cellType: 'code',
+          editMode: 'replace',
+          newSource: notebookContentAskAttemptedSource,
+          notebookPath: notebookContentAskFilePath,
+          toolUseIdPrefix: 'toolu_cli_notebook_content_ask_',
+        },
+        text: '',
+      }
+    }
+    return {
+      index: responses.length + 53,
+      toolUse: true,
+      toolOptions: {
+        filePath: notebookContentAskFilePath,
+        toolUseIdPrefix: 'toolu_cli_read_notebook_content_ask_',
       },
       text: '',
     }
@@ -3387,6 +3478,34 @@ async function main() {
       null,
       1,
     ),
+    'utf8',
+  )
+  await writeFile(
+    notebookContentDenyFilePath,
+    makeNotebookContent([
+      {
+        cell_type: 'code',
+        execution_count: 1,
+        id: notebookContentDenyCellId,
+        metadata: {},
+        outputs: [],
+        source: notebookContentDenyOriginalSource,
+      },
+    ]),
+    'utf8',
+  )
+  await writeFile(
+    notebookContentAskFilePath,
+    makeNotebookContent([
+      {
+        cell_type: 'code',
+        execution_count: 1,
+        id: notebookContentAskCellId,
+        metadata: {},
+        outputs: [],
+        source: notebookContentAskOriginalSource,
+      },
+    ]),
     'utf8',
   )
   notebookDenyFilePath = join(
@@ -6997,6 +7116,196 @@ async function main() {
       'NotebookEdit stale rejection should preserve the external modification',
     )
 
+    const notebookContentRuleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '3',
+      '--strict-mcp-config',
+      '--tools',
+      'Read,NotebookEdit',
+      '--allowedTools',
+      'Read,NotebookEdit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+
+    const notebookContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-notebook-content-deny-config-'),
+    )
+    await writeFile(
+      join(notebookContentDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: [`Edit(${notebookContentDenyRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const notebookContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: notebookContentDenyConfigDir,
+    }
+    const beforeNotebookContentDenyRequests = server.requests.length
+    const notebookContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookContentRuleArgs, notebookContentDenyPrompt],
+          notebookContentDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookContentDenyRun.is_error,
+      false,
+      'NotebookEdit content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      notebookContentDenyRun.result,
+      notebookContentDenyFinalResponse,
+      'NotebookEdit content-specific deny final response',
+    )
+    const notebookContentDenyRequests = server.requests
+      .slice(beforeNotebookContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookContentDenyRequests.length,
+      3,
+      'NotebookEdit content-specific deny run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookContentDenyReadFollowUpTexts = requestTexts(
+      notebookContentDenyRequests[1],
+    )
+    assert(
+      containsText(
+        notebookContentDenyReadFollowUpTexts,
+        notebookContentDenyOriginalSource,
+      ),
+      'NotebookEdit content-specific deny follow-up should include Read notebook content',
+    )
+    const notebookContentDenyResultBlocks = requestContentBlocks(
+      notebookContentDenyRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookContentDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_content_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Permission to edit') &&
+          block.content.includes('has been denied')
+        )
+      }),
+      `NotebookEdit content-specific deny follow-up should include path-denied tool_result: ${JSON.stringify(notebookContentDenyResultBlocks, null, 2)}`,
+    )
+    const notebookContentDenyNotebook = JSON.parse(
+      await readFile(notebookContentDenyFilePath, 'utf8'),
+    )
+    assert.equal(
+      notebookContentDenyNotebook.cells[0].source,
+      notebookContentDenyOriginalSource,
+      'NotebookEdit content-specific deny should leave notebook unchanged',
+    )
+
+    const notebookContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-notebook-content-ask-config-'),
+    )
+    await writeFile(
+      join(notebookContentAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: [`Edit(${notebookContentAskRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const notebookContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: notebookContentAskConfigDir,
+    }
+    const beforeNotebookContentAskRequests = server.requests.length
+    const notebookContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...notebookContentRuleArgs, notebookContentAskPrompt],
+          notebookContentAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      notebookContentAskRun.is_error,
+      false,
+      'NotebookEdit content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      notebookContentAskRun.result,
+      notebookContentAskFinalResponse,
+      'NotebookEdit content-specific ask final response',
+    )
+    const notebookContentAskRequests = server.requests
+      .slice(beforeNotebookContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      notebookContentAskRequests.length,
+      3,
+      'NotebookEdit content-specific ask run should make Read, NotebookEdit, and final requests',
+    )
+    const notebookContentAskReadFollowUpTexts = requestTexts(
+      notebookContentAskRequests[1],
+    )
+    assert(
+      containsText(
+        notebookContentAskReadFollowUpTexts,
+        notebookContentAskOriginalSource,
+      ),
+      'NotebookEdit content-specific ask follow-up should include Read notebook content',
+    )
+    const notebookContentAskResultBlocks = requestContentBlocks(
+      notebookContentAskRequests[2],
+      'tool_result',
+    )
+    assert(
+      notebookContentAskResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_notebook_content_ask_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Claude requested permissions to write to') &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `NotebookEdit content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(notebookContentAskResultBlocks, null, 2)}`,
+    )
+    const notebookContentAskNotebook = JSON.parse(
+      await readFile(notebookContentAskFilePath, 'utf8'),
+    )
+    assert.equal(
+      notebookContentAskNotebook.cells[0].source,
+      notebookContentAskOriginalSource,
+      'NotebookEdit content-specific ask should leave notebook unchanged',
+    )
+
     const beforeNotebookDenyRequests = server.requests.length
     const notebookDenyArgs = [
       '--bare',
@@ -7218,6 +7527,8 @@ async function main() {
     console.log('ok - NotebookEdit rejects oversized notebooks before parsing')
     console.log('ok - NotebookEdit rejects editing a notebook that was not read first')
     console.log('ok - NotebookEdit rejects stale notebook edits after external modification')
+    console.log('ok - NotebookEdit respects Edit path-specific deny rules')
+    console.log('ok - NotebookEdit respects Edit path-specific ask rules')
     console.log('ok - NotebookEdit respects explicit disallowedTools denial')
     console.log('ok - NotebookEdit replaces a markdown cell by cell index')
     console.log(`ok - transcript ${transcripts[0]}`)
