@@ -122,6 +122,14 @@ const projectBashContentDenyFinalResponse =
 const projectBashContentDenyRelativePath =
   'project-bash-content-deny-tool.txt'
 let projectBashContentDenyFilePath = ''
+const projectBashContentAskPrompt =
+  'cli project bash content-specific ask prompt'
+const projectBashContentAskResult = 'project-bash-content-ask-4382'
+const projectBashContentAskFinalResponse =
+  'Project Bash content-specific ask completed'
+const projectBashContentAskRelativePath =
+  'project-bash-content-ask-tool.txt'
+let projectBashContentAskFilePath = ''
 
 const editToolPrompt = 'cli read then edit tool prompt'
 const editToolOriginalContent = 'edit structured tool fixture: before-1842'
@@ -2306,6 +2314,27 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(projectBashContentAskPrompt)) {
+    if (
+      hasToolResultWithIdPrefix(body, 'toolu_cli_project_bash_content_ask_')
+    ) {
+      return {
+        index: responses.length + 13,
+        text: projectBashContentAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 13,
+      bashSideEffectToolUse: true,
+      bashSideEffectOptions: {
+        command: `echo ${projectBashContentAskResult} > ${projectBashContentAskRelativePath}`,
+        description: 'Attempt to write a project ask Bash fixture marker',
+        messageIdPrefix: 'msg_cli_project_bash_content_ask_tool_use_',
+        toolUseIdPrefix: 'toolu_cli_project_bash_content_ask_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(mixedToolPrompt)) {
     if (
       combinedText.includes(mixedToolReadContent) &&
@@ -4058,6 +4087,100 @@ async function main() {
       projectBashContentDenyFileExists,
       false,
       'Project Bash content-specific deny should not create the denied file',
+    )
+
+    const projectBashContentAskCwd = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-bash-content-ask-cwd-'),
+    )
+    await mkdir(join(projectBashContentAskCwd, '.claude'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(projectBashContentAskCwd, '.claude', 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: ['Bash(echo:*)'],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    projectBashContentAskFilePath = join(
+      projectBashContentAskCwd,
+      projectBashContentAskRelativePath,
+    )
+    const projectBashContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-project-bash-content-ask-config-'),
+    )
+    const projectBashContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: projectBashContentAskConfigDir,
+    }
+    const beforeProjectBashContentAskRequests = server.requests.length
+    const projectBashContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...bashSideEffectArgs, projectBashContentAskPrompt],
+          projectBashContentAskEnv,
+          {
+            ...runCliOptions(),
+            cwd: projectBashContentAskCwd,
+          },
+        )
+      ).stdout,
+    )
+    assert.equal(
+      projectBashContentAskRun.is_error,
+      false,
+      'Project Bash content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      projectBashContentAskRun.result,
+      projectBashContentAskFinalResponse,
+      'Project Bash content-specific ask final response',
+    )
+    const projectBashContentAskRequests = server.requests
+      .slice(beforeProjectBashContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      projectBashContentAskRequests.length,
+      2,
+      'Project Bash content-specific ask run should make tool_use and final requests',
+    )
+    const projectBashContentAskResultBlocks = requestContentBlocks(
+      projectBashContentAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      projectBashContentAskResultBlocks.some(block => {
+        const content = textFromContent(block.content)
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith(
+            'toolu_cli_project_bash_content_ask_',
+          ) &&
+          block.is_error === true &&
+          content.includes('Claude requested permissions to use Bash') &&
+          content.includes("haven't granted it yet")
+        )
+      }),
+      `Project Bash content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(projectBashContentAskResultBlocks, null, 2)}`,
+    )
+    const projectBashContentAskFileExists = await stat(
+      projectBashContentAskFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      projectBashContentAskFileExists,
+      false,
+      'Project Bash content-specific ask should not create the unapproved file',
     )
 
     const beforeEditToolRequests = server.requests.length
@@ -6369,6 +6492,7 @@ async function main() {
     console.log('ok - Bash content-specific deny blocks a matching command')
     console.log('ok - Bash content-specific ask requires approval')
     console.log('ok - project Bash content-specific deny blocks a matching command')
+    console.log('ok - project Bash content-specific ask requires approval')
     console.log('ok - Read then Edit executes and updates a fixture file')
     console.log('ok - Edit rejects updating a file that was not read first')
     console.log('ok - Edit rejects stale updates after external modification')
