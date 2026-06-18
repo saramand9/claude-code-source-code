@@ -111,17 +111,11 @@ type WebBrowserPanelModule = {
 type ContextCollapseModule = {
   resetContextCollapse(): void;
 };
-const feedbackSurveyModulePath: string =
-  '../components/FeedbackSurvey/useFrustrationDetection.js';
-const antOrgWarningNotificationModulePath: string =
-  '../hooks/notifs/useAntOrgWarningNotification.js';
-const tungstenLiveMonitorModulePath: string =
-  '../tools/TungstenTool/TungstenLiveMonitor.js';
 const webBrowserPanelModulePath: string =
   '../tools/WebBrowserTool/WebBrowserPanel.js';
 const TungstenLiveMonitor: React.ComponentType =
   isAntUserType()
-    ? (require(tungstenLiveMonitorModulePath).TungstenLiveMonitor as React.ComponentType)
+    ? (require('../tools/TungstenTool/TungstenLiveMonitor.js').TungstenLiveMonitor as React.ComponentType)
     : () => null;
 const fireCompanionObserver: (
   messages: MessageType[],
@@ -147,13 +141,13 @@ const VoiceKeybindingHandler: typeof import('../hooks/useVoiceIntegration.js').V
 // Frustration detection is ant-only (dogfooding). Conditional require so external
 // builds eliminate the module entirely (including its two O(n) useMemos that run
 // on every messages change, plus the GrowthBook fetch).
-const useFrustrationDetection: UseFrustrationDetection = isAntUserType() ? require(feedbackSurveyModulePath).useFrustrationDetection : () => ({
+const useFrustrationDetection: UseFrustrationDetection = isAntUserType() ? require('../components/FeedbackSurvey/useFrustrationDetection.js').useFrustrationDetection : () => ({
   state: 'closed',
   handleTranscriptSelect: () => {}
 });
 // Ant-only org warning. Conditional require so the org UUID list is
 // eliminated from external builds (one UUID is on excluded-strings).
-const useAntOrgWarningNotification: () => void = isAntUserType() ? require(antOrgWarningNotificationModulePath).useAntOrgWarningNotification : () => {};
+const useAntOrgWarningNotification: () => void = isAntUserType() ? require('../hooks/notifs/useAntOrgWarningNotification.js').useAntOrgWarningNotification : () => {};
 // Dead code elimination: conditional import for coordinator mode
 const getCoordinatorUserContext: (mcpClients: ReadonlyArray<{
   name: string;

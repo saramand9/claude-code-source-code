@@ -342,11 +342,11 @@ await test('lazy tool export loader falls back to fail-fast default stubs', asyn
   const output = await buildAndRunSnippet(
     'tool-loader-fallback-test',
     `import { loadToolExport } from './src/utils/toolModuleLoader.ts';
-const tungsten = await import('./src/tools/TungstenTool/TungstenTool.js');
+const repl = await import('./src/tools/REPLTool/REPLTool.js');
 const tool = loadToolExport(
-  tungsten,
-  'TungstenTool',
-  './src/tools/TungstenTool/TungstenTool.js',
+  repl,
+  'REPLTool',
+  './src/tools/REPLTool/REPLTool.js',
 );
 let failedFast = false;
 try {
@@ -359,6 +359,58 @@ if (!failedFast) throw new Error('expected default tool stub to fail fast');
 console.log('tool loader fallback OK');`,
   )
   assert.equal(output, 'tool loader fallback OK')
+})
+
+await test('devtools and Tungsten external fallbacks are loadable', async () => {
+  const missingFallbacks = manifest.entries.filter(entry =>
+    /(?:ink\/devtools|TungstenTool\/TungstenTool)/.test(String(entry.path ?? '')),
+  )
+  assert.deepEqual(missingFallbacks, [])
+  const replSource = await readFile(join(BUILD, 'src/screens/REPL.tsx'), 'utf8')
+  assert.doesNotMatch(
+    replSource,
+    /feedbackSurveyModulePath|antOrgWarningNotificationModulePath|tungstenLiveMonitorModulePath/,
+    'ant-only REPL fallback modules should not use variable-path requires',
+  )
+
+  const output = await buildAndRunSnippet(
+    'devtools-tungsten-fallback-test',
+    `import React from 'react';
+import { connectToDevTools, getDevtoolsStatus } from './src/ink/devtools.ts';
+import { useFrustrationDetection } from './src/components/FeedbackSurvey/useFrustrationDetection.ts';
+import { useAntOrgWarningNotification } from './src/hooks/notifs/useAntOrgWarningNotification.ts';
+import {
+  TungstenTool,
+  clearSessionsWithTungstenUsage,
+  resetInitializationState,
+  getTungstenFallbackState,
+} from './src/tools/TungstenTool/TungstenTool.ts';
+import { TungstenLiveMonitor } from './src/tools/TungstenTool/TungstenLiveMonitor.tsx';
+
+const devtools = await connectToDevTools();
+if (devtools.status !== 'unavailable') throw new Error('devtools should be unavailable');
+if (getDevtoolsStatus().implementation !== 'external-conservative') {
+  throw new Error('bad devtools implementation marker');
+}
+if (TungstenTool.name !== 'Tungsten') throw new Error('bad Tungsten tool name');
+if (TungstenTool.isEnabled()) throw new Error('Tungsten should be disabled by default');
+const result = await TungstenTool.call({ command: 'echo hi' });
+if (result.data.status !== 'unavailable') throw new Error('Tungsten should return unavailable');
+if (result.data.command !== 'echo hi') throw new Error('Tungsten should echo requested command');
+clearSessionsWithTungstenUsage();
+resetInitializationState();
+const state = getTungstenFallbackState();
+if (state.usageClearCount !== 1 || state.initializationResetCount !== 1) {
+  throw new Error('Tungsten cleanup state was not updated');
+}
+const element = React.createElement(TungstenLiveMonitor);
+if (element.type !== TungstenLiveMonitor) throw new Error('bad Tungsten monitor element');
+const frustration = useFrustrationDetection([], false, false, false);
+if (frustration.state !== 'closed') throw new Error('frustration fallback should be closed');
+useAntOrgWarningNotification();
+console.log('devtools tungsten fallback OK');`,
+  )
+  assert.equal(output, 'devtools tungsten fallback OK')
 })
 
 await test('context collapse build gate is preserved but runtime-gated', async () => {
