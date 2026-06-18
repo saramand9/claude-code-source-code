@@ -25,7 +25,7 @@
 2. **混合**：处理 Bun 编译期能力
 
    - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
-   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，但都不等同于官方完整实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT` 和 `MCP_SKILLS`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，MCP_SKILLS 是 `skill://` 文本资源到 prompt command 的外部实现，它们都不等同于官方完整内部实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -67,7 +67,7 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 与 `DUMP_SYSTEM_PROMPT`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT` 与 `MCP_SKILLS`，其它内部 gate 仍按外部构建关闭。 |
 | `scripts/audit-features.mjs` / `npm run audit:features` | 尝试修复/真实适配 | 统计 `src/` 中所有 `feature('...')` 调用、默认保留项、环境保留项和当前 stub manifest，作为后续 feature 修复清单。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
@@ -98,6 +98,7 @@
 | `src/components/messages/UserGitHubWebhookMessage.tsx` / `UserForkBoilerplateMessage.tsx` / `UserCrossSessionMessage.tsx` | 混合 | 补齐 gated 用户消息渲染组件，并把 `UserTextMessage` 中对应变量路径 require 改为静态路径；组件为外部保守摘要渲染，不恢复内部完整 UI。 |
 | `src/screens/ResumeConversation.tsx` ContextCollapse persist require | 尝试修复/真实适配 | 将 resume 入口的 ContextCollapse 持久化恢复从变量路径 require 改为静态字面量 require，避免单文件产物运行期查找不存在的相对文件。 |
 | `src/tools/REPLTool/REPLTool.ts` / `src/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.ts` / `src/commands/agents-platform/index.ts` | 混合 | 补齐最后 3 个 feature-gated manifest 缺口；均为默认禁用的外部保守实现，不恢复内部 REPL VM、后台 PR 或 agents platform。 |
+| `src/skills/mcpSkills.ts` | 混合 | 恢复 `MCP_SKILLS` 的外部可运行路径：读取 MCP `skill://` 文本资源并转换成 prompt command；不恢复非文本资源、resource templates 或内部 skill 分发策略。 |
 
 ## 尝试修复/真实适配
 
@@ -119,12 +120,13 @@
 - Resume 入口的 ContextCollapse persist 静态打包路径，以及 `UserTextMessage` 中 GitHub webhook、fork boilerplate、cross-session 三个 gated 用户消息分支的静态打包路径。
 - `REPLTool` / `SuggestBackgroundPRTool` / `agents-platform` 的加载路径不再由生成 stub 兜底；`REPLTool` 不可用时不会隐藏 Read/Bash/Edit 等基础工具。
 - `@ant/claude-for-chrome-mcp` 不再由构建脚本生成 fail-fast private stub；当前 alias 到源码里的外部保守 shim，至少能完成 MCP 初始化、列出空工具集并给出明确不可用错误。
+- `MCP_SKILLS` 默认保留，`skill://` 文本资源会被读取、解析 frontmatter，并作为 `loadedFrom: 'mcp'` 的 prompt command 进入 MCP commands 列表。
 
 ## mock/stub/降级
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT`。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT` 和 `MCP_SKILLS`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - 当前 `build-src/stub-manifest.json` 为 0 项；`@ant/claude-for-chrome-mcp` 不再由构建脚本生成 private-package-stub，而是 alias 到源码里的外部保守 shim。该 shim 只提供空 browser tools 和可连接的空 MCP server，不恢复真实 Chrome browser tools。
 - 当前 manifest 不再包含 `@ant/claude-for-chrome-mcp` private-package-stub、`snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools`、`tools/TungstenTool`、`tools/REPLTool`、`tools/SuggestBackgroundPRTool` 和 `commands/agents-platform`。
@@ -133,6 +135,7 @@
 - `REPLTool` 当前默认禁用，不提供内部 REPL VM 或工具包装执行；工具池会保留直接 Read/Bash/Edit 等基础工具。
 - `SuggestBackgroundPRTool` 当前默认禁用，不创建后台 PR 或远程任务。
 - `agents-platform` 命令当前隐藏且禁用，不连接 Anthropic 内部 agents platform。
+- `MCP_SKILLS` 当前只处理 `resources/list` 中 URI 以 `skill://` 开头、且 `resources/read` 返回 text content 的资源；blob-only 资源会跳过，远端 skill 中的 `!` shell 语法会作为普通文本保留，不会执行。
 - `UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 是外部保守摘要渲染组件，只保证 gated 分支启用后不因缺失模块崩溃；它们不恢复内部完整 GitHub webhook、fork 子会话或 UDS inbox UI 语义。
 - `ULTRAPLAN` feature 仍未恢复：提示词资源是真实文本，但远程 CCR 会话、轮询和执行选择依然依赖内部/线上能力。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
@@ -168,7 +171,7 @@ feature('DUMP_SYSTEM_PROMPT') -> true
 feature('HISTORY_SNIP') -> true
 ```
 
-这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行。其它 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT` 和 `MCP_SKILLS` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行，`MCP_SKILLS` 只在已连接 MCP server 暴露 `skill://` text resources 时生效。其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
@@ -176,7 +179,7 @@ feature('HISTORY_SNIP') -> true
 
 1. feature gate 替换仍是最大风险
 
-   除当前选择性保留的 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT` 外，这仍会关闭大量内部或实验功能，例如：
+   除当前选择性保留的 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`DUMP_SYSTEM_PROMPT` 和 `MCP_SKILLS` 外，这仍会关闭大量内部或实验功能，例如：
 
    ```text
    KAIROS
@@ -779,7 +782,7 @@ git diff --check
 
 结果：
 
-- `npm run audit:features` 会列出 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`HISTORY_SNIP` 为 `preserved-default`。
+- `npm run audit:features` 会列出 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`HISTORY_SNIP`、`MCP_SKILLS` 为 `preserved-default`。
 - `npm run test:build-safety` 当时通过全部 32 项，覆盖 `DUMP_SYSTEM_PROMPT` 的构建保留和真实 CLI 快速路径；后续新增测试后的当前统计见下方“已验证”部分。
 - `node dist\cli.js --dump-system-prompt --model sonnet` 不需要真实 API key，也不连接当前代理或模型服务；smoke 检查命中了 `Claude Code` 文本。
 - `npm run check`、`node --check scripts\test-build-safety.mjs`、`node --check dist\cli.js`、`npm run test:cli-e2e` 和 `git diff --check` 均通过；`git diff --check` 仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
@@ -921,6 +924,7 @@ REPLTool / SuggestBackgroundPRTool / agents-platform 外部保守加载路径，
 - 交互 UI 流式显示回归：`visibleStreamingText` 不再按最后一个换行截断，避免无尾随换行内容必须等最终 message 或键盘 repaint 才出现；`maybeRepinLiveScroll` 会在 streaming 文本更新和 assistant 消息落地时保持 live 区域可见，除非用户最近主动滚动离开；真实 `Messages`/Ink 渲染测试会把无尾随换行的 `streamingText` 渲染到模拟 TTY，并确认输出中包含完整 tail。
 - 构建副本中不再存在 `export const X = undefined` 静默导出。
 - `@ant/claude-for-chrome-mcp` 外部保守 shim 的空工具列表、真实 MCP client/server in-process 连接、`tools/list=[]` 和未知 browser tool 的明确不可用错误。
+- `MCP_SKILLS` 被保留进构建副本，`dist/cli.js` 不再保留 `mcpSkillsModulePath` 变量路径 require；真实 MCP client/server in-process 测试会暴露 `skill://` text resource，并验证 frontmatter 解析、命令命名、`loadedFrom: 'mcp'` 标记、参数替换、blob resource 跳过、缓存命中和 cache delete 后刷新。
 - `nativeOptional` 对缺失 native 包的统一错误包装。
 - `modifiers-napi`、`image-processor-napi`、`audio-capture-napi`、`url-handler-napi` 相关 fallback 或保护路径。
 - Node 产物缺少 vendored ripgrep 二进制时，`ripgrepCommand()` 会回退到系统 `rg`，并通过真实 `rg --version` 验证。
@@ -1243,7 +1247,7 @@ npm run test:cli-e2e
 
 - `npm run build` 通过，stub manifest 从 4 项降到 1 项，只剩 `private-package-stub: 1`。
 - `npm run audit:features` 通过，Stub kinds 只剩 `private-package-stub: 1`。
-- `npm run test:build-safety` 通过，当前为 41/41 项。
+- `npm run test:build-safety` 通过，当时为 41/41 项；后续 MCP_SKILLS 专项补测后为 43/43 项。
 - 新增专项确认 `REPLTool`、`SuggestBackgroundPRTool`、`agents-platform` 不再在 manifest 中；`USER_TYPE=ant` + CLI 下工具池包含 Read/Bash/Edit，且不暴露 disabled 的 REPL/SuggestBackgroundPR。
 - `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 
@@ -1286,15 +1290,60 @@ npm run test:cli-e2e
 
 - `npm run build` 通过，`build-src/stub-manifest.json` 当前为 `entries: []`。
 - `npm run audit:features` 通过，Stub kinds 为空。
-- `npm run test:build-safety` 通过，当前为 41/41 项；Chrome MCP 新专项覆盖真实 MCP client/server in-process 连接。
+- `npm run test:build-safety` 通过，当时为 41/41 项；Chrome MCP 新专项覆盖真实 MCP client/server in-process 连接。后续 MCP_SKILLS 专项补测后为 43/43 项。
 - `npm run test:cli-e2e` 串行复跑通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 - 曾经并行跑 `test:build-safety` 与 `test:cli-e2e` 时出现过一次 CLI e2e 假失败；串行复跑已通过，后续仍建议这两个测试顺序执行。
+
+## 2026-06-18 MCP_SKILLS 外部可运行路径修复
+
+本轮继续推进 feature gate 层面的真实可用能力，选择 `MCP_SKILLS`。它影响 MCP server 通过 resources 暴露模型可调用 skill 的路径。之前源码里只有 `src/skills/mcpSkills.d.ts` 类型占位，没有实现文件；如果直接保留 `feature('MCP_SKILLS')`，构建会重新生成 fail-fast stub，或者单文件产物在变量路径 require 上出问题。
+
+### 本轮真实修复
+
+- 删除 `src/skills/mcpSkills.d.ts`，新增 `src/skills/mcpSkills.ts`。
+- `scripts/build.mjs` 默认保留 `MCP_SKILLS`，`npm run audit:features` 现在会把它列为 `preserved-default`。
+- `src/services/mcp/client.ts` 和 `src/services/mcp/useManageMCPConnections.ts` 的 MCP skill require 改为静态字面量路径，避免单文件产物运行时查找 `mcpSkillsModulePath`。
+- `fetchMcpSkillsForClient()` 现在会：
+  - 对 connected 且支持 resources 的 MCP server 调用 `resources/list`。
+  - 只处理 URI 以 `skill://` 开头的资源。
+  - 对每个 skill resource 调用 `resources/read`。
+  - 只接受 text content，blob-only resource 会跳过。
+  - 复用 `loadSkillsDir.ts` 注册的 parser/builder，解析 frontmatter、`allowed-tools`、`arguments`、`user-invocable` 等字段。
+  - 生成 `loadedFrom: 'mcp'`、`source: 'mcp'` 的 prompt command，命名规则为 `normalizedServer:normalizedSkill`，和现有 MCP command cleanup/filter 逻辑兼容。
+  - 使用 LRU cache，并暴露 `.cache.delete(serverName)` 给 reconnect/list_changed 路径刷新。
+- `scripts/test-build-safety.mjs` 的 snippet runner 默认加入和真实 `dist` 一致的 `createRequire` banner，避免临时 ESM snippet 在 `require('yaml')`、`require('perf_hooks')` 这类 Node fallback 上产生假失败。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是完整恢复所有 MCP skill/resource 能力。当前只支持静态 `resources/list` 返回的 `skill://` text resources，不支持 resource templates、blob skill、远端资源目录递归、签名校验或内部分发策略。
+- MCP skill 来自远端 server，按不可信内容处理；skill markdown 里的 `!` shell 语法不会执行，只作为普通文本交给模型。
+- `MCP_SKILLS` 虽然被默认保留，但只有在用户配置的 MCP server 成功连接并暴露 skill resources 时才生效。
+- 如果 MCP server 返回坏 YAML、不可读 resource 或 blob-only 内容，当前策略是跳过该资源并记录 debug，不让整个 MCP server 连接失败。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run audit:features` 通过，默认保留项为 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`HISTORY_SNIP`、`MCP_SKILLS`。
+- `build-src/stub-manifest.json` 仍为 `entries: []`。
+- `npm run test:build-safety` 通过，当前为 43/43 项；新增 MCP skill 专项覆盖真实 MCP client/server in-process 连接、resource list/read、frontmatter、参数替换、缓存和坏资源跳过。
+- `npm run test:cli-e2e` 通过，真实 `dist\cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
 
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub / external-conservative 实现。当前 `build-src/stub-manifest.json` 已为 0 项，但这只代表不再由构建脚本生成缺失模块 stub，不代表内部能力都已恢复。Chrome MCP 已不再是 private-package-stub，但仍只是空工具外部保守 shim。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub / external-conservative 实现。当前 `build-src/stub-manifest.json` 已为 0 项，但这只代表不再由构建脚本生成缺失模块 stub，不代表内部能力都已恢复。Chrome MCP 已不再是 private-package-stub，但仍只是空工具外部保守 shim。`MCP_SKILLS` 已不再是缺失实现，但当前只支持 `skill://` text resources 到 prompt command 的外部路径，不代表恢复完整内部 MCP skill 分发。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。`ink/devtools`、`TungstenTool`、`useFrustrationDetection` 和 `useAntOrgWarningNotification` 也已不再是缺失模块或变量路径运行期缺口，但它们只是 no-op / unavailable 外部保守实现。`REPLTool`、`SuggestBackgroundPRTool` 和 `agents-platform` 已不再是生成 stub，但仍只是默认禁用的 external-conservative 实现。`UserGitHubWebhookMessage`、`UserForkBoilerplateMessage` 和 `UserCrossSessionMessage` 也只是外部保守摘要渲染，不代表恢复 GitHub webhook、fork 子会话或 UDS inbox 的完整内部体验。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 

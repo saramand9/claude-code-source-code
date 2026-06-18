@@ -122,9 +122,8 @@ type FetchMcpSkillsForClient = ((
   }
 }
 
-const mcpSkillsModulePath: string = '../../skills/mcpSkills.js'
 const fetchMcpSkillsForClient = feature('MCP_SKILLS')
-  ? (require(mcpSkillsModulePath) as {
+  ? (require('../../skills/mcpSkills.js') as {
       fetchMcpSkillsForClient: FetchMcpSkillsForClient
     }).fetchMcpSkillsForClient
   : null

@@ -63,7 +63,7 @@ function escapeRegExp(value) {
 }
 
 async function buildAndRunSnippet(name, contents, options = {}) {
-  const { alias: optionAlias, ...buildOptions } = options
+  const { alias: optionAlias, banner: optionBanner, ...buildOptions } = options
   await mkdir(TEST_DIR, { recursive: true })
   const outfile = join(TEST_DIR, `${name}.mjs`)
   const jsoncStub = join(TEST_DIR, 'jsonc-parser-main-stub.mjs')
@@ -102,6 +102,10 @@ export default { coerce, satisfies, valid };
       '.txt': 'text',
       '.md': 'text',
       ...(buildOptions.loader ?? {}),
+    },
+    banner: {
+      js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      ...(optionBanner ?? {}),
     },
     alias: {
       src: join(BUILD, 'src'),
@@ -1994,6 +1998,12 @@ await test('generated build has no snip variable-path requires', async () => {
   assert.doesNotMatch(text, /snip(?:Projection|Compact|BoundaryMessage)ModulePath\s*=/)
 })
 
+await test('generated build has no MCP skill variable-path requires', async () => {
+  const text = await readFile(DIST_CLI, 'utf8')
+  assert.doesNotMatch(text, /mcpSkillsModulePath\s*=/)
+  assert.doesNotMatch(text, /__require\(\s*mcpSkillsModulePath/)
+})
+
 await test('Chrome MCP external shim starts empty in-process server', async () => {
   const output = await buildAndRunSnippet(
     'chrome-mcp-shim-test',
@@ -2027,6 +2037,138 @@ await server.close();
 console.log('chrome mcp shim OK');`,
   )
   assert.equal(output, 'chrome mcp shim OK')
+})
+
+await test('MCP skill resources become safe prompt commands', async () => {
+  const output = await buildAndRunSnippet(
+    'mcp-skills-test',
+    `import './src/skills/loadSkillsDir.ts';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createLinkedTransportPair } from './src/services/mcp/InProcessTransport.ts';
+import { fetchMcpSkillsForClient } from './src/skills/mcpSkills.ts';
+import { getMcpSkillCommands } from './src/commands.ts';
+
+let listCount = 0;
+let alphaReadCount = 0;
+let blobReadCount = 0;
+const server = new Server(
+  { name: 'mcp-skill-fixture', version: '0.0.0' },
+  { capabilities: { resources: { listChanged: true } } },
+);
+server.setRequestHandler(ListResourcesRequestSchema, () => {
+  listCount += 1;
+  return {
+    resources: [
+      {
+        uri: 'skill://alpha/SKILL.md',
+        name: 'Alpha Skill',
+        description: 'resource fallback description',
+        mimeType: 'text/markdown',
+      },
+      {
+        uri: 'skill://blob/SKILL.md',
+        name: 'Blob Skill',
+        description: 'blob should be skipped',
+        mimeType: 'application/octet-stream',
+      },
+      {
+        uri: 'file://regular-note.md',
+        name: 'Regular note',
+        description: 'not a skill resource',
+        mimeType: 'text/markdown',
+      },
+    ],
+  };
+});
+server.setRequestHandler(ReadResourceRequestSchema, request => {
+  if (request.params.uri === 'skill://alpha/SKILL.md') {
+    alphaReadCount += 1;
+    return {
+      contents: [
+        {
+          uri: request.params.uri,
+          mimeType: 'text/markdown',
+          text: [
+            '---',
+            'name: Alpha Display',
+            'description: Run alpha task',
+            'allowed-tools:',
+            '  - Read',
+            'arguments: target',
+            'user-invocable: false',
+            '---',
+            'Use $target to inspect.',
+            '',
+            '!\`echo should-not-run\`',
+          ].join('\\n'),
+        },
+      ],
+    };
+  }
+  if (request.params.uri === 'skill://blob/SKILL.md') {
+    blobReadCount += 1;
+    return {
+      contents: [
+        {
+          uri: request.params.uri,
+          mimeType: 'application/octet-stream',
+          blob: 'AQID',
+        },
+      ],
+    };
+  }
+  throw new Error('unexpected resource read: ' + request.params.uri);
+});
+
+const client = new Client({ name: 'mcp-skill-client', version: '0.0.0' }, { capabilities: {} });
+const [clientTransport, serverTransport] = createLinkedTransportPair();
+await server.connect(serverTransport);
+await client.connect(clientTransport);
+
+const connection = {
+  name: 'Skill Server',
+  type: 'connected',
+  client,
+  capabilities: { resources: { listChanged: true } },
+  config: { type: 'sdk' },
+  cleanup: async () => {},
+};
+const commands = await fetchMcpSkillsForClient(connection);
+if (commands.length !== 1) throw new Error('expected one text skill, got ' + commands.length);
+const skill = commands[0];
+if (skill.name !== 'Skill_Server:Alpha_Skill') throw new Error('bad skill name: ' + skill.name);
+if (skill.userFacingName() !== 'Alpha Display') throw new Error('bad display name: ' + skill.userFacingName());
+if (skill.description !== 'Run alpha task') throw new Error('bad description: ' + skill.description);
+if (skill.loadedFrom !== 'mcp' || skill.source !== 'mcp') throw new Error('bad mcp markers');
+if (!skill.isHidden || skill.userInvocable !== false) throw new Error('user-invocable=false should hide skill');
+if (!skill.allowedTools?.includes('Read')) throw new Error('allowed-tools not parsed');
+if (!getMcpSkillCommands(commands).some(command => command.name === skill.name)) throw new Error('mcp skill filter missed command');
+const prompt = await skill.getPromptForCommand('target-file', {});
+const text = prompt.map(block => block.type === 'text' ? block.text : '').join('\\n');
+if (!text.includes('Use target-file to inspect.')) throw new Error('argument substitution failed: ' + text);
+if (!text.includes('should-not-run')) throw new Error('mcp skill shell syntax should remain inert text');
+
+await fetchMcpSkillsForClient(connection);
+if (listCount !== 1 || alphaReadCount !== 1 || blobReadCount !== 1) {
+  throw new Error('cache miss unexpectedly repeated list/read calls');
+}
+fetchMcpSkillsForClient.cache.delete('Skill Server');
+await fetchMcpSkillsForClient(connection);
+if (listCount !== 2 || alphaReadCount !== 2 || blobReadCount !== 2) {
+  throw new Error('cache delete did not force refresh');
+}
+await client.close();
+await server.close();
+console.log('mcp skills OK');`,
+    {
+      banner: {
+        js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      },
+    },
+  )
+  assert.equal(output, 'mcp skills OK')
 })
 
 await test('optional native loader wraps missing modules', async () => {
