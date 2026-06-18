@@ -7,6 +7,7 @@
   "scripts": {
     "prepare-src": "node scripts/prepare-src.mjs",
     "build": "node scripts/build.mjs",
+    "audit:features": "node scripts/audit-features.mjs",
     "check": "tsc --noEmit",
     "test:build-safety": "node scripts/test-build-safety.mjs",
     "test:cli-e2e": "node scripts/test-cli-resume-e2e.mjs",

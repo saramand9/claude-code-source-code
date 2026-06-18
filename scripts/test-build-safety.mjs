@@ -210,6 +210,12 @@ await test('context collapse build gate is preserved but runtime-gated', async (
   const querySource = await readFile(join(BUILD, 'src/query.ts'), 'utf8')
   const toolsSource = await readFile(join(BUILD, 'src/tools.ts'), 'utf8')
   const commandsSource = await readFile(join(BUILD, 'src/commands.ts'), 'utf8')
+  const cliSource = await readFile(join(BUILD, 'src/entrypoints/cli.tsx'), 'utf8')
+  assert.match(
+    cliSource,
+    /if \(true && args\[0\] === '--dump-system-prompt'\)/,
+    'DUMP_SYSTEM_PROMPT should stay bundled',
+  )
   assert.match(
     querySource,
     /const contextCollapse = true\s+\?\s+\(require\('\.\/services\/contextCollapse\/index\.js'\)/,
@@ -245,6 +251,27 @@ await test('context collapse build gate is preserved but runtime-gated', async (
     /const reactiveCompact = false\s+\?\s+\(require\('\.\/services\/compact\/reactiveCompact\.js'\)/,
     'unrestored feature gates should still be compiled out',
   )
+})
+
+await test('dump system prompt fast path runs without a model request', async () => {
+  const output = execFileSync(
+    process.execPath,
+    [DIST_CLI, '--dump-system-prompt', '--model', 'sonnet'],
+    {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ANTHROPIC_API_KEY: '',
+        ANTHROPIC_AUTH_TOKEN: '',
+        ANTHROPIC_BASE_URL: '',
+      },
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  )
+  assert.match(output, /Claude Code/, 'system prompt should identify Claude Code')
+  assert.doesNotMatch(output, /Connection error|API error/i)
 })
 
 await test('context collapse runtime is loadable and conservative', async () => {

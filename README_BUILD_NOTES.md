@@ -25,7 +25,7 @@
 2. **混合**：处理 Bun 编译期能力
 
    - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
-   - **混合**：当前例外保留 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，但都不等同于官方完整实现。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，但都不等同于官方完整实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -67,7 +67,8 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE` 与 `HISTORY_SNIP`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 与 `DUMP_SYSTEM_PROMPT`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/audit-features.mjs` / `npm run audit:features` | 尝试修复/真实适配 | 统计 `src/` 中所有 `feature('...')` 调用、默认保留项、环境保留项和当前 stub manifest，作为后续 feature 修复清单。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
 | `@ant/claude-for-chrome-mcp` alias | mock/stub/降级 | 空 browser tools；server 创建时 fail-fast。 |
@@ -102,7 +103,7 @@
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP`。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - `@ant/claude-for-chrome-mcp` 在构建副本中生成为空 browser tools；server 创建时会 fail-fast。
 - 一批 feature-gated 内部模块会在 `build-src/` 中生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`，例如：
@@ -146,10 +147,11 @@ import { feature } from 'bun:bundle'
 ```text
 feature('...') -> false
 feature('CONTEXT_COLLAPSE') -> true
+feature('DUMP_SYSTEM_PROMPT') -> true
 feature('HISTORY_SNIP') -> true
 ```
 
-这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制。其它 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行。其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
@@ -157,7 +159,7 @@ feature('HISTORY_SNIP') -> true
 
 1. feature gate 替换仍是最大风险
 
-   除当前选择性保留的 `CONTEXT_COLLAPSE` 和 `HISTORY_SNIP` 外，这仍会关闭大量内部或实验功能，例如：
+   除当前选择性保留的 `CONTEXT_COLLAPSE`、`HISTORY_SNIP` 和 `DUMP_SYSTEM_PROMPT` 外，这仍会关闭大量内部或实验功能，例如：
 
    ```text
    KAIROS
@@ -725,6 +727,46 @@ git diff --check
 - `node --check dist\cli.js` 通过。
 - `git diff --check` 通过，仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
 
+## 2026-06-18 Feature gate 首批恢复记录
+
+本轮开始推进“各种 feature”修复，但不采用一次性全开的方式。原因是当前审计显示 `src/` 里仍有大量内部 gate，一次性保留会把私有包、内部服务、native 依赖和未补齐模块一起拉入构建，容易把 fail-fast 边界重新变成运行期崩溃。
+
+### 本轮尝试修复/真实适配
+
+- 新增 `scripts/audit-features.mjs` 和 `npm run audit:features`，可重复统计所有 `feature('...')` 调用、默认保留项、环境保留项和当前 `build-src/stub-manifest.json`。
+- `scripts/build.mjs` 默认保留 `DUMP_SYSTEM_PROMPT`，恢复 `node dist\cli.js --dump-system-prompt --model <model>` 快速路径。
+- `scripts/test-build-safety.mjs` 增加两类针对性验证：
+  - 构建副本中 `DUMP_SYSTEM_PROMPT` 没有被折叠成 `false`。
+  - 真实 `dist/cli.js --dump-system-prompt --model sonnet` 可以直接输出系统提示词，且不会触发 API/model 请求。
+
+### 本轮 mock/stub/降级说明
+
+- `npm run audit:features` 是审计工具，不代表清单里的 feature 已恢复。
+- `DUMP_SYSTEM_PROMPT` 只是显式 CLI 快速路径恢复，不影响普通 `-p`、REPL 或工具调用主路径。
+- 其它 feature gate 仍默认关闭；审计结果显示当前共有 90 个 feature、974 次 `feature(...)` 调用，后续需要逐项按“是否有源码、是否依赖私有服务、是否可测试”推进。
+
+### 本轮验证结果
+
+```text
+node --check scripts\audit-features.mjs
+npm run check
+npm run audit:features
+npm run build
+npm run test:build-safety
+node dist\cli.js --dump-system-prompt --model sonnet
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+npm run test:cli-e2e
+git diff --check
+```
+
+结果：
+
+- `npm run audit:features` 会列出 `CONTEXT_COLLAPSE`、`DUMP_SYSTEM_PROMPT`、`HISTORY_SNIP` 为 `preserved-default`。
+- `npm run test:build-safety` 通过，当前为 32/32 项，覆盖 `DUMP_SYSTEM_PROMPT` 的构建保留和真实 CLI 快速路径。
+- `node dist\cli.js --dump-system-prompt --model sonnet` 不需要真实 API key，也不连接当前代理或模型服务；smoke 检查命中了 `Claude Code` 文本。
+- `npm run check`、`node --check scripts\test-build-safety.mjs`、`node --check dist\cli.js`、`npm run test:cli-e2e` 和 `git diff --check` 均通过；`git diff --check` 仅提示 Windows 下 LF/CRLF 工作区换行转换警告。
+
 ## 构建和启动
 
 ```powershell
@@ -758,10 +800,12 @@ node .\dist\cli.js -p "hello" --max-turns 1
 
 ```text
 npm run check
+npm run audit:features
 npm run build
 npm start -- --version
 node dist\cli.js --help
 node dist\cli.js doctor --help
+node dist\cli.js --dump-system-prompt --model sonnet
 node dist\cli.js -p "<prompt>" --max-turns 1 --model <model>
 npm run test:build-safety
 npm run test:cli-e2e
@@ -774,6 +818,7 @@ fail-fast stub 默认导出和命名导出行为
 fail-fast stub 调用、构造、取属性和数值转换行为
 ContextCollapse 默认关闭、显式 opt-in、恢复状态和 CtxInspectTool 加载
 History Snip 构建保留、分段裁剪、目标 ID 裁剪、boundary replay、投影删除、工具对保护、SnipTool 和 force-snip 加载
+DUMP_SYSTEM_PROMPT 构建保留、真实 dist 快速路径输出、且不触发模型/API 请求
 Snip 后 transcript resume 过滤、parentUuid 重连、conversation chain 恢复、resume 入口恢复、session-id/continue 恢复、compact+Snip 叠加恢复，以及 recordTranscript 写侧去重接链
 真实 dist/cli.js 子进程 E2E：-p、--resume <session-id>、--continue 三段模型请求和 transcript 落盘恢复
 第三方代理文本化工具调用泄漏检测：`Calling: Read` + JSON 被识别为 tool_use 协议兼容错误，不自动执行工具
@@ -809,11 +854,12 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 31 项深度检查：
+`npm run test:build-safety` 当前覆盖 32 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
 - lazy tool export loader 对 default-only fail-fast stub 的回退行为。
+- `DUMP_SYSTEM_PROMPT` 在构建副本中被保留，真实 `dist/cli.js --dump-system-prompt --model sonnet` 能输出系统提示词，且不会触发 API/model 请求。
 - `CONTEXT_COLLAPSE` 在构建副本中被保留，但 prompt-too-long 兜底仍受 runtime gate 控制。
 - ContextCollapse 外部运行时默认关闭、projection no-op、恢复元数据、显式 opt-in 和 prompt-too-long withholding 行为。
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
@@ -852,7 +898,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 
 ## 当前风险边界
 
-当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
+当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
 不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、VerifyPlanExecution、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。
 
