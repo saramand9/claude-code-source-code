@@ -148,6 +148,61 @@ await test('stub manifest exists and covers all stub kinds', async () => {
   }
 })
 
+await test('protected namespace guard is implemented and conservative', async () => {
+  const protectedNamespaceEntry = manifest.entries.find(entry =>
+    String(entry.path ?? '').includes('protectedNamespace'),
+  )
+  assert.equal(protectedNamespaceEntry, undefined)
+
+  const output = await buildAndRunSnippet(
+    'protected-namespace-test',
+    `import { checkProtectedNamespace } from './src/utils/protectedNamespace.ts';
+const initialEnv = { ...process.env };
+const managedKeys = [
+  'ASL',
+  'ASL_LEVEL',
+  'CLAUDE_CODE_HOMESPACE',
+  'CLAUDE_CODE_K8S_NAMESPACE_PATH',
+  'CLAUDE_CODE_NAMESPACE',
+  'CLAUDE_CODE_OPEN_NAMESPACES',
+  'CLUSTER',
+  'COO_ASL',
+  'COO_CLUSTER',
+  'COO_CLUSTER_NAME',
+  'COO_NAMESPACE',
+  'COO_NAMESPACE_SECURITY_LEVEL',
+  'COO_RUNNING_ON_HOMESPACE',
+  'COO_SECURITY_LEVEL',
+  'KUBERNETES_NAMESPACE',
+  'KUBERNETES_SERVICE_HOST',
+  'NAMESPACE',
+  'POD_NAMESPACE',
+  'SECURITY_LEVEL',
+];
+function withEnv(values, expected, label) {
+  for (const key of managedKeys) delete process.env[key];
+  Object.assign(process.env, values);
+  process.env.CLAUDE_CODE_K8S_NAMESPACE_PATH = 'Z:/definitely/missing/namespace';
+  const actual = checkProtectedNamespace();
+  if (actual !== expected) {
+    throw new Error(label + ': expected ' + expected + ', got ' + actual);
+  }
+}
+withEnv({}, false, 'local');
+withEnv({ COO_RUNNING_ON_HOMESPACE: '1', COO_NAMESPACE: 'production' }, false, 'homespace');
+withEnv({ KUBERNETES_SERVICE_HOST: '10.0.0.1', COO_NAMESPACE: 'default' }, false, 'default namespace');
+withEnv({ KUBERNETES_SERVICE_HOST: '10.0.0.1', COO_NAMESPACE: 'production' }, true, 'production namespace');
+withEnv({ KUBERNETES_SERVICE_HOST: '10.0.0.1', COO_NAMESPACE: 'unknown-team' }, true, 'unknown namespace');
+withEnv({ KUBERNETES_SERVICE_HOST: '10.0.0.1', COO_NAMESPACE: 'default', COO_ASL: '3' }, true, 'asl3 override');
+withEnv({ COO_CLUSTER: 'cluster-a' }, true, 'cluster without namespace');
+withEnv({ KUBERNETES_SERVICE_HOST: '10.0.0.1', COO_NAMESPACE: 'research', CLAUDE_CODE_OPEN_NAMESPACES: 'research' }, false, 'configured open namespace');
+for (const key of managedKeys) delete process.env[key];
+Object.assign(process.env, initialEnv);
+console.log('protected namespace OK');`,
+  )
+  assert.equal(output, 'protected namespace OK')
+})
+
 await test('generated stubs are fail-fast for default exports', async () => {
   const mod = await import(pathToFileURL(join(BUILD, 'src/tools/REPLTool/REPLTool.js')).href)
   await assertThrowsMessage(

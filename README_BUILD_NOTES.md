@@ -88,6 +88,7 @@
 | `src/components/messages/SnipBoundaryMessage.tsx` | 尝试修复/真实适配 | UI 可渲染 snip 边界摘要，避免历史裁剪事件不可见。 |
 | `src/tools/VerifyPlanExecutionTool/*` | 混合 | `CLAUDE_CODE_VERIFY_PLAN=true` 时可加载、可进入工具池、可记录验证请求；不是官方后台 verifier。 |
 | `src/skills/bundled/verify/*` | 尝试修复/真实适配 | 补齐 verify bundled skill 文档和示例，避免继续由空文本 asset stub 代替。 |
+| `src/utils/protectedNamespace.ts` | 混合 | 补齐受保护命名空间检查的外部保守实现；未知 k8s/COO 环境默认按 protected 处理。 |
 
 ## 尝试修复/真实适配
 
@@ -101,6 +102,7 @@
 - 验证报告模板的数据校验、过滤、搜索和后置清理逻辑。
 - History Snip 的高可用分段裁剪、目标 ID 裁剪、投影删除、工具对保护、SnipTool 和内部 force-snip 命令加载路径。
 - VerifyPlanExecution 外部保守工具加载路径、计划退出后的验证提示 gate、pending plan verification 状态记录，以及 verify bundled skill 文档资产。
+- `protectedNamespace` 外部保守运行时，避免 `USER_TYPE=ant` 或内部遥测路径触发 fail-fast stub。
 
 ## mock/stub/降级
 
@@ -117,8 +119,7 @@
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
-  - `utils/protectedNamespace`
-- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool` 和 bundled verify skill 文档资产，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
+- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产和 `utils/protectedNamespace`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
   - 不把历史消息投影成 `<collapsed id="...">` 占位。
@@ -859,7 +860,7 @@ verify bundled skill 文档资产不再是空文本 stub
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 35 项深度检查：
+`npm run test:build-safety` 当前覆盖 36 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -870,6 +871,7 @@ verify bundled skill 文档资产不再是空文本 stub
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
 - `VerifyPlanExecutionTool` 默认关闭、`CLAUDE_CODE_VERIFY_PLAN=true` 后进入工具池、调用后只记录请求并返回 `external-conservative` / `recorded_unavailable`，不会伪造官方后台验证结果。
 - verify bundled skill 的 `SKILL.md`、CLI 示例和 server 示例都是真实文本资产，不再由空字符串 asset stub 代替。
+- `protectedNamespace` 不再由 fail-fast stub 代替；测试覆盖本地无信号、homespace、开放命名空间、未知命名空间、production 命名空间、ASL3 override 和只有 cluster 信号的保守路径。
 - ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
 - History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
@@ -983,11 +985,51 @@ node --check dist\cli.js
 - `npm run test:build-safety` 通过，当前为 35/35 项。
 - VerifyPlanExecution 专项测试覆盖默认关闭、显式 env opt-in、工具池加载、调用后的 app state 更新、工具结果序列化和“非官方 verifier”警告。
 
+## 2026-06-18 protectedNamespace 外部保守版修复
+
+本轮继续推进未完成 feature，选择 `utils/protectedNamespace`。它原本只有 `.d.ts` 类型占位，`envUtils.isInProtectedNamespace()` 在 `USER_TYPE=ant` 分支会动态加载 `./protectedNamespace.js`，当前构建只能生成 fail-fast stub。虽然外部用户默认不会触发这个分支，但内部遥测、权限事件和 bridge 事件会读取该值；一旦用户误设或继承 `USER_TYPE=ant`，这里会从“返回一个保守布尔值”变成运行期异常。
+
+### 本轮真实修复
+
+- 删除 `src/utils/protectedNamespace.d.ts` 类型占位，新增 `src/utils/protectedNamespace.ts` 真实实现。
+- 实现 `checkProtectedNamespace()`：
+  - 没有 k8s/COO 信号时按本地环境处理，返回 `false`。
+  - `COO_RUNNING_ON_HOMESPACE=1` 或 `CLAUDE_CODE_HOMESPACE=1` 返回 `false`。
+  - `default`、`ts`、`dev`、`test`、`sandbox` 等开放命名空间返回 `false`。
+  - `production`、`stage`、`protected`、`secure`、`sensitive`、`asl3+`、`boron` 等命名空间返回 `true`。
+  - 只有 cluster 信号但没有 namespace，或 namespace 未知时返回 `true`。
+  - 支持 `CLAUDE_CODE_OPEN_NAMESPACES` 追加外部可控开放命名空间，便于本地/测试环境显式放行。
+- `scripts/test-build-safety.mjs` 新增 protectedNamespace 专项，确认 manifest 不再包含该 stub，并覆盖上述判断路径。
+
+### 本轮 mock/stub/风险说明
+
+- 这是外部保守实现，不是 Anthropic 内部真实 allowlist。
+- 风险取向是宁可把未知 k8s/COO 环境判为 protected，也不把敏感环境误判为 unprotected。
+- 如果某个真实内部开放 namespace 不在默认列表里，需要通过 `CLAUDE_CODE_OPEN_NAMESPACES` 显式追加，或者后续补充更准确的公开规则。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+npm run audit:features
+```
+
+结果：
+
+- `npm run build` 通过，stub manifest 从 10 项降到 9 项，`utils/protectedNamespace` 不再在 manifest 中。
+- `npm run test:build-safety` 通过，当前为 36/36 项。
+- `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback 和工具链回归未受影响。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 
