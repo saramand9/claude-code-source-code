@@ -137,7 +137,6 @@ await test('stub manifest exists and records current stub kinds', async () => {
 
   const kinds = new Set(manifest.entries.map(entry => entry.kind))
   assert(kinds.has('private-package-stub'), 'missing private-package-stub')
-  assert(kinds.has('feature-gated-module-stub'), 'missing feature-gated-module-stub')
   assert(!kinds.has('empty-asset-stub'), 'empty asset stubs should be restored or made fail-fast')
 
   for (const entry of manifest.entries) {
@@ -299,21 +298,27 @@ console.log('ant callouts OK');`,
   assert.match(output, /ant callouts OK$/)
 })
 
-await test('generated stubs are fail-fast for default exports', async () => {
-  const mod = await import(pathToFileURL(join(BUILD, 'src/tools/REPLTool/REPLTool.js')).href)
+await test('generated feature stubs are fail-fast for default exports when present', async () => {
+  const entry = manifest.entries.find(
+    item => item.kind === 'feature-gated-module-stub' && item.path,
+  )
+  if (!entry) return
+
+  const mod = await import(pathToFileURL(join(ROOT, entry.path)).href)
+  const pathPattern = new RegExp(escapeRegExp(String(entry.path).replace(/^build-src\/src\//, '').replace(/\.js$/, '.js#default')))
   await assertThrowsMessage(
     () => mod.default(),
-    /Feature-gated module unavailable.*REPLTool\/REPLTool\.js#default/,
+    pathPattern,
     'default export call',
   )
   await assertThrowsMessage(
     () => new mod.default(),
-    /Feature-gated module unavailable.*REPLTool\/REPLTool\.js#default/,
+    pathPattern,
     'default export constructor',
   )
   await assertThrowsMessage(
     () => mod.default.someProperty,
-    /Feature-gated module unavailable.*REPLTool\/REPLTool\.js#default/,
+    pathPattern,
     'default export property access',
   )
 })
@@ -338,27 +343,78 @@ await test('generated stubs are fail-fast for missing named exports', async () =
   )
 })
 
-await test('lazy tool export loader falls back to fail-fast default stubs', async () => {
+await test('lazy tool export loader prefers named exports and falls back to default', async () => {
   const output = await buildAndRunSnippet(
     'tool-loader-fallback-test',
     `import { loadToolExport } from './src/utils/toolModuleLoader.ts';
-const repl = await import('./src/tools/REPLTool/REPLTool.js');
-const tool = loadToolExport(
-  repl,
-  'REPLTool',
-  './src/tools/REPLTool/REPLTool.js',
-);
-let failedFast = false;
-try {
-  tool.name;
-} catch (error) {
-  failedFast = String(error.message).includes('Feature-gated module unavailable') &&
-    String(error.message).includes('#default');
+const named = { name: 'NamedTool' };
+const fallback = { name: 'DefaultTool' };
+if (loadToolExport({ REPLTool: named, default: fallback }, 'REPLTool', 'named').name !== 'NamedTool') {
+  throw new Error('named export should win');
 }
-if (!failedFast) throw new Error('expected default tool stub to fail fast');
+if (loadToolExport({ default: fallback }, 'MissingTool', 'fallback').name !== 'DefaultTool') {
+  throw new Error('default export should be fallback');
+}
 console.log('tool loader fallback OK');`,
   )
   assert.equal(output, 'tool loader fallback OK')
+})
+
+await test('ant-only REPL/background PR/agents-platform fallbacks are loadable', async () => {
+  const antStubEntries = manifest.entries.filter(entry =>
+    /(?:REPLTool|SuggestBackgroundPRTool|commands\/agents-platform)/.test(
+      String(entry.path ?? ''),
+    ),
+  )
+  assert.deepEqual(antStubEntries, [])
+  const featureStubEntries = manifest.entries.filter(
+    entry => entry.kind === 'feature-gated-module-stub',
+  )
+  assert.deepEqual(featureStubEntries, [])
+
+  const output = await buildAndRunSnippet(
+    'ant-only-tool-command-fallback-test',
+    `const initialEnv = { ...process.env };
+process.env.USER_TYPE = 'ant';
+process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+delete process.env.CLAUDE_CODE_REPL;
+delete process.env.CLAUDE_REPL_MODE;
+
+const { REPLTool } = await import('./src/tools/REPLTool/REPLTool.ts');
+const { SuggestBackgroundPRTool } = await import('./src/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.ts');
+const { default: agentsPlatform } = await import('./src/commands/agents-platform/index.ts');
+const { getTools } = await import('./src/tools.ts');
+const { getEmptyToolPermissionContext } = await import('./src/Tool.ts');
+
+if (REPLTool.isEnabled()) throw new Error('REPLTool should be disabled');
+if (SuggestBackgroundPRTool.isEnabled()) throw new Error('SuggestBackgroundPRTool should be disabled');
+if (agentsPlatform.isEnabled?.() !== false || agentsPlatform.isHidden !== true) {
+  throw new Error('agents platform command should be hidden and disabled');
+}
+const replResult = await REPLTool.call({});
+if (replResult.data.status !== 'unavailable') throw new Error('bad REPL result');
+const prResult = await SuggestBackgroundPRTool.call({});
+if (prResult.data.status !== 'unavailable') throw new Error('bad SuggestBackgroundPR result');
+
+const tools = getTools(getEmptyToolPermissionContext());
+const names = tools.map(tool => tool.name);
+for (const required of ['Read', 'Bash', 'Edit']) {
+  if (!names.includes(required)) {
+    throw new Error('missing primitive tool when REPL fallback is disabled: ' + required + ' in ' + names.join(','));
+  }
+}
+if (names.includes('REPL') || names.includes('SuggestBackgroundPR')) {
+  throw new Error('disabled ant-only tools should not be exposed: ' + names.join(','));
+}
+process.env = initialEnv;
+console.log('ant-only fallbacks OK');`,
+    {
+      banner: {
+        js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      },
+    },
+  )
+  assert.equal(output, 'ant-only fallbacks OK')
 })
 
 await test('devtools and Tungsten external fallbacks are loadable', async () => {

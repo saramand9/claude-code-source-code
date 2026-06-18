@@ -354,7 +354,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // --bare + REPL mode: REPL wraps Bash/Read/Edit/etc inside the VM, so
     // return REPL instead of the raw primitives. Matches the non-bare path
     // below which also hides REPL_ONLY_TOOLS when REPL is enabled.
-    if (isReplModeEnabled() && REPLTool) {
+    if (isReplModeEnabled() && REPLTool?.isEnabled()) {
       const replSimple: Tool[] = [REPLTool]
       if (
         feature('COORDINATOR_MODE') &&
@@ -405,7 +405,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // They're still accessible inside REPL via the VM context.
   if (isReplModeEnabled()) {
     const replEnabled = allowedTools.some(tool =>
-      toolMatchesName(tool, REPL_TOOL_NAME),
+      toolMatchesName(tool, REPL_TOOL_NAME) && tool.isEnabled(),
     )
     if (replEnabled) {
       allowedTools = allowedTools.filter(
