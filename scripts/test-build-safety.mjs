@@ -1162,6 +1162,84 @@ console.log('permission sync rules OK');`,
   assert.equal(output, 'permission sync rules OK')
 })
 
+await test('PowerShell path constraints respect path-specific ask rules', async () => {
+  const output = await buildAndRunSnippet(
+    'powershell-path-rules-test',
+    `import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { parsePowerShellCommand } from './src/utils/powershell/parser.ts';
+import { checkPathConstraints } from './src/tools/PowerShellTool/pathValidation.ts';
+
+process.env.NODE_ENV = 'test';
+
+const artifactDir = join('build-src', 'test-artifacts');
+await mkdir(artifactDir, { recursive: true });
+const readPath = join(artifactDir, 'powershell-path-read-rule.txt').replace(/\\\\/g, '/');
+const writePath = join(artifactDir, 'powershell-path-write-rule.txt').replace(/\\\\/g, '/');
+await writeFile(readPath, 'read fixture', 'utf8');
+await writeFile(writePath, 'write fixture', 'utf8');
+
+function makeContext({ deny = [], ask = [] } = {}) {
+  return {
+    mode: 'acceptEdits',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {
+      cliArg: ['PowerShell(Get-Content:*)', 'PowerShell(Set-Content:*)'],
+    },
+    alwaysDenyRules: {
+      userSettings: deny,
+    },
+    alwaysAskRules: {
+      userSettings: ask,
+    },
+    isBypassPermissionsModeAvailable: false,
+  };
+}
+
+async function check(command, context) {
+  const parsed = await parsePowerShellCommand(command);
+  if (!parsed.valid) {
+    if (parsed.errors.some(error => error.errorId === 'NoPowerShell')) {
+      return null;
+    }
+    throw new Error('PowerShell parser failed: ' + JSON.stringify(parsed.errors));
+  }
+  return checkPathConstraints({ command }, parsed, context, false);
+}
+
+function assertBehavior(result, behavior, ruleBehavior, label) {
+  if (result === null) return;
+  if (result.behavior !== behavior) {
+    throw new Error(label + ' expected ' + behavior + ', got ' + JSON.stringify(result));
+  }
+  if (result.decisionReason?.type !== 'rule') {
+    throw new Error(label + ' should include rule decision: ' + JSON.stringify(result));
+  }
+  if (result.decisionReason.rule.ruleBehavior !== ruleBehavior) {
+    throw new Error(label + ' should preserve ' + ruleBehavior + ' rule: ' + JSON.stringify(result.decisionReason.rule));
+  }
+}
+
+const readCommand = 'Get-Content ' + readPath;
+const writeCommand = 'Set-Content -Path ' + writePath + ' -Value updated';
+
+const readDeny = await check(readCommand, makeContext({ deny: ['Read(' + readPath + ')'] }));
+assertBehavior(readDeny, 'deny', 'deny', 'read deny');
+
+const readAsk = await check(readCommand, makeContext({ ask: ['Read(' + readPath + ')'] }));
+assertBehavior(readAsk, 'ask', 'ask', 'read ask');
+
+const writeDeny = await check(writeCommand, makeContext({ deny: ['Edit(' + writePath + ')'] }));
+assertBehavior(writeDeny, 'deny', 'deny', 'write deny');
+
+const writeAsk = await check(writeCommand, makeContext({ ask: ['Edit(' + writePath + ')'] }));
+assertBehavior(writeAsk, 'ask', 'ask', 'write ask');
+
+console.log('powershell path rules OK');`,
+  )
+  assert.equal(output, 'powershell path rules OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

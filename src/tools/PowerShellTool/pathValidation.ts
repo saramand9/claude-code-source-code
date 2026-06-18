@@ -53,6 +53,7 @@ type FileOperationType = 'read' | 'write' | 'create'
 
 type PathCheckResult = {
   allowed: boolean
+  ruleBehavior?: 'ask' | 'deny'
   decisionReason?: import('../../utils/permissions/PermissionResult.js').PermissionDecisionReason
 }
 
@@ -878,6 +879,7 @@ function isPathAllowed(
   if (denyRule !== null) {
     return {
       allowed: false,
+      ruleBehavior: 'deny',
       decisionReason: { type: 'rule', rule: denyRule },
     }
   }
@@ -911,6 +913,23 @@ function isPathAllowed(
           classifierApprovable: safetyCheck.classifierApprovable,
         },
       }
+    }
+  }
+
+  // 2.8. Check ask rules before implicit working-directory, sandbox, or allow
+  // rules. This mirrors Read/Edit tool precedence: an explicit path-specific
+  // ask must override default readable cwd and acceptEdits write access.
+  const askRule = matchingRuleForInput(
+    resolvedPath,
+    context,
+    permissionType,
+    'ask',
+  )
+  if (askRule !== null) {
+    return {
+      allowed: false,
+      ruleBehavior: 'ask',
+      decisionReason: { type: 'rule', rule: askRule },
     }
   }
 
@@ -1046,6 +1065,7 @@ function validatePath(
       return {
         allowed: false,
         resolvedPath: denyHit.resolvedPath,
+        ruleBehavior: 'deny',
         decisionReason: { type: 'rule', rule: denyHit.rule },
       }
     }
@@ -1081,6 +1101,7 @@ function validatePath(
       return {
         allowed: false,
         resolvedPath: denyHit.resolvedPath,
+        ruleBehavior: 'deny',
         decisionReason: { type: 'rule', rule: denyHit.rule },
       }
     }
@@ -1192,6 +1213,7 @@ function validatePath(
       return {
         allowed: result.allowed,
         resolvedPath,
+        ruleBehavior: result.ruleBehavior,
         decisionReason: result.decisionReason,
       }
     }
@@ -1227,6 +1249,7 @@ function validatePath(
       return {
         allowed: false,
         resolvedPath,
+        ruleBehavior: 'deny',
         decisionReason: { type: 'rule', rule: denyRule },
       }
     }
@@ -1259,6 +1282,7 @@ function validatePath(
   return {
     allowed: result.allowed,
     resolvedPath,
+    ruleBehavior: result.ruleBehavior,
     decisionReason: result.decisionReason,
   }
 }
@@ -1736,12 +1760,12 @@ function checkPathConstraintsForStatement(
         return dangerousRemovalDeny(filePath)
       }
 
-      const { allowed, resolvedPath, decisionReason } = validatePath(
-        filePath,
-        cwd,
-        toolPermissionContext,
-        operationType,
-      )
+      const {
+        allowed,
+        resolvedPath,
+        decisionReason,
+        ruleBehavior,
+      } = validatePath(filePath, cwd, toolPermissionContext, operationType)
 
       // Also check the resolved path — catches symlinks that resolve to a
       // protected location.
@@ -1762,7 +1786,10 @@ function checkPathConstraintsForStatement(
             ? decisionReason.reason
             : `${canonical} targeting '${resolvedPath}' was blocked. For security, Claude Code may only access files in the allowed working directories for this session: ${dirListStr}.`
 
-        if (decisionReason?.type === 'rule') {
+        if (
+          decisionReason?.type === 'rule' &&
+          ruleBehavior === 'deny'
+        ) {
           return {
             behavior: 'deny',
             message,
@@ -1851,12 +1878,12 @@ function checkPathConstraintsForStatement(
           return dangerousRemovalDeny(filePath)
         }
 
-        const { allowed, resolvedPath, decisionReason } = validatePath(
-          filePath,
-          cwd,
-          toolPermissionContext,
-          operationType,
-        )
+        const {
+          allowed,
+          resolvedPath,
+          decisionReason,
+          ruleBehavior,
+        } = validatePath(filePath, cwd, toolPermissionContext, operationType)
 
         if (isRemoval && isDangerousRemovalPath(resolvedPath)) {
           return dangerousRemovalDeny(resolvedPath)
@@ -1875,7 +1902,10 @@ function checkPathConstraintsForStatement(
               ? decisionReason.reason
               : `${canonical} targeting '${resolvedPath}' was blocked. For security, Claude Code may only access files in the allowed working directories for this session: ${dirListStr}.`
 
-          if (decisionReason?.type === 'rule') {
+          if (
+            decisionReason?.type === 'rule' &&
+            ruleBehavior === 'deny'
+          ) {
             return {
               behavior: 'deny',
               message,
@@ -1943,12 +1973,12 @@ function checkPathConstraintsForStatement(
           if (!redir.target) continue
           if (isNullRedirectionTarget(redir.target)) continue
 
-          const { allowed, resolvedPath, decisionReason } = validatePath(
-            redir.target,
-            cwd,
-            toolPermissionContext,
-            'create',
-          )
+          const {
+            allowed,
+            resolvedPath,
+            decisionReason,
+            ruleBehavior,
+          } = validatePath(redir.target, cwd, toolPermissionContext, 'create')
 
           if (!allowed) {
             const workingDirs = Array.from(
@@ -1962,7 +1992,10 @@ function checkPathConstraintsForStatement(
                 ? decisionReason.reason
                 : `Output redirection to '${resolvedPath}' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: ${dirListStr}.`
 
-            if (decisionReason?.type === 'rule') {
+            if (
+              decisionReason?.type === 'rule' &&
+              ruleBehavior === 'deny'
+            ) {
               return {
                 behavior: 'deny',
                 message,
@@ -1996,12 +2029,12 @@ function checkPathConstraintsForStatement(
       if (!redir.target) continue
       if (isNullRedirectionTarget(redir.target)) continue
 
-      const { allowed, resolvedPath, decisionReason } = validatePath(
-        redir.target,
-        cwd,
-        toolPermissionContext,
-        'create',
-      )
+      const {
+        allowed,
+        resolvedPath,
+        decisionReason,
+        ruleBehavior,
+      } = validatePath(redir.target, cwd, toolPermissionContext, 'create')
 
       if (!allowed) {
         const workingDirs = Array.from(
@@ -2015,7 +2048,10 @@ function checkPathConstraintsForStatement(
             ? decisionReason.reason
             : `Output redirection to '${resolvedPath}' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: ${dirListStr}.`
 
-        if (decisionReason?.type === 'rule') {
+        if (
+          decisionReason?.type === 'rule' &&
+          ruleBehavior === 'deny'
+        ) {
           return {
             behavior: 'deny',
             message,

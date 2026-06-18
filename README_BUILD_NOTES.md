@@ -2136,7 +2136,7 @@ npm run test:cli-e2e
 ### 本轮 mock/stub/风险说明
 
 - mock server 只模拟 provider 的 `Read` / `NotebookEdit` `tool_use`；settings 加载、`Edit(path)` 匹配、read-before-write 状态、NotebookEdit 权限拦截、tool_result 回传和磁盘不变断言都走真实 `dist\cli.js`。
-- 当前覆盖的是 user settings 中 `NotebookEdit` 复用 `Edit(path)` deny/ask 的路径级规则。PowerShell 路径抽取规则、交互权限弹窗拒绝和 hook 拒绝仍需后续覆盖。
+- 当前覆盖的是 user settings 中 `NotebookEdit` 复用 `Edit(path)` deny/ask 的路径级规则。PowerShell 路径抽取规则见后续章节；交互权限弹窗拒绝和 hook 拒绝仍需后续覆盖。
 
 ### 本轮验证结果
 
@@ -2149,6 +2149,41 @@ npm run test:cli-e2e
 
 - `node --check scripts\test-cli-resume-e2e.mjs` 通过。
 - `npm run test:cli-e2e` 通过，新增输出 `ok - NotebookEdit respects Edit path-specific deny rules` 和 `ok - NotebookEdit respects Edit path-specific ask rules`。
+
+## 2026-06-19 PowerShell path-specific ask 规则修复
+
+本轮继续收窄 PowerShell 路径权限风险。`pathValidation.ts` 已能从 `Get-Content` / `Set-Content` 等 cmdlet 抽取文件路径并检查 `Read(...)` / `Edit(...)` deny，但 ask 规则没有在隐式工作区允许和 `acceptEdits` 之前参与判断，导致路径级 ask 可能被绕过。
+
+### 本轮真实修复
+
+- `src/tools/PowerShellTool/pathValidation.ts`
+  - `isPathAllowed()` 新增路径级 ask 规则检查，位置在默认工作区读权限、sandbox allow、`acceptEdits` 和 allow 规则之前。
+  - 路径检查结果新增 `ruleBehavior`，让上层区分 ask/deny：deny 仍直接返回 `deny`，ask 则进入原有 `firstAsk` 聚合，不再被误当成 deny，也不会落到 passthrough。
+  - `validatePath()` 对普通路径、glob traversal 路径、provider/backtick deny 猜测路径透传 `ruleBehavior`，避免 rule 命中在上层丢失行为语义。
+- `scripts/test-build-safety.mjs`
+  - 新增 build-safety 回归，解析真实 PowerShell AST 后调用 `checkPathConstraints()`。
+  - 覆盖 `Get-Content <path>` 命中 `Read(path)` deny/ask，以及 `Set-Content -Path <path>` 命中 `Edit(path)` deny/ask。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是 mock parser。测试使用真实 PowerShell parser 输出的 AST，再走真实 `checkPathConstraints()`；不执行 PowerShell 命令，因此没有文件写入副作用。
+- 当前覆盖的是 PowerShell 静态路径抽取后的 `Read(path)` / `Edit(path)` deny/ask 优先级。交互权限弹窗拒绝、hook 拒绝、复杂 provider/runtime 动态路径仍需后续覆盖。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，重新生成 `build-src` / `dist\cli.js` 用于 build-safety 验证。
+- `node --check scripts\test-build-safety.mjs` 通过。
+- `npm run test:build-safety` 通过，新增输出 `ok - PowerShell path constraints respect path-specific ask rules`。
 
 ## 2026-06-18 NotebookEdit 损坏 JSON 拒绝 E2E
 
@@ -2192,9 +2227,9 @@ History Snip 的当前风险也要单独看待：它已不再是完全关闭、s
 
 Resume/transcript 的当前风险：本轮已覆盖 Snip 多段删除后的 JSONL 读侧恢复、`loadConversationForResume(..., jsonlPath)` / `loadTranscriptFromFile()` 恢复入口、`loadConversationForResume(sessionId, undefined)` / `loadConversationForResume(undefined, undefined)` session 恢复入口、compact preservedSegment 与 Snip 删除叠加恢复、`recordTranscript()` 写侧重复持久化、boundary 接链和 tail 接链，以及真实 `dist/cli.js` 子进程在本地 Anthropic-compatible mock server 下的 `-p` / `--resume <session-id>` / `--continue` 三段恢复。第三方代理把工具调用泄漏成普通文本的场景已能识别并返回明确错误，但仍不会自动转换为真实工具调用。结构化工具调用已覆盖标准 `tool_use(Read)`、多段 `input_json_delta`、stop reason 错报为 `end_turn`、缺失 `content_block_stop` 但 stream 正常结束、同一 assistant response 内两个 Read `tool_use` 交错 delta/反向 stop、simple 主路径中的 assistant 文本 + Read + Bash 混合工具 block、同一 assistant response 内三个工具 block 交错、显式授权下的副作用型 Bash、Bash content-specific deny/ask、project Bash content-specific deny/ask、simple 主路径中的 `Read -> Edit -> final` 写入工具链、Edit 未读直接拒绝、Edit 读后外部修改拒绝、Edit deny-list 禁用、Edit path-specific deny/ask、Edit `replace_all: true` 全量替换、Edit 多匹配默认拒绝、Edit `old_string: ""` 创建新文件、Edit CRLF 保留、Edit 混合 CRLF/LF 保留、Edit UTF-16LE BOM 保留、Edit UTF-8 BOM 保留、bare/simple 显式 `Write` 创建文件路径、Write CRLF 创建文件路径、Write 混合 CRLF/LF 创建文件路径、bare/simple 显式 `Read -> Write(existing file) -> final` 覆盖已有文件路径、Write UTF-16LE BOM 覆盖、Write UTF-8 BOM 覆盖、Write 未读直接覆盖拒绝、Write 读后外部修改拒绝、Write deny-list 禁用、Write path-specific Edit deny/ask、user settings Write deny、project settings Write deny、managed-only 权限规则忽略 CLI Write allow、bare/simple 显式 `Read -> NotebookEdit(replace) -> final` notebook 替换 cell 路径、NotebookEdit `insert -> delete` 路径、NotebookEdit 缺失 cell 拒绝路径、NotebookEdit 损坏 JSON 拒绝路径、NotebookEdit 超大文件拒绝路径、NotebookEdit 未读直接编辑拒绝、NotebookEdit 读后外部修改拒绝、NotebookEdit deny-list 禁用，以及 NotebookEdit `cell-N` markdown replace。Streaming 损坏恢复已覆盖 `content_block_delta` 早于 `content_block_start` 时切换到 non-streaming fallback 的路径。进程中断读侧恢复已覆盖尾部只有 user、尾部孤立 `tool_use` 两种场景。仍未覆盖的风险是：真实外部 provider 网络、更复杂的第三方代理 streaming 事件字段差异、更大规模多工具并发、交互权限弹窗拒绝、hook 拒绝、Read/NotebookEdit/PowerShell 等其它 content-specific 规则、非 simple 全量工具池的复杂混合、工具执行过程中产生部分副作用后被强杀的幂等性，以及跨 provider streaming 中断恢复。
 
-补充：`Read(path)` user settings deny/ask 与 `NotebookEdit` 复用 `Edit(path)` deny/ask 已在后续 2026-06-19 章节覆盖；当前剩余的 content-specific 权限风险主要收敛为 PowerShell 路径抽取规则、交互权限弹窗拒绝和 hook 拒绝。
+补充：`Read(path)` user settings deny/ask、`NotebookEdit` 复用 `Edit(path)` deny/ask、以及 PowerShell 静态路径抽取后的 `Read(path)` / `Edit(path)` deny/ask 优先级已在后续 2026-06-19 章节覆盖；当前剩余的 content-specific 权限风险主要收敛为交互权限弹窗拒绝、hook 拒绝和复杂 provider/runtime 动态路径。
 
-NotebookEdit 大文件保护的当前风险：`NotebookEdit` 现在会在解析 JSON 和 file history 之前按 `Read` 的 size limit 做 stat 级拒绝；真实 CLI E2E 已覆盖 Read 成功后 notebook 被替换成 oversized 合法 JSON 且 mtime 保持不变时，NotebookEdit 返回 too-large 错误并保持文件不变。复杂并发编辑、hook 拒绝、PowerShell 等其它 content-specific 规则、强杀恢复仍需后续覆盖。
+NotebookEdit 大文件保护的当前风险：`NotebookEdit` 现在会在解析 JSON 和 file history 之前按 `Read` 的 size limit 做 stat 级拒绝；真实 CLI E2E 已覆盖 Read 成功后 notebook 被替换成 oversized 合法 JSON 且 mtime 保持不变时，NotebookEdit 返回 too-large 错误并保持文件不变。复杂并发编辑、hook 拒绝、复杂 provider/runtime 动态路径、强杀恢复仍需后续覆盖。
 
 二进制写入保护的当前风险：普通文本 `Read` 现在会对未知扩展文件做内容 sniff，明显二进制内容会被拒绝，并且不会建立后续 `Write` 覆盖资格；真实 CLI E2E 已覆盖无扩展二进制文件的 `Read` 拒绝、同路径 `Write` 继续被读后写保护拒绝，以及原始字节不变。带 UTF-16LE BOM 的文本为兼容现有编码保留流程仍允许通过；其它无 BOM 多字节文本如果被误判为二进制，需要后续专门编码读取支持。
 
