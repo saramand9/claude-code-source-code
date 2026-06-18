@@ -185,6 +185,13 @@ const WebBrowserTool = feature('WEB_BROWSER_TOOL')
       './tools/WebBrowserTool/WebBrowserTool.js',
     )
   : null
+const DiscoverSkillsTool = feature('EXPERIMENTAL_SKILL_SEARCH')
+  ? loadToolExport(
+      require('./tools/DiscoverSkillsTool/DiscoverSkillsTool.js'),
+      'DiscoverSkillsTool',
+      './tools/DiscoverSkillsTool/DiscoverSkillsTool.js',
+    )
+  : null
 const coordinatorModeModule = feature('COORDINATOR_MODE')
   ? (require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js'))
   : null
@@ -289,6 +296,7 @@ export function getAllBaseTools(): Tools {
     WebSearchTool,
     TaskStopTool,
     AskUserQuestionTool,
+    ...(DiscoverSkillsTool ? [DiscoverSkillsTool] : []),
     SkillTool,
     EnterPlanModeTool,
     ...(process.env.USER_TYPE === 'ant' ? [ConfigTool] : []),

@@ -2004,6 +2004,116 @@ await test('generated build has no MCP skill variable-path requires', async () =
   assert.doesNotMatch(text, /__require\(\s*mcpSkillsModulePath/)
 })
 
+await test('skill search is preserved and wired into the tool pool', async () => {
+  const text = await readFile(DIST_CLI, 'utf8')
+  assert.match(text, /DiscoverSkills/, 'dist should include DiscoverSkills when skill search is preserved')
+  assert.doesNotMatch(text, /services\/skillSearch\/localSearch\.d\.ts/)
+
+  const output = await buildAndRunSnippet(
+    'skill-search-tool-pool-test',
+    `import { getTools } from './src/tools.ts';
+import { getEmptyToolPermissionContext } from './src/Tool.ts';
+import { DISCOVER_SKILLS_TOOL_NAME } from './src/tools/DiscoverSkillsTool/prompt.ts';
+import { isSkillSearchEnabled } from './src/services/skillSearch/featureCheck.ts';
+delete process.env.CLAUDE_CODE_DISABLE_SKILL_SEARCH;
+delete process.env.DISABLE_SKILL_SEARCH;
+delete process.env.CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH;
+if (!isSkillSearchEnabled()) throw new Error('skill search should be enabled by default');
+process.env.CLAUDE_CODE_DISABLE_SKILL_SEARCH = '1';
+if (isSkillSearchEnabled()) throw new Error('disable env should turn skill search off');
+delete process.env.CLAUDE_CODE_DISABLE_SKILL_SEARCH;
+const names = getTools(getEmptyToolPermissionContext()).map(tool => tool.name);
+if (!names.includes(DISCOVER_SKILLS_TOOL_NAME)) {
+  throw new Error('DiscoverSkills missing from tool pool: ' + names.join(','));
+}
+console.log('skill search tool pool OK');`,
+  )
+  assert.equal(output, 'skill search tool pool OK')
+})
+
+await test('local skill search and DiscoverSkills surface matching MCP skills', async () => {
+  const output = await buildAndRunSnippet(
+    'skill-search-runtime-test',
+    `import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+process.env.CLAUDE_CONFIG_DIR = join(process.cwd(), 'build-src', 'test-artifacts', 'skill-search-config');
+await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+const { enableConfigs } = await import('./src/utils/config.ts');
+enableConfigs();
+const { searchSkillIndex, clearSkillIndexCache } = await import('./src/services/skillSearch/localSearch.ts');
+const { getTurnZeroSkillDiscovery, startSkillDiscoveryPrefetch } = await import('./src/services/skillSearch/prefetch.ts');
+const { DiscoverSkillsTool } = await import('./src/tools/DiscoverSkillsTool/DiscoverSkillsTool.ts');
+const fakeSkill = {
+  type: 'prompt',
+  name: 'mcp:alpha-observability',
+  description: 'Inspect alpha observability telemetry pipelines',
+  whenToUse: 'Use for frobnicate latency traces and alpha metrics review',
+  progressMessage: 'Loading alpha skill',
+  contentLength: 10,
+  source: 'mcp',
+  loadedFrom: 'mcp',
+  getPromptForCommand: async () => [],
+};
+const appState = { mcp: { commands: [fakeSkill] } };
+const context = {
+  discoveredSkillNames: new Set(),
+  getAppState: () => appState,
+  setAppState: () => {},
+  options: { tools: [], commands: [], mainLoopModel: 'claude-sonnet-4-6' },
+};
+clearSkillIndexCache();
+const direct = await searchSkillIndex(process.cwd(), 'frobnicate telemetry alpha', {
+  extraCommands: [fakeSkill],
+  maxResults: 3,
+});
+if (direct[0]?.name !== fakeSkill.name) {
+  throw new Error('direct search missed fake skill: ' + direct.map(result => result.name).join(','));
+}
+const clamped = await searchSkillIndex(process.cwd(), 'frobnicate telemetry alpha', {
+  extraCommands: [fakeSkill],
+  maxResults: -10,
+});
+if (clamped[0]?.name !== fakeSkill.name) {
+  throw new Error('negative maxResults should clamp to at least one result');
+}
+const discovered = await getTurnZeroSkillDiscovery('Need frobnicate latency telemetry', [], context);
+if (discovered.length !== 1 || discovered[0].type !== 'skill_discovery') {
+  throw new Error('expected one skill discovery attachment');
+}
+if (discovered[0].skills[0]?.name !== fakeSkill.name) {
+  throw new Error('wrong discovered skill: ' + JSON.stringify(discovered[0]));
+}
+const repeated = await getTurnZeroSkillDiscovery('Need frobnicate latency telemetry', [], context);
+if (repeated.length !== 0) {
+  throw new Error('discovered skills should be de-duplicated');
+}
+const emptyDiscovery = await getTurnZeroSkillDiscovery(null, [], context);
+if (emptyDiscovery.length !== 0) {
+  throw new Error('null turn-zero input should not discover skills');
+}
+context.discoveredSkillNames.clear();
+const toolResult = await DiscoverSkillsTool.call({ query: 'alpha metrics review', max_results: 99 }, context);
+if (toolResult.data.skills[0]?.name !== fakeSkill.name) {
+  throw new Error('DiscoverSkills missed fake skill: ' + JSON.stringify(toolResult.data));
+}
+const toolBlock = DiscoverSkillsTool.mapToolResultToToolResultBlockParam(toolResult.data, 'toolu_1');
+if (typeof toolBlock.content !== 'string' || !toolBlock.content.includes(fakeSkill.name)) {
+  throw new Error('DiscoverSkills tool result did not mention skill');
+}
+const nullPrefetch = startSkillDiscoveryPrefetch(null, [{
+  type: 'user',
+  uuid: '00000000-0000-4000-8000-000000000001',
+  timestamp: new Date().toISOString(),
+  message: { role: 'user', content: null },
+}], context);
+if (nullPrefetch !== null) {
+  throw new Error('null user text should not start skill prefetch');
+}
+console.log('skill search runtime OK');`,
+  )
+  assert.equal(output, 'skill search runtime OK')
+})
+
 await test('Chrome MCP external shim starts empty in-process server', async () => {
   const output = await buildAndRunSnippet(
     'chrome-mcp-shim-test',
