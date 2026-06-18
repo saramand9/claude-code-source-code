@@ -89,6 +89,7 @@
 | `src/tools/VerifyPlanExecutionTool/*` | 混合 | `CLAUDE_CODE_VERIFY_PLAN=true` 时可加载、可进入工具池、可记录验证请求；不是官方后台 verifier。 |
 | `src/skills/bundled/verify/*` | 尝试修复/真实适配 | 补齐 verify bundled skill 文档和示例，避免继续由空文本 asset stub 代替。 |
 | `src/utils/protectedNamespace.ts` | 混合 | 补齐受保护命名空间检查的外部保守实现；未知 k8s/COO 环境默认按 protected 处理。 |
+| `src/utils/ultraplan/prompt.txt` | 混合 | 补齐远程规划提示词资源，避免空文本 asset stub；不等于恢复 CCR 远程规划功能。 |
 
 ## 尝试修复/真实适配
 
@@ -103,6 +104,7 @@
 - History Snip 的高可用分段裁剪、目标 ID 裁剪、投影删除、工具对保护、SnipTool 和内部 force-snip 命令加载路径。
 - VerifyPlanExecution 外部保守工具加载路径、计划退出后的验证提示 gate、pending plan verification 状态记录，以及 verify bundled skill 文档资产。
 - `protectedNamespace` 外部保守运行时，避免 `USER_TYPE=ant` 或内部遥测路径触发 fail-fast stub。
+- `ultraplan` 的远程规划提示词资源，构建时不再生成空文本 asset stub。
 
 ## mock/stub/降级
 
@@ -119,7 +121,8 @@
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
-- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产和 `utils/protectedNamespace`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
+- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace` 和 `utils/ultraplan/prompt.txt`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
+- `ULTRAPLAN` feature 仍未恢复：提示词资源是真实文本，但远程 CCR 会话、轮询和执行选择依然依赖内部/线上能力。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
   - 不把历史消息投影成 `<collapsed id="...">` 占位。
@@ -860,7 +863,7 @@ verify bundled skill 文档资产不再是空文本 stub
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 36 项深度检查：
+`npm run test:build-safety` 当前覆盖 37 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -871,6 +874,7 @@ verify bundled skill 文档资产不再是空文本 stub
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
 - `VerifyPlanExecutionTool` 默认关闭、`CLAUDE_CODE_VERIFY_PLAN=true` 后进入工具池、调用后只记录请求并返回 `external-conservative` / `recorded_unavailable`，不会伪造官方后台验证结果。
 - verify bundled skill 的 `SKILL.md`、CLI 示例和 server 示例都是真实文本资产，不再由空字符串 asset stub 代替。
+- `ultraplan` prompt 是真实文本资源，包含规划和 `ExitPlanMode` 指引，且不包含会自触发关键词检测的裸 `ultraplan`。
 - `protectedNamespace` 不再由 fail-fast stub 代替；测试覆盖本地无信号、homespace、开放命名空间、未知命名空间、production 命名空间、ASL3 override 和只有 cluster 信号的保守路径。
 - ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
@@ -1024,6 +1028,43 @@ npm run audit:features
 - `npm run build` 通过，stub manifest 从 10 项降到 9 项，`utils/protectedNamespace` 不再在 manifest 中。
 - `npm run test:build-safety` 通过，当前为 36/36 项。
 - `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback 和工具链回归未受影响。
+
+## 2026-06-18 ultraplan prompt 资源修复
+
+本轮继续收口 manifest 中最后一个 `empty-asset-stub`：`src/utils/ultraplan/prompt.txt`。该资源被 `commands/ultraplan.tsx` 读取，用于远程规划会话的系统提示；之前源码包缺失该文件，构建只能生成空文本 stub。空 prompt 虽然不直接启用 `ULTRAPLAN`，但一旦内部路径被打开，会让远程规划缺少核心行为约束。
+
+### 本轮真实修复
+
+- 新增 `src/utils/ultraplan/prompt.txt`，提供真实规划提示词资源。
+- prompt 要求远程规划会话只产出实现计划，不直接改代码，并在计划完成时调用 `ExitPlanMode`。
+- prompt 明确要求计划包含行为变化、涉及文件/子系统、验证步骤和剩余风险。
+- prompt 避免包含裸 `ultraplan` 关键词，防止被原始输入关键词检测误触发。
+- `scripts/test-build-safety.mjs` 增加 `.txt` loader，并新增 prompt 资产测试，确认该文件非空、包含 `ExitPlanMode` 指引、不自触发关键词检测，且 manifest 不再包含该 asset stub。
+- stub manifest 断言收紧：当前构建不应再出现 `empty-asset-stub`。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是完整恢复 `ULTRAPLAN` feature。`ULTRAPLAN` 仍然 off-by-default，远程 CCR session、审批轮询、执行目标选择等能力仍依赖内部/线上服务。
+- 本轮只恢复缺失文本资产，避免空 prompt 这种静默坏状态。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+npm run test:cli-e2e
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+npm run audit:features
+```
+
+结果：
+
+- `npm run build` 通过，stub manifest 从 9 项降到 8 项；`empty-asset-stub` 已为 0。
+- `npm run test:build-safety` 通过，当前为 37/37 项。
+- `npm run audit:features` 通过，当前 stub kinds 只剩 `feature-gated-module-stub: 7` 和 `private-package-stub: 1`。
+- `npm run test:cli-e2e` 顺序重跑通过。曾经并行跑 `test:build-safety` 与 `test:cli-e2e` 会互相清理 `build-src/test-artifacts`，导致一次假失败；后续验证已按顺序执行。
 
 ## 当前风险边界
 

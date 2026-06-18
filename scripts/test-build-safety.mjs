@@ -99,6 +99,7 @@ export default { coerce, satisfies, valid };
     outfile,
     packages: 'external',
     loader: {
+      '.txt': 'text',
       '.md': 'text',
       ...(buildOptions.loader ?? {}),
     },
@@ -128,7 +129,7 @@ await test('build outputs exist before safety tests', async () => {
 })
 
 let manifest
-await test('stub manifest exists and covers all stub kinds', async () => {
+await test('stub manifest exists and records current stub kinds', async () => {
   const manifestPath = join(BUILD, 'stub-manifest.json')
   manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   assert.equal(Array.isArray(manifest.entries), true)
@@ -137,7 +138,7 @@ await test('stub manifest exists and covers all stub kinds', async () => {
   const kinds = new Set(manifest.entries.map(entry => entry.kind))
   assert(kinds.has('private-package-stub'), 'missing private-package-stub')
   assert(kinds.has('feature-gated-module-stub'), 'missing feature-gated-module-stub')
-  assert(kinds.has('empty-asset-stub'), 'missing empty-asset-stub')
+  assert(!kinds.has('empty-asset-stub'), 'empty asset stubs should be restored or made fail-fast')
 
   for (const entry of manifest.entries) {
     assert(entry.kind, 'manifest entry missing kind')
@@ -553,6 +554,29 @@ if (!verifyContent.SKILL_FILES['examples/server.md']?.includes('server')) {
 console.log('verify skill assets OK');`,
   )
   assert.equal(output, 'verify skill assets OK')
+})
+
+await test('ultraplan prompt asset is real text', async () => {
+  const promptPath = join(BUILD, 'src/utils/ultraplan/prompt.txt')
+  const prompt = await readFile(promptPath, 'utf8')
+  assert.match(prompt, /advanced remote planning session/)
+  assert.match(prompt, /ExitPlanMode/)
+  assert.doesNotMatch(prompt, /\bultraplan\b/i)
+
+  const manifestEntry = manifest.entries.find(entry =>
+    String(entry.path ?? '').includes('ultraplan/prompt.txt'),
+  )
+  assert.equal(manifestEntry, undefined)
+
+  const output = await buildAndRunSnippet(
+    'ultraplan-prompt-test',
+    `import prompt from './src/utils/ultraplan/prompt.txt';
+if (!prompt.includes('advanced remote planning session')) throw new Error('missing planning guidance');
+if (!prompt.includes('ExitPlanMode')) throw new Error('missing ExitPlanMode guidance');
+if (/\\bultraplan\\b/i.test(prompt)) throw new Error('prompt self-triggers keyword detection');
+console.log('ultraplan prompt OK');`,
+  )
+  assert.equal(output, 'ultraplan prompt OK')
 })
 
 await test('snip runtime projects removed ranges and preserves tool pairs', async () => {
