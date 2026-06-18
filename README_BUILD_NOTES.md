@@ -2370,3 +2370,38 @@ Expected new output:
 ```text
 ok - Write respects PreToolUse command hook exit 2 denial
 ```
+
+## 2026-06-19 Bash PreToolUse command hook denial E2E coverage
+
+This round extends command-hook denial coverage beyond file-write tools. The
+new E2E validates that a `PreToolUse:Bash` command hook exiting with status 2
+blocks a side-effecting Bash tool call before it can write to disk.
+
+- `scripts/test-cli-resume-e2e.mjs`
+  - Adds `cli bash pretooluse command hook exit two prompt`.
+  - Uses a real non-bare `dist/cli.js` subprocess with `--tools Bash` and
+    `--allowedTools Bash`.
+  - Creates a temporary `settings.json` with `hooks.PreToolUse` matching
+    `Bash` and a `type: "command"` PowerShell hook.
+  - The hook writes a marker to stderr and exits with code 2.
+  - Asserts the follow-up `tool_result` is `is_error: true`, includes the
+    `PreToolUse:Bash hook error` wrapper and command-hook marker, and the
+    Bash target file is not created.
+
+Risk boundary update: command exit-code-2 hook denial is now covered for both
+`Write` and `Bash`. Remaining hook gaps are mainly interactive
+PermissionRequest UI, other tool families, and larger mixed-tool/concurrency
+cases.
+
+Verification:
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+Expected new output:
+
+```text
+ok - Bash respects PreToolUse command hook exit 2 denial
+```

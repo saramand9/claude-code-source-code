@@ -119,6 +119,19 @@ const bashSideEffectFinalResponse =
 const bashSideEffectRelativePath =
   'build-src/test-artifacts/cli-bash-side-effect-tool.txt'
 const bashSideEffectFilePath = join(ROOT, bashSideEffectRelativePath)
+const bashHookCommandDenyPrompt =
+  'cli bash pretooluse command hook exit two prompt'
+const bashHookCommandDenyResult = 'bash-hook-command-deny-2197'
+const bashHookCommandDenyFinalResponse =
+  'Bash PreToolUse command hook deny completed'
+const bashHookCommandDenyReason =
+  'pretooluse command hook blocked Bash fixture marker 2197'
+const bashHookCommandDenyRelativePath =
+  'build-src/test-artifacts/cli-bash-hook-command-deny-tool.txt'
+const bashHookCommandDenyFilePath = join(
+  ROOT,
+  bashHookCommandDenyRelativePath,
+)
 const bashContentDenyPrompt = 'cli bash content-specific deny prompt'
 const bashContentDenyResult = 'bash-content-deny-2604'
 const bashContentDenyFinalResponse = 'Bash content-specific deny completed'
@@ -2568,6 +2581,25 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(bashHookCommandDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_bash_hook_command_deny_')) {
+      return {
+        index: responses.length + 57,
+        text: bashHookCommandDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 57,
+      bashSideEffectToolUse: true,
+      bashSideEffectOptions: {
+        command: `echo ${bashHookCommandDenyResult} > ${bashHookCommandDenyRelativePath}`,
+        description: 'Attempt to write a Bash fixture blocked by hook',
+        messageIdPrefix: 'msg_cli_bash_hook_command_deny_tool_use_',
+        toolUseIdPrefix: 'toolu_cli_bash_hook_command_deny_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(bashContentDenyPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_bash_content_deny_')) {
       return {
@@ -4447,6 +4479,113 @@ async function main() {
       await readFile(bashSideEffectFilePath, 'utf8'),
       new RegExp(bashSideEffectResult),
       'Bash side-effect should write the fixture file on disk',
+    )
+
+    const bashHookCommandDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-bash-hook-command-deny-config-'),
+    )
+    await writeFile(
+      join(bashHookCommandDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: [
+                  {
+                    type: 'command',
+                    shell: 'powershell',
+                    command: `[Console]::Error.WriteLine('${bashHookCommandDenyReason}'); exit 2`,
+                    timeout: 5,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const bashHookCommandDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: bashHookCommandDenyConfigDir,
+    }
+    delete bashHookCommandDenyEnv.CLAUDE_CODE_SIMPLE
+    const bashHookCommandDenyArgs = [
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Bash',
+      '--allowedTools',
+      'Bash',
+      '--model',
+      'sonnet',
+    ]
+    await rm(bashHookCommandDenyFilePath, { force: true })
+    const beforeBashHookCommandDenyRequests = server.requests.length
+    const bashHookCommandDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...bashHookCommandDenyArgs, bashHookCommandDenyPrompt],
+          bashHookCommandDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      bashHookCommandDenyRun.is_error,
+      false,
+      'Bash PreToolUse command hook deny run should complete after model final response',
+    )
+    assert.equal(
+      bashHookCommandDenyRun.result,
+      bashHookCommandDenyFinalResponse,
+      'Bash PreToolUse command hook deny final response',
+    )
+    const bashHookCommandDenyRequests = server.requests
+      .slice(beforeBashHookCommandDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      bashHookCommandDenyRequests.length,
+      2,
+      'Bash PreToolUse command hook deny run should make tool_use and final requests',
+    )
+    const bashHookCommandDenyResultBlocks = requestContentBlocks(
+      bashHookCommandDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      bashHookCommandDenyResultBlocks.some(block => {
+        const content = textFromContent(block.content)
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_bash_hook_command_deny_') &&
+          block.is_error === true &&
+          content.includes('PreToolUse:Bash hook error') &&
+          content.includes(bashHookCommandDenyReason)
+        )
+      }),
+      `Bash PreToolUse command hook deny follow-up should include exit-code hook-denied tool_result: ${JSON.stringify(bashHookCommandDenyResultBlocks, null, 2)}`,
+    )
+    const bashHookCommandDenyFileExists = await stat(
+      bashHookCommandDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      bashHookCommandDenyFileExists,
+      false,
+      'Bash PreToolUse command hook deny should not create the blocked file',
     )
 
     const bashContentDenyConfigDir = await mkdtemp(
@@ -7940,6 +8079,7 @@ async function main() {
     console.log('ok - mixed text, Read, and Bash blocks preserve text and results')
     console.log('ok - triple interleaved Read, Bash, and Read blocks follow up')
     console.log('ok - Bash side-effect tool writes an artifact fixture file')
+    console.log('ok - Bash respects PreToolUse command hook exit 2 denial')
     console.log('ok - Bash content-specific deny blocks a matching command')
     console.log('ok - Bash content-specific ask requires approval')
     console.log('ok - project Bash content-specific deny blocks a matching command')
