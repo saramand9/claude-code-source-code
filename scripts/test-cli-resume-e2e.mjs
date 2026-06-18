@@ -154,6 +154,24 @@ const editDenyOriginalContent = 'edit permission deny fixture: before-9174'
 const editDenyUpdatedContent = 'edit permission deny fixture: after-9174'
 const editDenyFinalResponse = 'structured Edit permission deny completed'
 let editDenyFilePath = ''
+const editContentDenyPrompt = 'cli edit content-specific deny prompt'
+const editContentDenyOriginalContent =
+  'edit content-specific deny fixture: before-3097'
+const editContentDenyUpdatedContent =
+  'edit content-specific deny fixture: after-3097'
+const editContentDenyFinalResponse =
+  'structured Edit content-specific deny completed'
+const editContentDenyRelativePath =
+  'build-src/test-artifacts/cli-edit-content-deny-tool.txt'
+const editContentDenyFilePath = join(ROOT, editContentDenyRelativePath)
+const editContentAskPrompt = 'cli edit content-specific ask prompt'
+const editContentAskUpdatedContent =
+  'edit content-specific ask fixture: after-4580'
+const editContentAskFinalResponse =
+  'structured Edit content-specific ask completed'
+const editContentAskRelativePath =
+  'build-src/test-artifacts/cli-edit-content-ask-tool.txt'
+const editContentAskFilePath = join(ROOT, editContentAskRelativePath)
 const editReplaceAllPrompt = 'cli edit replace all prompt'
 const editReplaceAllOriginalContent = 'alpha replace-all-2048 alpha replace-all-2048 alpha replace-all-2048'
 const editReplaceAllUpdatedContent = 'beta replace-all-2048 beta replace-all-2048 beta replace-all-2048'
@@ -2057,6 +2075,44 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(editContentDenyPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_content_deny_')) {
+      return {
+        index: responses.length + 48,
+        text: editContentDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 48,
+      editToolUse: true,
+      editToolOptions: {
+        filePath: editContentDenyFilePath,
+        oldString: editContentDenyOriginalContent,
+        newString: editContentDenyUpdatedContent,
+        toolUseIdPrefix: 'toolu_cli_edit_content_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(editContentAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_content_ask_')) {
+      return {
+        index: responses.length + 49,
+        text: editContentAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 49,
+      editToolUse: true,
+      editToolOptions: {
+        filePath: editContentAskFilePath,
+        oldString: '',
+        newString: `${editContentAskUpdatedContent}\n`,
+        toolUseIdPrefix: 'toolu_cli_edit_content_ask_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(editReplaceAllPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_edit_replace_all_')) {
       return {
@@ -2965,6 +3021,12 @@ async function main() {
   await writeFile(editStaleFilePath, `${editStaleOriginalContent}\n`, 'utf8')
   editDenyFilePath = join(ARTIFACT_DIR, 'cli-edit-permission-deny.txt')
   await writeFile(editDenyFilePath, `${editDenyOriginalContent}\n`, 'utf8')
+  await writeFile(
+    editContentDenyFilePath,
+    `${editContentDenyOriginalContent}\n`,
+    'utf8',
+  )
+  await rm(editContentAskFilePath, { force: true })
   editReplaceAllFilePath = join(ARTIFACT_DIR, 'cli-edit-replace-all.txt')
   await writeFile(
     editReplaceAllFilePath,
@@ -4499,6 +4561,172 @@ async function main() {
       await readFile(editDenyFilePath, 'utf8'),
       `${editDenyOriginalContent}\n`,
       'Edit permission deny should leave the file unchanged',
+    )
+
+    const editContentDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-edit-content-deny-config-'),
+    )
+    await writeFile(
+      join(editContentDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            deny: [`Edit(${editContentDenyRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const editContentDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: editContentDenyConfigDir,
+    }
+    const editContentRuleArgs = [
+      '--bare',
+      '--print',
+      '--output-format',
+      'json',
+      '--max-turns',
+      '2',
+      '--strict-mcp-config',
+      '--tools',
+      'Edit',
+      '--permission-mode',
+      'acceptEdits',
+      '--model',
+      'sonnet',
+    ]
+    const beforeEditContentDenyRequests = server.requests.length
+    const editContentDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editContentRuleArgs, editContentDenyPrompt],
+          editContentDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editContentDenyRun.is_error,
+      false,
+      'Edit content-specific deny run should complete after model final response',
+    )
+    assert.equal(
+      editContentDenyRun.result,
+      editContentDenyFinalResponse,
+      'Edit content-specific deny final response',
+    )
+    const editContentDenyRequests = server.requests
+      .slice(beforeEditContentDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editContentDenyRequests.length,
+      2,
+      'Edit content-specific deny run should make tool_use and final requests',
+    )
+    const editContentDenyResultBlocks = requestContentBlocks(
+      editContentDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      editContentDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_content_deny_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes(
+            'File is in a directory that is denied by your permission settings',
+          )
+        )
+      }),
+      `Edit content-specific deny follow-up should include path-denied tool_result: ${JSON.stringify(editContentDenyResultBlocks, null, 2)}`,
+    )
+    assert.equal(
+      await readFile(editContentDenyFilePath, 'utf8'),
+      `${editContentDenyOriginalContent}\n`,
+      'Edit content-specific deny should leave the file unchanged',
+    )
+
+    const editContentAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-edit-content-ask-config-'),
+    )
+    await writeFile(
+      join(editContentAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: [`Edit(${editContentAskRelativePath})`],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const editContentAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: editContentAskConfigDir,
+    }
+    const beforeEditContentAskRequests = server.requests.length
+    const editContentAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...editContentRuleArgs, editContentAskPrompt],
+          editContentAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      editContentAskRun.is_error,
+      false,
+      'Edit content-specific ask run should complete after model final response',
+    )
+    assert.equal(
+      editContentAskRun.result,
+      editContentAskFinalResponse,
+      'Edit content-specific ask final response',
+    )
+    const editContentAskRequests = server.requests
+      .slice(beforeEditContentAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      editContentAskRequests.length,
+      2,
+      'Edit content-specific ask run should make tool_use and final requests',
+    )
+    const editContentAskResultBlocks = requestContentBlocks(
+      editContentAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      editContentAskResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_edit_content_ask_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Claude requested permissions to write to') &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `Edit content-specific ask follow-up should include approval-required tool_result: ${JSON.stringify(editContentAskResultBlocks, null, 2)}`,
+    )
+    const editContentAskFileExists = await stat(editContentAskFilePath).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      editContentAskFileExists,
+      false,
+      'Edit content-specific ask should not create the unapproved file',
     )
 
     const beforeEditReplaceAllRequests = server.requests.length
@@ -6725,6 +6953,8 @@ async function main() {
     console.log('ok - Edit rejects updating a file that was not read first')
     console.log('ok - Edit rejects stale updates after external modification')
     console.log('ok - Edit respects explicit disallowedTools denial')
+    console.log('ok - Edit respects path-specific deny rules')
+    console.log('ok - Edit respects path-specific ask rules')
     console.log('ok - Edit replace_all updates every matching occurrence')
     console.log('ok - Edit rejects ambiguous multi-match updates')
     console.log('ok - Edit creates a new file when old_string is empty')
