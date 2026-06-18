@@ -204,6 +204,101 @@ console.log('protected namespace OK');`,
   assert.equal(output, 'protected namespace OK')
 })
 
+await test('ant-only callout components are loadable and conservative', async () => {
+  const missingCallouts = manifest.entries.filter(entry =>
+    /(?:AntModelSwitchCallout|UndercoverAutoCallout)/.test(String(entry.path ?? '')),
+  )
+  assert.deepEqual(missingCallouts, [])
+
+  const output = await buildAndRunSnippet(
+    'ant-callout-test',
+    `import React from 'react';
+import { mkdir } from 'node:fs/promises';
+import { PassThrough, Writable } from 'node:stream';
+import { AntModelSwitchCallout, shouldShowModelSwitchCallout } from './src/components/AntModelSwitchCallout.tsx';
+import { UndercoverAutoCallout } from './src/components/UndercoverAutoCallout.tsx';
+const initialEnv = { ...process.env };
+process.env.USER_TYPE = 'ant';
+delete process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT;
+delete process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET;
+if (shouldShowModelSwitchCallout()) throw new Error('model switch should be disabled by default');
+process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT = '1';
+process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET = 'claude-sonnet-4-6';
+process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/callout-config';
+await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+const { enableConfigs } = await import('./src/utils/config.ts');
+enableConfigs();
+const { renderSync } = await import('./src/ink/root.ts');
+if (!shouldShowModelSwitchCallout()) throw new Error('model switch should be opt-in visible');
+const modelElement = React.createElement(AntModelSwitchCallout, { onDone: () => {} });
+const undercoverElement = React.createElement(UndercoverAutoCallout, { onDone: () => {} });
+if (modelElement.type !== AntModelSwitchCallout) throw new Error('bad model callout element');
+if (undercoverElement.type !== UndercoverAutoCallout) throw new Error('bad undercover callout element');
+
+class CaptureStream extends Writable {
+  constructor() {
+    super();
+    this.chunks = [];
+    this.columns = 100;
+    this.rows = 30;
+    this.isTTY = true;
+  }
+  _write(chunk, _encoding, callback) {
+    this.chunks.push(Buffer.from(chunk).toString('utf8'));
+    callback();
+  }
+  get output() {
+    return this.chunks.join('');
+  }
+}
+function createStdin() {
+  const stdin = new PassThrough();
+  stdin.isTTY = true;
+  stdin.setRawMode = () => stdin;
+  stdin.ref = () => stdin;
+  stdin.unref = () => stdin;
+  stdin.setEncoding('utf8');
+  return stdin;
+}
+function normalizeOutput(output) {
+  return output
+    .replace(/\\x1b\\[(\\d+)C/g, (_, count) => ' '.repeat(Number(count)))
+    .replace(/\\x1b\\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\\r/g, '');
+}
+async function renderToText(element) {
+  const stdout = new CaptureStream();
+  const stderr = new CaptureStream();
+  const instance = renderSync(element, {
+    stdout,
+    stderr,
+    stdin: createStdin(),
+    exitOnCtrlC: false,
+    patchConsole: false,
+  });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  instance.unmount();
+  instance.cleanup();
+  return normalizeOutput(stdout.output);
+}
+const modelOutput = await renderToText(modelElement);
+if (!modelOutput.includes('Model Update')) throw new Error('missing model callout title: ' + JSON.stringify(modelOutput));
+if (!modelOutput.includes('claude-sonnet-4-6')) throw new Error('missing model callout target: ' + JSON.stringify(modelOutput));
+const undercoverOutput = await renderToText(undercoverElement);
+if (!undercoverOutput.includes('Public Repository Safety')) throw new Error('missing undercover title: ' + JSON.stringify(undercoverOutput));
+if (!undercoverOutput.includes('public or external')) throw new Error('missing undercover body: ' + JSON.stringify(undercoverOutput));
+
+process.env = initialEnv;
+console.log('ant callouts OK');`,
+    {
+      banner: {
+        js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+      },
+    },
+  )
+  assert.match(output, /ant callouts OK$/)
+})
+
 await test('generated stubs are fail-fast for default exports', async () => {
   const mod = await import(pathToFileURL(join(BUILD, 'src/tools/REPLTool/REPLTool.js')).href)
   await assertThrowsMessage(

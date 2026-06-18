@@ -90,6 +90,8 @@
 | `src/skills/bundled/verify/*` | 尝试修复/真实适配 | 补齐 verify bundled skill 文档和示例，避免继续由空文本 asset stub 代替。 |
 | `src/utils/protectedNamespace.ts` | 混合 | 补齐受保护命名空间检查的外部保守实现；未知 k8s/COO 环境默认按 protected 处理。 |
 | `src/utils/ultraplan/prompt.txt` | 混合 | 补齐远程规划提示词资源，避免空文本 asset stub；不等于恢复 CCR 远程规划功能。 |
+| `src/components/AntModelSwitchCallout.tsx` | 混合 | 补齐 ant-only 模型切换提示弹窗外部保守版；只在显式 env 配置目标模型时显示，不做官方内部模型迁移。 |
+| `src/components/UndercoverAutoCallout.tsx` | 混合 | 补齐 ant-only 公开仓库安全提示弹窗；只负责提示和记录已读，不改变 undercover 判定逻辑。 |
 
 ## 尝试修复/真实适配
 
@@ -105,6 +107,7 @@
 - VerifyPlanExecution 外部保守工具加载路径、计划退出后的验证提示 gate、pending plan verification 状态记录，以及 verify bundled skill 文档资产。
 - `protectedNamespace` 外部保守运行时，避免 `USER_TYPE=ant` 或内部遥测路径触发 fail-fast stub。
 - `ultraplan` 的远程规划提示词资源，构建时不再生成空文本 asset stub。
+- Ant-only `AntModelSwitchCallout` 和 `UndercoverAutoCallout` 的外部保守 UI 加载路径，避免 `USER_TYPE=ant` 时 REPL 动态加载缺失模块。
 
 ## mock/stub/降级
 
@@ -116,12 +119,10 @@
 - 一批 feature-gated 内部模块会在 `build-src/` 中生成 fail-fast stub，并记录到 `build-src/stub-manifest.json`，例如：
   - `commands/agents-platform`
   - `ink/devtools`
-  - `components/AntModelSwitchCallout`
-  - `components/UndercoverAutoCallout`
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
-- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace` 和 `utils/ultraplan/prompt.txt`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
+- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout` 和 `components/UndercoverAutoCallout`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
 - `ULTRAPLAN` feature 仍未恢复：提示词资源是真实文本，但远程 CCR 会话、轮询和执行选择依然依赖内部/线上能力。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
@@ -863,7 +864,7 @@ verify bundled skill 文档资产不再是空文本 stub
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 37 项深度检查：
+`npm run test:build-safety` 当前覆盖 38 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -876,6 +877,7 @@ verify bundled skill 文档资产不再是空文本 stub
 - verify bundled skill 的 `SKILL.md`、CLI 示例和 server 示例都是真实文本资产，不再由空字符串 asset stub 代替。
 - `ultraplan` prompt 是真实文本资源，包含规划和 `ExitPlanMode` 指引，且不包含会自触发关键词检测的裸 `ultraplan`。
 - `protectedNamespace` 不再由 fail-fast stub 代替；测试覆盖本地无信号、homespace、开放命名空间、未知命名空间、production 命名空间、ASL3 override 和只有 cluster 信号的保守路径。
+- Ant-only callout 不再由 fail-fast stub 代替；测试覆盖默认关闭、显式 env opt-in 可见，以及 `AntModelSwitchCallout` / `UndercoverAutoCallout` 真实 Ink 渲染输出。
 - ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
 - History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
@@ -1066,11 +1068,53 @@ npm run audit:features
 - `npm run audit:features` 通过，当前 stub kinds 只剩 `feature-gated-module-stub: 7` 和 `private-package-stub: 1`。
 - `npm run test:cli-e2e` 顺序重跑通过。曾经并行跑 `test:build-safety` 与 `test:cli-e2e` 会互相清理 `build-src/test-artifacts`，导致一次假失败；后续验证已按顺序执行。
 
+## 2026-06-18 ant-only 提示弹窗外部保守版修复
+
+本轮继续推进未完成 feature，选择 `components/AntModelSwitchCallout` 和 `components/UndercoverAutoCallout`。这两个组件在 `screens/REPL.tsx` 中只会在 `USER_TYPE=ant` 时动态加载；之前源码包缺失实际实现，构建只能生成 fail-fast stub。一旦用户继承或手动设置 `USER_TYPE=ant`，REPL 打开相关弹窗路径会直接遇到缺失模块。
+
+### 本轮真实修复
+
+- 新增 `src/components/AntModelSwitchCallout.tsx`。
+- `shouldShowModelSwitchCallout()` 只在以下条件同时满足时返回 true：
+  - `USER_TYPE=ant`
+  - `CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT` 为 truthy
+  - 显式配置了 `CLAUDE_CODE_MODEL_SWITCH_TARGET` 或内部 `antModels` switchCallout
+  - 用户没有永久 dismiss，且没有在 24 小时内展示过同版本 callout
+- 弹窗可以选择切换到显式目标模型、暂不处理或不再显示；选择切换时只把目标模型交还给 REPL 的既有 `setModel(...)` 回调。
+- 新增 `src/components/UndercoverAutoCallout.tsx`。
+- Undercover 弹窗只展示公开仓库安全提示，并把 `hasSeenUndercoverAutoNotice` 写入全局配置；真正是否 undercover 仍由 `src/utils/undercover.ts` 判断。
+- `scripts/test-build-safety.mjs` 新增专项测试，确认 manifest 不再包含两个 callout stub，且默认关闭、显式 opt-in、真实 Ink 渲染路径都可执行。
+
+### 本轮 mock/stub/风险说明
+
+- 这两个组件都是 **external-conservative** 实现，不是 Anthropic 内部原版 UI 或完整策略。
+- `AntModelSwitchCallout` 不会自动判断应该迁移到哪个官方模型；必须显式配置目标模型，避免假装知道内部模型迁移策略。
+- `UndercoverAutoCallout` 不改变 undercover 模式，不新增仓库隐私判断，只负责提示和记录已读。
+- 这轮修复把运行期缺失模块风险收敛成可加载 UI，但没有恢复任何内部 ant-only 后台策略。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+```
+
+结果：
+
+- `npm run build` 通过，stub manifest 从 8 项降到 6 项；`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 不再在 manifest 中。
+- `npm run test:build-safety` 通过，当前为 38/38 项。
+- `npm run test:cli-e2e` 通过，真实 `dist/cli.js` 子进程主路径、resume、streaming fallback、多工具调用和写入工具链回归未受影响。
+- `npm run audit:features` 通过，当前 stub kinds 只剩 `feature-gated-module-stub: 5` 和 `private-package-stub: 1`。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。`protectedNamespace` 也已不再是缺失模块，但它是保守外部实现，不包含 Anthropic 内部完整 namespace allowlist。`AntModelSwitchCallout` 和 `UndercoverAutoCallout` 已不再是缺失模块，但只是 ant-only UI 的外部保守实现，不代表恢复内部模型迁移或仓库隐私策略。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 
