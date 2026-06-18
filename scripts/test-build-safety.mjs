@@ -98,6 +98,10 @@ export default { coerce, satisfies, valid };
     format: 'esm',
     outfile,
     packages: 'external',
+    loader: {
+      '.md': 'text',
+      ...(buildOptions.loader ?? {}),
+    },
     alias: {
       src: join(BUILD, 'src'),
       '@ant/claude-for-chrome-mcp': join(BUILD, 'stubs', 'claude-for-chrome-mcp.js'),
@@ -405,6 +409,95 @@ delete process.env.CLAUDE_CONTEXT_COLLAPSE;
 console.log('ctx inspect tool OK');`,
   )
   assert.equal(output, 'ctx inspect tool OK')
+})
+
+await test('VerifyPlanExecutionTool is loadable and conservative', async () => {
+  const replSource = await readFile(join(BUILD, 'src/screens/REPL.tsx'), 'utf8')
+  const exitPlanSource = await readFile(
+    join(
+      BUILD,
+      'src/components/permissions/ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.tsx',
+    ),
+    'utf8',
+  )
+  assert.doesNotMatch(
+    replSource,
+    /isEnvTruthy\(undefined\)/,
+    'plan verification state gate should read the runtime env var',
+  )
+  assert.match(
+    replSource,
+    /CLAUDE_CODE_VERIFY_PLAN/,
+    'REPL should retain the verify-plan runtime env gate',
+  )
+  assert.doesNotMatch(
+    exitPlanSource,
+    /undefined === 'true'/,
+    'plan verification instruction should not be folded to false',
+  )
+
+  const output = await buildAndRunSnippet(
+    'verify-plan-tool-test',
+    `delete process.env.CLAUDE_CODE_VERIFY_PLAN;
+const direct = await import('./src/tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.ts');
+if (direct.VerifyPlanExecutionTool.name !== 'VerifyPlanExecution') throw new Error('bad tool name');
+if (direct.VerifyPlanExecutionTool.isEnabled()) throw new Error('tool should be disabled by default');
+
+process.env.CLAUDE_CODE_VERIFY_PLAN = 'true';
+const { getAllBaseTools } = await import('./src/tools.ts');
+const tool = getAllBaseTools().find(item => item.name === 'VerifyPlanExecution');
+if (!tool) throw new Error('VerifyPlanExecution did not enter the tool pool');
+if (!tool.isEnabled()) throw new Error('VerifyPlanExecution should be enabled by env');
+if (tool.isDestructive({})) throw new Error('VerifyPlanExecution should not be destructive');
+
+let state = {
+  pendingPlanVerification: {
+    plan: 'Implement the accepted plan',
+    verificationStarted: false,
+    verificationCompleted: false,
+  },
+};
+const context = {
+  getAppState: () => state,
+  setAppState: updater => {
+    state = updater(state);
+  },
+};
+const result = await tool.call({ notes: 'ran targeted checks' }, context, undefined, undefined);
+if (result.data.status !== 'recorded_unavailable') throw new Error('should not claim real verification');
+if (result.data.implementation !== 'external-conservative') throw new Error('bad implementation marker');
+if (!result.data.planAvailable || !result.data.verificationStarted || result.data.verificationCompleted) {
+  throw new Error('bad result state: ' + JSON.stringify(result.data));
+}
+if (!state.pendingPlanVerification.verificationStarted || state.pendingPlanVerification.verificationCompleted) {
+  throw new Error('app state not updated conservatively: ' + JSON.stringify(state));
+}
+if (!result.data.warning.includes('does not prove')) throw new Error('missing warning');
+const block = tool.mapToolResultToToolResultBlockParam(result.data, 'toolu_verify');
+if (block.type !== 'tool_result' || !block.content.includes('recorded_unavailable')) {
+  throw new Error('bad tool_result block');
+}
+delete process.env.CLAUDE_CODE_VERIFY_PLAN;
+console.log('verify plan tool OK');`,
+  )
+  assert.equal(output, 'verify plan tool OK')
+})
+
+await test('verify bundled skill assets are real text', async () => {
+  const output = await buildAndRunSnippet(
+    'verify-skill-assets-test',
+    `const verifyContent = await import('./src/skills/bundled/verifyContent.ts');
+if (!verifyContent.SKILL_MD.includes('description:')) throw new Error('missing skill frontmatter');
+if (!verifyContent.SKILL_MD.includes('VerifyPlanExecution')) throw new Error('missing verify tool guidance');
+if (!verifyContent.SKILL_FILES['examples/cli.md']?.includes('npm run check')) {
+  throw new Error('missing CLI verification example');
+}
+if (!verifyContent.SKILL_FILES['examples/server.md']?.includes('server')) {
+  throw new Error('missing server verification example');
+}
+console.log('verify skill assets OK');`,
+  )
+  assert.equal(output, 'verify skill assets OK')
 })
 
 await test('snip runtime projects removed ranges and preserves tool pairs', async () => {

@@ -86,6 +86,8 @@
 | `src/services/compact/snipCompact.ts` / `snipProjection.ts` | 混合 | 提供高可用 History Snip 运行时、分段裁剪、目标 ID 裁剪、投影删除、工具对保护和运行时阈值；不是官方完整语义 snip。 |
 | `src/tools/SnipTool/SnipTool.ts` / `src/commands/force-snip.ts` | 混合 | Snip 工具与内部 force-snip 命令可加载、可执行；支持自动分段裁剪、目标 ID 和目标 token 参数。 |
 | `src/components/messages/SnipBoundaryMessage.tsx` | 尝试修复/真实适配 | UI 可渲染 snip 边界摘要，避免历史裁剪事件不可见。 |
+| `src/tools/VerifyPlanExecutionTool/*` | 混合 | `CLAUDE_CODE_VERIFY_PLAN=true` 时可加载、可进入工具池、可记录验证请求；不是官方后台 verifier。 |
+| `src/skills/bundled/verify/*` | 尝试修复/真实适配 | 补齐 verify bundled skill 文档和示例，避免继续由空文本 asset stub 代替。 |
 
 ## 尝试修复/真实适配
 
@@ -98,6 +100,7 @@
 - 已存在的纯 TypeScript native 替代实现会被构建使用，例如 `src/native-ts/color-diff`、`src/native-ts/file-index`、`src/native-ts/yoga-layout`。
 - 验证报告模板的数据校验、过滤、搜索和后置清理逻辑。
 - History Snip 的高可用分段裁剪、目标 ID 裁剪、投影删除、工具对保护、SnipTool 和内部 force-snip 命令加载路径。
+- VerifyPlanExecution 外部保守工具加载路径、计划退出后的验证提示 gate、pending plan verification 状态记录，以及 verify bundled skill 文档资产。
 
 ## mock/stub/降级
 
@@ -111,13 +114,11 @@
   - `ink/devtools`
   - `components/AntModelSwitchCallout`
   - `components/UndercoverAutoCallout`
-  - `tools/VerifyPlanExecutionTool`
   - `tools/TungstenTool`
   - `tools/REPLTool`
   - `tools/SuggestBackgroundPRTool`
   - `utils/protectedNamespace`
-  - bundled verify skill 相关空文本资源
-- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
+- 当前 manifest 不再包含本次补齐的 `snipCompact` / `snipProjection`、`VerifyPlanExecutionTool` 和 bundled verify skill 文档资产，但其它内部 compact/agent 能力仍可能被 feature gate 关闭。
 - `src/services/contextCollapse/*` 已从纯 `.d.ts` 占位改成可加载运行时，但仍是保守降级实现：
   - 不生成摘要。
   - 不把历史消息投影成 `<collapsed id="...">` 占位。
@@ -848,6 +849,8 @@ modifiers-napi 缺失 fallback
 image-processor-napi 缺失时 sharp fallback
 audio-capture-napi 缺失时语音依赖检查 fallback
 url-handler-napi 缺失由 nativeOptional 包装
+VerifyPlanExecutionTool 默认关闭、显式 opt-in、工具池加载、保守状态记录和非官方 verifier 警告
+verify bundled skill 文档资产不再是空文本 stub
 ```
 
 版本输出：
@@ -856,7 +859,7 @@ url-handler-napi 缺失由 nativeOptional 包装
 2.1.88 (Claude Code)
 ```
 
-`npm run test:build-safety` 当前覆盖 33 项深度检查：
+`npm run test:build-safety` 当前覆盖 35 项深度检查：
 
 - 构建输出、`build-src/stub-manifest.json` 和当前实际 stub 类型记录。
 - 默认导出和存在时的缺失命名导出 fail-fast 行为，包括调用、构造、解引用和 primitive coercion。
@@ -865,6 +868,8 @@ url-handler-napi 缺失由 nativeOptional 包装
 - `CONTEXT_COLLAPSE` 在构建副本中被保留，但 prompt-too-long 兜底仍受 runtime gate 控制。
 - ContextCollapse 外部运行时默认关闭、projection no-op、恢复元数据、显式 opt-in 和 prompt-too-long withholding 行为。
 - `CtxInspectTool` 加载、默认隐藏、显式启用和工具结果序列化。
+- `VerifyPlanExecutionTool` 默认关闭、`CLAUDE_CODE_VERIFY_PLAN=true` 后进入工具池、调用后只记录请求并返回 `external-conservative` / `recorded_unavailable`，不会伪造官方后台验证结果。
+- verify bundled skill 的 `SKILL.md`、CLI 示例和 server 示例都是真实文本资产，不再由空字符串 asset stub 代替。
 - ContextCollapse 相关 `setup`、`TokenWarning`、`REPL`、`analyzeContext` 不再保留变量路径 require；`setup()` 不再在首屏前同步初始化 ContextCollapse。
 - `HISTORY_SNIP` 在构建副本中被保留，SnipTool 和 force-snip 命令不会继续被 feature gate 折叠。
 - History Snip 高可用外部运行时的分段裁剪、目标 ID 裁剪、boundary replay 确定性、投影删除、snip boundary 保留、保护尾部消息和 tool_use/tool_result 不被切开。
@@ -939,11 +944,50 @@ CC Switch settings env 启动探针：setup() completed，读取到 ANTHROPIC_BA
 ripgrep 启动探针：Ripgrep first use test PASSED (mode=system, path=rg)，不再出现 dist/vendor/.../rg.exe ENOENT
 ```
 
+## 2026-06-18 VerifyPlanExecution 外部保守版修复
+
+本轮继续推进未完成 feature，优先选择 `CLAUDE_CODE_VERIFY_PLAN`。它比 Tungsten 或 Chrome MCP 更适合作为下一项，因为源码中已有计划退出、提醒和状态字段，只缺工具实现与文档资产；同时它不依赖私有包或真实浏览器桥接服务。
+
+### 本轮真实修复
+
+- 新增 `src/tools/VerifyPlanExecutionTool/constants.ts` 和 `VerifyPlanExecutionTool.ts`。
+- `CLAUDE_CODE_VERIFY_PLAN=true` 时，工具可以进入 `getAllBaseTools()`，不会再加载 fail-fast stub。
+- 工具调用会读取 `pendingPlanVerification`，把 `verificationStarted` 置为 `true`，但保持 `verificationCompleted=false`。
+- `ExitPlanModePermissionRequest` 的验证提示从固定 `undefined === 'true'` 恢复为读取 `process.env.CLAUDE_CODE_VERIFY_PLAN`。
+- `REPL.tsx` 的 pending plan verification 状态保存从 `isEnvTruthy(undefined)` 恢复为读取 `process.env.CLAUDE_CODE_VERIFY_PLAN`。
+- `classifierDecision.ts` 的 allowlist 改为跟随 `CLAUDE_CODE_VERIFY_PLAN=true`，和工具池启用条件一致。
+- 补齐 `src/skills/bundled/verify/SKILL.md`、`examples/cli.md`、`examples/server.md`，构建后不再生成 bundled verify skill 空文本 asset stub。
+- `scripts/test-build-safety.mjs` 增加 `.md` text loader，并新增 VerifyPlanExecution 与 verify skill 资产专项测试。
+
+### 本轮 mock/stub/风险说明
+
+- `VerifyPlanExecutionTool` 是 **external-conservative** 实现，不是 Anthropic 内部后台 verifier。
+- 它不会启动后台 agent、不会自动证明计划已完成，也不会把 `verificationCompleted` 置为 `true`。
+- 它的作用是让 opt-in 路径可加载、可调用、可诊断，并明确提醒模型/用户仍需报告真实测试证据。
+- 默认不启用；只有显式设置 `CLAUDE_CODE_VERIFY_PLAN=true` 才会进入工具池并向模型注入调用提示。
+
+### 本轮验证结果
+
+```text
+npm run check
+npm run build
+npm run test:build-safety
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+```
+
+结果：
+
+- `npm run check` 通过。
+- `npm run build` 通过，stub manifest 从 14 项降到 10 项，`VerifyPlanExecutionTool` 和 bundled verify skill 文档资产不再在 manifest 中。
+- `npm run test:build-safety` 通过，当前为 35/35 项。
+- VerifyPlanExecution 专项测试覆盖默认关闭、显式 env opt-in、工具池加载、调用后的 app state 更新、工具结果序列化和“非官方 verifier”警告。
+
 ## 当前风险边界
 
 当前产物适合验证 CLI 主路径、模型调用、基础项目读取、非交互任务、显式 `--dump-system-prompt` 快速路径、高可用 History Snip 路径，以及 Snip 后 resume/transcript 读写侧、恢复入口和 compact+Snip 叠加恢复一致性。
 
-不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、VerifyPlanExecution、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。
+不要把它理解为完整恢复的官方 Bun 编译产物。内部实验功能、Chrome MCP、Tungsten、Workflow、部分 SDK generated 类型、语音、图片 native 处理、deep link 等路径仍然可能不可用或只提供 stub。VerifyPlanExecution 已不再是缺失模块，但仍只是外部保守版，不是官方后台 verifier。
 
 ContextCollapse 的当前风险要单独看待：它已不再是纯缺失模块，但仍不是官方完整长上下文压缩系统。它现在的价值是让相关代码路径可构建、可加载、可诊断，并且不会默认破坏 AutoCompact；它还不能替代真实 ctx-agent、摘要提交或官方投影恢复逻辑。
 

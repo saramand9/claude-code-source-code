@@ -3125,7 +3125,7 @@ export function REPL({
       }
 
       // Atomically: clear initial message, set permission mode and rules, and store plan for verification
-      const shouldStorePlanForVerification = initialMsg.message.planContent && isAntUserType() && isEnvTruthy(undefined);
+      const shouldStorePlanForVerification = !!initialMsg.message.planContent && isEnvTruthy(process.env.CLAUDE_CODE_VERIFY_PLAN);
       setAppState(prev => {
         // Build and apply permission updates (mode + allowedPrompts rules)
         let updatedToolPermissionContext = initialMsg.mode ? applyPermissionUpdates(prev.toolPermissionContext, buildPermissionUpdates(initialMsg.mode, initialMsg.allowedPrompts)) : prev.toolPermissionContext;
