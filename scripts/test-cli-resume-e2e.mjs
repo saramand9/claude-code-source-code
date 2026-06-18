@@ -300,6 +300,20 @@ const writeHookDenyReason =
 const writeHookDenyRelativePath =
   'build-src/test-artifacts/cli-write-hook-deny-tool.txt'
 const writeHookDenyFilePath = join(ROOT, writeHookDenyRelativePath)
+const writeHookAllowRuleAskPrompt =
+  'cli write pretooluse hook allow overridden by ask prompt'
+const writeHookAllowRuleAskContent =
+  'write pretooluse hook allow overridden by ask fixture: attempted-8402'
+const writeHookAllowRuleAskFinalResponse =
+  'structured Write PreToolUse hook allow ask-rule completed'
+const writeHookAllowRuleAskReason =
+  'pretooluse hook approved Write fixture marker 8402'
+const writeHookAllowRuleAskRelativePath =
+  'build-src/test-artifacts/cli-write-hook-allow-rule-ask-tool.txt'
+const writeHookAllowRuleAskFilePath = join(
+  ROOT,
+  writeHookAllowRuleAskRelativePath,
+)
 const userSettingsWriteDenyPrompt =
   'cli user settings write deny prompt'
 const userSettingsWriteDenyContent =
@@ -1939,6 +1953,24 @@ function responseForBody(body, fallbackIndex) {
       text: '',
     }
   }
+  if (combinedText.includes(writeHookAllowRuleAskPrompt)) {
+    if (hasToolResultWithIdPrefix(body, 'toolu_cli_write_hook_allow_ask_')) {
+      return {
+        index: responses.length + 55,
+        text: writeHookAllowRuleAskFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 55,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeHookAllowRuleAskContent}\n`,
+        filePath: writeHookAllowRuleAskFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_hook_allow_ask_',
+      },
+      text: '',
+    }
+  }
   if (combinedText.includes(userSettingsWriteDenyPrompt)) {
     if (hasToolResultWithIdPrefix(body, 'toolu_cli_user_settings_write_deny_')) {
       return {
@@ -2790,6 +2822,29 @@ function startMockServer() {
         writeJson(res, {
           decision: 'block',
           reason: writeHookDenyReason,
+        })
+        return
+      }
+
+      if (url.pathname === '/hook/pretooluse-approve-write') {
+        assert.equal(
+          body.hook_event_name,
+          'PreToolUse',
+          'PreToolUse allow hook endpoint should receive a PreToolUse event',
+        )
+        assert.equal(
+          body.tool_name,
+          'Write',
+          'PreToolUse allow hook endpoint should receive the Write tool name',
+        )
+        assert.equal(
+          body.tool_input?.file_path,
+          writeHookAllowRuleAskFilePath,
+          'PreToolUse allow hook endpoint should receive the Write file path',
+        )
+        writeJson(res, {
+          decision: 'approve',
+          reason: writeHookAllowRuleAskReason,
         })
         return
       }
@@ -6311,7 +6366,7 @@ async function main() {
       CLAUDE_CONFIG_DIR: writeHookDenyConfigDir,
     }
     delete writeHookDenyEnv.CLAUDE_CODE_SIMPLE
-    const writeHookDenyArgs = [
+    const writeHookArgs = [
       '--print',
       '--output-format',
       'json',
@@ -6330,7 +6385,7 @@ async function main() {
     const writeHookDenyRun = parseJsonOutput(
       (
         await runCli(
-          [...writeHookDenyArgs, writeHookDenyPrompt],
+          [...writeHookArgs, writeHookDenyPrompt],
           writeHookDenyEnv,
           runCliOptions(),
         )
@@ -6388,6 +6443,109 @@ async function main() {
       writeHookDenyFileExists,
       false,
       'Write PreToolUse hook deny should not create the blocked file',
+    )
+
+    const writeHookAllowRuleAskConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-write-hook-allow-rule-ask-config-'),
+    )
+    await writeFile(
+      join(writeHookAllowRuleAskConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          permissions: {
+            ask: [`Edit(${writeHookAllowRuleAskRelativePath})`],
+          },
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Write',
+                hooks: [
+                  {
+                    type: 'http',
+                    url: `${server.baseUrl}/hook/pretooluse-approve-write`,
+                    timeout: 5,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const writeHookAllowRuleAskEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: writeHookAllowRuleAskConfigDir,
+    }
+    delete writeHookAllowRuleAskEnv.CLAUDE_CODE_SIMPLE
+    await rm(writeHookAllowRuleAskFilePath, { force: true })
+    const beforeWriteHookAllowRuleAskRequests = server.requests.length
+    const writeHookAllowRuleAskRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeHookArgs, writeHookAllowRuleAskPrompt],
+          writeHookAllowRuleAskEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeHookAllowRuleAskRun.is_error,
+      false,
+      'Write PreToolUse hook allow with ask rule should complete after model final response',
+    )
+    assert.equal(
+      writeHookAllowRuleAskRun.result,
+      writeHookAllowRuleAskFinalResponse,
+      'Write PreToolUse hook allow with ask-rule final response',
+    )
+    const writeHookAllowRuleAskRequests = server.requests
+      .slice(beforeWriteHookAllowRuleAskRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeHookAllowRuleAskRequests.length,
+      2,
+      'Write PreToolUse hook allow with ask rule should make tool_use and final requests',
+    )
+    const writeHookAllowRequests = server.requests
+      .slice(beforeWriteHookAllowRuleAskRequests)
+      .filter(request => request.path === '/hook/pretooluse-approve-write')
+    assert.equal(
+      writeHookAllowRequests.length,
+      1,
+      'Write PreToolUse hook allow with ask rule should call the approving hook once',
+    )
+    const writeHookAllowRuleAskResultBlocks = requestContentBlocks(
+      writeHookAllowRuleAskRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeHookAllowRuleAskResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith('toolu_cli_write_hook_allow_ask_') &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('Claude requested permissions to write to') &&
+          block.content.includes("haven't granted it yet")
+        )
+      }),
+      `Write PreToolUse hook allow with ask rule should include approval-required tool_result: ${JSON.stringify(writeHookAllowRuleAskResultBlocks, null, 2)}`,
+    )
+    const writeHookAllowRuleAskFileExists = await stat(
+      writeHookAllowRuleAskFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeHookAllowRuleAskFileExists,
+      false,
+      'Write PreToolUse hook allow should not bypass settings ask rules',
     )
 
     const userSettingsDenyConfigDir = await mkdtemp(
@@ -7679,6 +7837,7 @@ async function main() {
     console.log('ok - Write respects Edit path-specific deny rules')
     console.log('ok - Write respects Edit path-specific ask rules')
     console.log('ok - Write respects PreToolUse hook denial')
+    console.log('ok - Write hook approval does not bypass ask rules')
     console.log('ok - user settings deny removes Write from the tool pool')
     console.log('ok - project settings deny removes Write from the tool pool')
     console.log('ok - managed-only permissions ignore CLI Write allow')

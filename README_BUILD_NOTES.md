@@ -2254,6 +2254,10 @@ arguments allow that tool.
   - Asserts the hook endpoint is called once, the follow-up `tool_result` is
     `is_error: true` and includes the hook reason, and the blocked file is not
     created.
+  - Adds a second HTTP hook scenario returning `{"decision":"approve"}` while
+    user settings ask `Edit(path)` for the same Write target.
+  - Asserts the approving hook is called, but the settings ask rule still wins
+    and the target file is not created.
 
 ### Verification
 
@@ -2266,4 +2270,5 @@ Expected new output:
 
 ```text
 ok - Write respects PreToolUse hook denial
+ok - Write hook approval does not bypass ask rules
 ```
