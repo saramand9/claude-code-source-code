@@ -2300,3 +2300,38 @@ Expected new output:
 ```text
 ok - PreToolUse hook allow does not bypass deny rules
 ```
+
+## 2026-06-19 PermissionRequest headless hook build-safety coverage
+
+This round narrows the remaining hook-permission risk. `PreToolUse` hook
+denial and approval/ask ordering are covered by real CLI E2E, and the shared
+PreToolUse allow resolver is covered at build-safety level. The new coverage
+adds the adjacent headless prompt path used by async/background agents that
+cannot show an interactive permission dialog.
+
+- `scripts/test-build-safety.mjs`
+  - Imports real `hasPermissionsToUseTool` and registered hook plumbing.
+  - Runs with `toolPermissionContext.shouldAvoidPermissionPrompts = true`.
+  - Asserts the no-hook path still auto-denies with an `asyncAgent` decision.
+  - Registers a real `PermissionRequest` callback hook for `Write`.
+  - Asserts hook deny wins over the headless auto-deny fallback and preserves
+    the hook message.
+  - Asserts hook allow wins over the headless auto-deny fallback and preserves
+    `updatedInput`.
+
+Risk boundary update: the broad "hook refusal" gap is now reduced to uncovered
+interactive PermissionRequest UI flows, command-hook exit-code behavior, other
+tool families beyond `Write`, and larger mixed-tool/concurrency combinations.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionRequest hooks decide headless permission prompts
+```

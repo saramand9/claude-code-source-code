@@ -1364,6 +1364,182 @@ console.log('pretool hook allow deny rules OK');`,
   assert.equal(output, 'pretool hook allow deny rules OK')
 })
 
+await test('PermissionRequest hooks decide headless permission prompts', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-request-headless-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/permission-request-headless-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { hasPermissionsToUseTool },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/permissions/permissions.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const input = {
+  file_path: 'build-src/test-artifacts/permission-request-headless.txt',
+  content: 'headless permission request hook',
+};
+const assistantMessage = {
+  uuid: 'assistant-test-uuid',
+  message: {
+    id: 'msg_permission_request_headless_hook',
+    role: 'assistant',
+    content: [],
+  },
+};
+const tool = {
+  name: 'Write',
+  inputSchema: {
+    parse(value) {
+      return value;
+    },
+  },
+  async checkPermissions() {
+    return {
+      behavior: 'passthrough',
+      suggestions: [{ behavior: 'allow', destination: 'userSettings', rule: 'Write' }],
+    };
+  },
+};
+function makeContext() {
+  let appState = {
+    sessionHooks: new Map(),
+    toolPermissionContext: {
+      mode: 'default',
+      shouldAvoidPermissionPrompts: true,
+      additionalWorkingDirectories: new Map(),
+      alwaysAllowRules: {},
+      alwaysDenyRules: {},
+      alwaysAskRules: {},
+      isBypassPermissionsModeAvailable: false,
+    },
+  };
+  return {
+    abortController: new AbortController(),
+    options: { isNonInteractiveSession: true },
+    getAppState() {
+      return appState;
+    },
+    setAppState(updater) {
+      appState = updater(appState);
+    },
+    updateAttributionState() {},
+  };
+}
+async function runPermissionCheck() {
+  return await hasPermissionsToUseTool(
+    tool,
+    input,
+    makeContext(),
+    assistantMessage,
+    'toolu_permission_request_headless_hook',
+  );
+}
+
+const fallback = await runPermissionCheck();
+if (fallback.behavior !== 'deny' || fallback.decisionReason?.type !== 'asyncAgent') {
+  throw new Error('headless prompt should auto-deny without hooks: ' + JSON.stringify(fallback));
+}
+
+let denyCalls = 0;
+registerHookCallbacks({
+  PermissionRequest: [
+    {
+      matcher: 'Write',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            denyCalls += 1;
+            if (hookInput.hook_event_name !== 'PermissionRequest') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.tool_name !== 'Write') {
+              throw new Error('unexpected hook tool: ' + hookInput.tool_name);
+            }
+            if (hookInput.tool_input.file_path !== input.file_path) {
+              throw new Error('unexpected hook file path: ' + JSON.stringify(hookInput.tool_input));
+            }
+            if (!Array.isArray(hookInput.permission_suggestions) || hookInput.permission_suggestions.length !== 1) {
+              throw new Error('missing permission suggestions: ' + JSON.stringify(hookInput.permission_suggestions));
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'deny',
+                  message: 'blocked by PermissionRequest hook',
+                },
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+const denied = await runPermissionCheck();
+if (denyCalls !== 1) {
+  throw new Error('deny hook should run once, got ' + denyCalls);
+}
+if (denied.behavior !== 'deny' || denied.decisionReason?.hookName !== 'PermissionRequest') {
+  throw new Error('PermissionRequest hook deny should win: ' + JSON.stringify(denied));
+}
+if (denied.message !== 'blocked by PermissionRequest hook') {
+  throw new Error('PermissionRequest hook deny should preserve message: ' + JSON.stringify(denied));
+}
+
+clearRegisteredHooks();
+let allowCalls = 0;
+registerHookCallbacks({
+  PermissionRequest: [
+    {
+      matcher: 'Write',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async () => {
+            allowCalls += 1;
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'allow',
+                  updatedInput: { ...input, content: 'updated by hook' },
+                },
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+const allowed = await runPermissionCheck();
+if (allowCalls !== 1) {
+  throw new Error('allow hook should run once, got ' + allowCalls);
+}
+if (allowed.behavior !== 'allow' || allowed.decisionReason?.hookName !== 'PermissionRequest') {
+  throw new Error('PermissionRequest hook allow should win: ' + JSON.stringify(allowed));
+}
+if (allowed.updatedInput?.content !== 'updated by hook') {
+  throw new Error('PermissionRequest hook allow should preserve updated input: ' + JSON.stringify(allowed));
+}
+
+console.log('permission request headless hook OK');`,
+  )
+  assert.equal(output, 'permission request headless hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
