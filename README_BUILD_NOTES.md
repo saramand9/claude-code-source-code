@@ -2335,3 +2335,38 @@ Expected new output:
 ```text
 ok - PermissionRequest hooks decide headless permission prompts
 ```
+
+## 2026-06-19 PreToolUse command hook exit-2 E2E coverage
+
+This round covers the command-hook branch of the remaining hook-denial risk.
+The earlier E2E used an HTTP hook returning a structured block decision; this
+new scenario validates the legacy hook protocol where a command exits with
+status code 2 and writes the denial reason to stderr.
+
+- `scripts/test-cli-resume-e2e.mjs`
+  - Adds `cli write pretooluse command hook exit two prompt`.
+  - Creates a temporary `settings.json` with `hooks.PreToolUse` matching
+    `Write` and a `type: "command"` hook using `shell: "powershell"`.
+  - The hook writes a marker to stderr and exits with code 2.
+  - Runs real non-bare `dist/cli.js` with `--tools Write --allowedTools Write`.
+  - Asserts the follow-up `tool_result` is `is_error: true`, includes the
+    `PreToolUse:Write hook error` wrapper and command-hook marker, and the
+    blocked file is not created.
+
+Risk boundary update: PreToolUse denial is now covered for both structured
+HTTP hook output and command exit-code-2 output. Remaining hook gaps are mainly
+interactive PermissionRequest UI, non-Write tool families, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-cli-resume-e2e.mjs
+npm run test:cli-e2e
+```
+
+Expected new output:
+
+```text
+ok - Write respects PreToolUse command hook exit 2 denial
+```

@@ -300,6 +300,20 @@ const writeHookDenyReason =
 const writeHookDenyRelativePath =
   'build-src/test-artifacts/cli-write-hook-deny-tool.txt'
 const writeHookDenyFilePath = join(ROOT, writeHookDenyRelativePath)
+const writeHookCommandDenyPrompt =
+  'cli write pretooluse command hook exit two prompt'
+const writeHookCommandDenyContent =
+  'write pretooluse command hook exit two fixture: attempted-7196'
+const writeHookCommandDenyFinalResponse =
+  'structured Write PreToolUse command hook deny completed'
+const writeHookCommandDenyReason =
+  'pretooluse command hook exit 2 fixture marker 7196'
+const writeHookCommandDenyRelativePath =
+  'build-src/test-artifacts/cli-write-hook-command-deny-tool.txt'
+const writeHookCommandDenyFilePath = join(
+  ROOT,
+  writeHookCommandDenyRelativePath,
+)
 const writeHookAllowRuleAskPrompt =
   'cli write pretooluse hook allow overridden by ask prompt'
 const writeHookAllowRuleAskContent =
@@ -1949,6 +1963,29 @@ function responseForBody(body, fallbackIndex) {
         content: `${writeHookDenyContent}\n`,
         filePath: writeHookDenyFilePath,
         toolUseIdPrefix: 'toolu_cli_write_hook_deny_',
+      },
+      text: '',
+    }
+  }
+  if (combinedText.includes(writeHookCommandDenyPrompt)) {
+    if (
+      hasToolResultWithIdPrefix(
+        body,
+        'toolu_cli_write_hook_command_deny_',
+      )
+    ) {
+      return {
+        index: responses.length + 56,
+        text: writeHookCommandDenyFinalResponse,
+      }
+    }
+    return {
+      index: responses.length + 56,
+      writeToolUse: true,
+      writeToolOptions: {
+        content: `${writeHookCommandDenyContent}\n`,
+        filePath: writeHookCommandDenyFilePath,
+        toolUseIdPrefix: 'toolu_cli_write_hook_command_deny_',
       },
       text: '',
     }
@@ -6445,6 +6482,101 @@ async function main() {
       'Write PreToolUse hook deny should not create the blocked file',
     )
 
+    const writeHookCommandDenyConfigDir = await mkdtemp(
+      join(ARTIFACT_DIR, 'cli-write-hook-command-deny-config-'),
+    )
+    await writeFile(
+      join(writeHookCommandDenyConfigDir, 'settings.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Write',
+                hooks: [
+                  {
+                    type: 'command',
+                    shell: 'powershell',
+                    command: `[Console]::Error.WriteLine('${writeHookCommandDenyReason}'); exit 2`,
+                    timeout: 5,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+    const writeHookCommandDenyEnv = {
+      ...env,
+      CLAUDE_CONFIG_DIR: writeHookCommandDenyConfigDir,
+    }
+    delete writeHookCommandDenyEnv.CLAUDE_CODE_SIMPLE
+    await rm(writeHookCommandDenyFilePath, { force: true })
+    const beforeWriteHookCommandDenyRequests = server.requests.length
+    const writeHookCommandDenyRun = parseJsonOutput(
+      (
+        await runCli(
+          [...writeHookArgs, writeHookCommandDenyPrompt],
+          writeHookCommandDenyEnv,
+          runCliOptions(),
+        )
+      ).stdout,
+    )
+    assert.equal(
+      writeHookCommandDenyRun.is_error,
+      false,
+      'Write PreToolUse command hook deny run should complete after model final response',
+    )
+    assert.equal(
+      writeHookCommandDenyRun.result,
+      writeHookCommandDenyFinalResponse,
+      'Write PreToolUse command hook deny final response',
+    )
+    const writeHookCommandDenyRequests = server.requests
+      .slice(beforeWriteHookCommandDenyRequests)
+      .filter(request => {
+        return request.path.endsWith('/messages') && request.body.stream === true
+      })
+    assert.equal(
+      writeHookCommandDenyRequests.length,
+      2,
+      'Write PreToolUse command hook deny run should make tool_use and final requests',
+    )
+    const writeHookCommandDenyResultBlocks = requestContentBlocks(
+      writeHookCommandDenyRequests[1],
+      'tool_result',
+    )
+    assert(
+      writeHookCommandDenyResultBlocks.some(block => {
+        return (
+          typeof block.tool_use_id === 'string' &&
+          block.tool_use_id.startsWith(
+            'toolu_cli_write_hook_command_deny_',
+          ) &&
+          block.is_error === true &&
+          typeof block.content === 'string' &&
+          block.content.includes('PreToolUse:Write hook error') &&
+          block.content.includes(writeHookCommandDenyReason)
+        )
+      }),
+      `Write PreToolUse command hook deny follow-up should include exit-code hook-denied tool_result: ${JSON.stringify(writeHookCommandDenyResultBlocks, null, 2)}`,
+    )
+    const writeHookCommandDenyFileExists = await stat(
+      writeHookCommandDenyFilePath,
+    ).then(
+      () => true,
+      () => false,
+    )
+    assert.equal(
+      writeHookCommandDenyFileExists,
+      false,
+      'Write PreToolUse command hook deny should not create the blocked file',
+    )
+
     const writeHookAllowRuleAskConfigDir = await mkdtemp(
       join(ARTIFACT_DIR, 'cli-write-hook-allow-rule-ask-config-'),
     )
@@ -7837,6 +7969,7 @@ async function main() {
     console.log('ok - Write respects Edit path-specific deny rules')
     console.log('ok - Write respects Edit path-specific ask rules')
     console.log('ok - Write respects PreToolUse hook denial')
+    console.log('ok - Write respects PreToolUse command hook exit 2 denial')
     console.log('ok - Write hook approval does not bypass ask rules')
     console.log('ok - user settings deny removes Write from the tool pool')
     console.log('ok - project settings deny removes Write from the tool pool')
