@@ -5240,6 +5240,155 @@ console.log('session start setup hooks OK');`,
   assert.equal(output, 'session start setup hooks OK')
 })
 
+await test('SessionStart and Setup command hooks expose startup context', async () => {
+  const output = await buildAndRunSnippet(
+    'session-start-setup-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/session-start-setup-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'session-start-setup-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'startup-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const sessionContext = 'session command context marker 8712';
+const setupContext = 'setup command context marker 8712';
+const initialUserMessage = 'session command initial user marker 8712';
+const watchPath = commandDir.replace(/\\\\/g, '/') + '/watched.txt';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name === 'SessionStart') {",
+    "  if (data.source !== 'startup') { process.stderr.write('bad source ' + data.source); process.exit(3); }",
+    "  if (data.agent_type !== 'command-agent-8712') { process.stderr.write('bad agent type ' + data.agent_type); process.exit(4); }",
+    "  if (data.model !== 'model-command-8712') { process.stderr.write('bad model ' + data.model); process.exit(5); }",
+    "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: '" + sessionContext + "', initialUserMessage: '" + initialUserMessage + "', watchPaths: ['" + watchPath + "'] } }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'Setup') {",
+    "  if (data.trigger !== 'init') { process.stderr.write('bad trigger ' + data.trigger); process.exit(6); }",
+    "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Setup', additionalContext: '" + setupContext + "' } }));",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad event ' + data.hook_event_name);",
+    "process.exit(7);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeSessionStartHooks, executeSetupHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  SessionStart: [
+    {
+      matcher: 'startup',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  Setup: [
+    {
+      matcher: 'init',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const sessionResults = [];
+for await (const result of executeSessionStartHooks(
+  'startup',
+  'session-command-8712',
+  'command-agent-8712',
+  'model-command-8712',
+  undefined,
+  10000,
+)) {
+  sessionResults.push(result);
+}
+if (!sessionResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(sessionContext)
+)) {
+  throw new Error('SessionStart command hook should return additional context: ' + JSON.stringify(sessionResults));
+}
+if (!sessionResults.some(result => result.initialUserMessage === initialUserMessage)) {
+  throw new Error('SessionStart command hook should return initial user message: ' + JSON.stringify(sessionResults));
+}
+if (!sessionResults.some(result =>
+  Array.isArray(result.watchPaths) &&
+  result.watchPaths.includes(watchPath)
+)) {
+  throw new Error('SessionStart command hook should return watch paths: ' + JSON.stringify(sessionResults));
+}
+
+const skippedSession = [];
+for await (const result of executeSessionStartHooks(
+  'resume',
+  'session-command-8712',
+  'command-agent-8712',
+  'model-command-8712',
+  undefined,
+  10000,
+)) {
+  skippedSession.push(result);
+}
+if (skippedSession.length !== 0) {
+  throw new Error('SessionStart command matcher should skip resume: ' + JSON.stringify(skippedSession));
+}
+
+const setupResults = [];
+for await (const result of executeSetupHooks('init', undefined, 10000)) {
+  setupResults.push(result);
+}
+if (!setupResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(setupContext)
+)) {
+  throw new Error('Setup command hook should return additional context: ' + JSON.stringify(setupResults));
+}
+
+const skippedSetup = [];
+for await (const result of executeSetupHooks('maintenance', undefined, 10000)) {
+  skippedSetup.push(result);
+}
+if (skippedSetup.length !== 0) {
+  throw new Error('Setup command matcher should skip maintenance: ' + JSON.stringify(skippedSetup));
+}
+
+console.log('session start setup command hooks OK');`,
+  )
+  assert.equal(output, 'session start setup command hooks OK')
+})
+
 await test('Stop hooks block and prevent continuation', async () => {
   const output = await buildAndRunSnippet(
     'stop-hook-test',

@@ -3287,6 +3287,42 @@ ok - SubagentStop command hooks block with agent metadata
 85/85 build-safety tests passed.
 ```
 
+## 2026-06-19 SessionStart and Setup command hook coverage
+
+This round extends startup hook coverage from SDK callback hooks to command
+hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a real Node command hook fixture shared by `SessionStart` and `Setup`.
+  - Verifies `SessionStart` command hooks receive source, agent type, and model
+    metadata.
+  - Asserts command JSON output propagates `additionalContext`,
+    `initialUserMessage`, and `watchPaths`.
+  - Verifies `Setup` command hooks receive their trigger and propagate
+    `additionalContext`.
+  - Asserts source/trigger matchers skip unrelated startup events.
+
+Risk boundary update: settings-style startup command hooks now have direct
+build-safety coverage alongside callback startup hooks. Remaining gaps are
+prompt and agent hook execution outside the REPL path, plus full
+keyboard-driven TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - SessionStart and Setup command hooks expose startup context
+86/86 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI
