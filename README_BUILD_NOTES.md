@@ -3248,6 +3248,40 @@ ok - PostToolUse command hooks can update MCP output
 96/96 build-safety tests passed.
 ```
 
+## 2026-06-19 PostToolUseFailure command hook coverage
+
+This round extends failed-tool hook coverage from callback hooks to real command
+hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture for `PostToolUseFailure`.
+  - Verifies command hooks receive tool name, tool use id, processed input,
+    error text, and interrupt metadata.
+  - Asserts structured command stdout can add failure-specific context that is
+    surfaced as a hook attachment.
+  - Asserts matcher misses skip unrelated tools without producing updates.
+
+Risk boundary update: failed tool execution now has direct command-hook
+regression coverage for metadata delivery, additional context, and matcher
+filtering. Remaining gaps include blocking/prevent-continuation behavior and
+timeout or malformed-output cases specific to failed-tool command hooks.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PostToolUseFailure command hooks attach additional context
+97/97 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

@@ -2626,6 +2626,145 @@ console.log('post tool use failure hook OK');`,
   assert.equal(output, 'post tool use failure hook OK')
 })
 
+await test('PostToolUseFailure command hooks attach additional context', async () => {
+  const output = await buildAndRunSnippet(
+    'post-tool-use-failure-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-failure-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'post-tool-use-failure-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'post-tool-use-failure-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const inputPath = 'build-src/test-artifacts/missing-post-failure-command.txt';
+const failureMessage = 'ENOENT missing-post-failure command marker 7319';
+const additionalContext = 'post failure command hook context marker 7319';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PostToolUseFailure') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Read') { process.stderr.write('bad tool ' + data.tool_name); process.exit(4); }",
+    "if (data.tool_use_id !== 'toolu_post_failure_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
+    "if (data.tool_input.file_path !== '" + inputPath + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
+    "if (!String(data.error).includes('" + failureMessage + "')) { process.stderr.write('bad error ' + data.error); process.exit(7); }",
+    "if (data.is_interrupt !== true) { process.stderr.write('bad interrupt flag ' + data.is_interrupt); process.exit(8); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: '" + additionalContext + "' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { runPostToolUseFailureHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/services/tools/toolHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  PostToolUseFailure: [
+    {
+      matcher: 'Read',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const updates = [];
+for await (const update of runPostToolUseFailureHooks(
+  context,
+  { name: 'Read', isMcp: false },
+  'toolu_post_failure_command_hook',
+  'msg_post_failure_command_hook',
+  { file_path: inputPath },
+  failureMessage,
+  true,
+  'req_post_failure_command_hook',
+  undefined,
+  undefined,
+)) {
+  updates.push(update);
+}
+const contextAttachment = updates.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_additional_context' &&
+    attachment.hookEvent === 'PostToolUseFailure' &&
+    attachment.hookName === 'PostToolUseFailure:Read' &&
+    Array.isArray(attachment.content) &&
+    attachment.content.includes(additionalContext)
+  );
+});
+if (!contextAttachment) {
+  throw new Error('missing PostToolUseFailure command additional context attachment: ' + JSON.stringify(updates));
+}
+
+const skipped = [];
+for await (const update of runPostToolUseFailureHooks(
+  context,
+  { name: 'Write', isMcp: false },
+  'toolu_post_failure_command_hook_skip',
+  'msg_post_failure_command_hook_skip',
+  { file_path: inputPath },
+  failureMessage,
+  true,
+  'req_post_failure_command_hook_skip',
+  undefined,
+  undefined,
+)) {
+  skipped.push(update);
+}
+if (skipped.length !== 0) {
+  throw new Error('PostToolUseFailure command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+console.log('post tool use failure command hook OK');`,
+  )
+  assert.equal(output, 'post tool use failure command hook OK')
+})
+
 await test('PostToolUse hooks can update MCP output', async () => {
   const output = await buildAndRunSnippet(
     'post-tool-use-hook-test',
