@@ -1034,7 +1034,9 @@ async function execCommandHook(
     // On other platforms, shell: true uses /bin/sh.
     const directWindowsHelper =
       isWindows &&
-      (hookEvent === 'StatusLine' || hookEvent === 'FileSuggestion')
+      (hookEvent === 'StatusLine' ||
+        hookEvent === 'FileSuggestion' ||
+        hookEvent === 'PermissionDenied')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null
     const shell = isWindows ? findGitBashPath() : true

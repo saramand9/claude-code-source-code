@@ -3143,6 +3143,46 @@ ok - status line and file suggestion commands respect live timeouts
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PermissionDenied command timeout hardening
+
+This round tightens `PermissionDenied` command-hook safety around malformed
+output and live timeouts.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn fast path for simple helper commands to
+    `PermissionDenied` hooks, so common commands such as `node hook.mjs` can be
+    cancelled by the held child-process handle instead of depending only on
+    Git Bash process-tree cleanup.
+  - Keeps complex shell commands on the existing Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the `PermissionDenied` command-hook regression to cover malformed
+    stdout that must not request retry.
+  - Adds a timeout fixture that flushes a retry JSON payload before hanging,
+    then verifies the timed-out hook does not yield retry.
+  - Verifies the timed-out helper starts but does not write its late marker
+    after the timeout window.
+
+Risk boundary update: `PermissionDenied` command hooks now have direct
+build-safety coverage for successful retry, matcher filtering, malformed
+output, and live timeout cleanup. Remaining gaps include retry precedence across
+multiple simultaneous hooks and complex-shell timeout cleanup.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PermissionDenied command hooks can request retry
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.

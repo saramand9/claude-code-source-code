@@ -3313,7 +3313,7 @@ console.log('permission denied hook OK');`,
 await test('PermissionDenied command hooks can request retry', async () => {
   const output = await buildAndRunSnippet(
     'permission-denied-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/permission-denied-command-hook-config';
@@ -3324,6 +3324,14 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'permission-denied-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const malformedCommandPath = join(commandDir, 'permission-denied-malformed-command-hook.mjs');
+const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'permission-denied-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'permission-denied-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'permission-denied-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const command = 'echo permission-denied-command-hook marker 5627';
 const deniedReason = 'permission denied command reason marker 5627';
 await writeFile(
@@ -3342,6 +3350,27 @@ await writeFile(
   ].join('\\n'),
   'utf8',
 );
+await writeFile(
+  malformedCommandPath,
+  [
+    "process.stdout.write('not-json permission denied malformed marker 5627');",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: true } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late retry should not be observed');",
+    "}, 1600);",
+  ].join('\\n'),
+  'utf8',
+);
 
 const [
   { executePermissionDeniedHooks },
@@ -3356,6 +3385,24 @@ const [
 setIsInteractive(false);
 clearRegisteredHooks();
 resetHooksConfigSnapshot();
+
+function registerPermissionDeniedCommand(command, timeout = 5) {
+  clearRegisteredHooks();
+  registerHookCallbacks({
+    PermissionDenied: [
+      {
+        matcher: 'Bash',
+        hooks: [
+          {
+            type: 'command',
+            command,
+            timeout,
+          },
+        ],
+      },
+    ],
+  });
+}
 
 registerHookCallbacks({
   PermissionDenied: [
@@ -3421,6 +3468,52 @@ for await (const result of executePermissionDeniedHooks(
 }
 if (skipped.length !== 0) {
   throw new Error('PermissionDenied command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+registerPermissionDeniedCommand('node ' + malformedCommandPathForHook);
+const malformed = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_command_hook_malformed',
+  { command },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  malformed.push(result);
+}
+if (malformed.some(result => result.retry === true)) {
+  throw new Error('PermissionDenied malformed command output must not request retry: ' + JSON.stringify(malformed));
+}
+
+registerPermissionDeniedCommand('node ' + timeoutCommandPathForHook, 0.5);
+const timedOut = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_command_hook_timeout',
+  { command },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  timedOut.push(result);
+}
+if (timedOut.some(result => result.retry === true)) {
+  throw new Error('PermissionDenied timed-out command output must not request retry: ' + JSON.stringify(timedOut));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('PermissionDenied timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('PermissionDenied timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('permission denied command hook OK');`,
