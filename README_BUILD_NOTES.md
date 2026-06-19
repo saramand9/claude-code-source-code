@@ -2569,3 +2569,35 @@ Expected new output:
 ```text
 ok - environment hooks collect watch paths and system messages
 ```
+
+## 2026-06-19 worktree hook build-safety coverage
+
+This round covers WorktreeCreate/WorktreeRemove hook plumbing without creating
+real git worktrees. These hooks are outside the normal tool execution pipeline
+and are used by worktree-backed agent flows.
+
+- `scripts/test-build-safety.mjs`
+  - Registers callback hooks for `WorktreeCreate` and `WorktreeRemove`.
+  - Asserts `hasWorktreeCreateHook()` detects registered create hooks.
+  - Asserts `executeWorktreeCreateHook()` passes the requested name to the hook
+    and returns the hook-provided worktree path.
+  - Asserts `executeWorktreeRemoveHook()` passes the path to the hook and
+    reports that hooks ran.
+  - Asserts remove returns `false` after hooks are cleared.
+
+Risk boundary update: worktree hook detection and callback execution now have
+direct build-safety coverage. Remaining gaps are full git worktree E2E,
+interactive PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - worktree hooks create and remove paths
+```

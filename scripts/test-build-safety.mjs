@@ -2113,6 +2113,115 @@ console.log('environment watch hooks OK');`,
   assert.equal(output, 'environment watch hooks OK')
 })
 
+await test('worktree hooks create and remove paths', async () => {
+  const output = await buildAndRunSnippet(
+    'worktree-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/worktree-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  {
+    executeWorktreeCreateHook,
+    executeWorktreeRemoveHook,
+    hasWorktreeCreateHook,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+if (hasWorktreeCreateHook()) {
+  throw new Error('WorktreeCreate hook should not be configured before registration');
+}
+
+const expectedName = 'worktree-hook-branch-6119';
+const expectedPath = 'build-src/test-artifacts/worktree-hook-created-6119';
+let createCalls = 0;
+let removeCalls = 0;
+registerHookCallbacks({
+  WorktreeCreate: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            createCalls += 1;
+            if (hookInput.hook_event_name !== 'WorktreeCreate') {
+              throw new Error('unexpected create event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.name !== expectedName) {
+              throw new Error('unexpected worktree name: ' + hookInput.name);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'WorktreeCreate',
+                worktreePath: expectedPath,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+  WorktreeRemove: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            removeCalls += 1;
+            if (hookInput.hook_event_name !== 'WorktreeRemove') {
+              throw new Error('unexpected remove event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.worktree_path !== expectedPath) {
+              throw new Error('unexpected worktree path: ' + hookInput.worktree_path);
+            }
+            return { systemMessage: 'worktree removed marker 6119' };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+if (!hasWorktreeCreateHook()) {
+  throw new Error('WorktreeCreate hook should be detected after registration');
+}
+
+const created = await executeWorktreeCreateHook(expectedName);
+if (createCalls !== 1) {
+  throw new Error('WorktreeCreate hook should run once, got ' + createCalls);
+}
+if (created.worktreePath !== expectedPath) {
+  throw new Error('WorktreeCreate should return hook path: ' + JSON.stringify(created));
+}
+
+const removed = await executeWorktreeRemoveHook(expectedPath);
+if (removed !== true) {
+  throw new Error('WorktreeRemove hook should report that it ran');
+}
+if (removeCalls !== 1) {
+  throw new Error('WorktreeRemove hook should run once, got ' + removeCalls);
+}
+
+clearRegisteredHooks();
+const removedWithoutHooks = await executeWorktreeRemoveHook(expectedPath);
+if (removedWithoutHooks !== false) {
+  throw new Error('WorktreeRemove should return false without hooks');
+}
+
+console.log('worktree hooks OK');`,
+  )
+  assert.equal(output, 'worktree hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
