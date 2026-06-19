@@ -3224,6 +3224,43 @@ ok - worktree command hooks create and remove paths
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PermissionDenied retry edge coverage
+
+This round closes the remaining direct build-safety gap around
+`PermissionDenied` command-hook retry parsing and multi-hook aggregation.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the `PermissionDenied` command-hook regression with a structured
+    wrong-event JSON payload that tries to return `retry: true` under
+    `PostToolUse`.
+  - Verifies the wrong-event JSON does not request retry and surfaces as a
+    non-blocking error mentioning the expected `PermissionDenied` event.
+  - Adds a mixed multi-hook case with one command returning `retry: false` and
+    one command returning `retry: true`, then verifies exactly one retry result
+    is yielded.
+
+Risk boundary update: `PermissionDenied` command hooks now have direct
+build-safety coverage for successful retry, matcher filtering, plain malformed
+output, wrong-event structured JSON, mixed retry/no-retry aggregation, and live
+timeout cleanup. Remaining gaps are broader complex-shell timeout cleanup and
+larger hook concurrency cases outside this lifecycle.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PermissionDenied command hooks can request retry
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

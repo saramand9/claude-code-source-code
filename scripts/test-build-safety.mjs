@@ -3580,6 +3580,10 @@ const commandPath = join(commandDir, 'permission-denied-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
 const malformedCommandPath = join(commandDir, 'permission-denied-malformed-command-hook.mjs');
 const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
+const wrongEventCommandPath = join(commandDir, 'permission-denied-wrong-event-command-hook.mjs');
+const wrongEventCommandPathForHook = wrongEventCommandPath.replace(/\\\\/g, '/');
+const noRetryCommandPath = join(commandDir, 'permission-denied-no-retry-command-hook.mjs');
+const noRetryCommandPathForHook = noRetryCommandPath.replace(/\\\\/g, '/');
 const timeoutCommandPath = join(commandDir, 'permission-denied-timeout-command-hook.mjs');
 const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const timeoutStartMarkerPath = join(commandDir, 'permission-denied-timeout-started.txt');
@@ -3608,6 +3612,22 @@ await writeFile(
   malformedCommandPath,
   [
     "process.stdout.write('not-json permission denied malformed marker 5627');",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  wrongEventCommandPath,
+  [
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', retry: true } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  noRetryCommandPath,
+  [
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: false } }));",
     "process.exit(0);",
   ].join('\\n'),
   'utf8',
@@ -3739,6 +3759,70 @@ for await (const result of executePermissionDeniedHooks(
 }
 if (malformed.some(result => result.retry === true)) {
   throw new Error('PermissionDenied malformed command output must not request retry: ' + JSON.stringify(malformed));
+}
+
+registerPermissionDeniedCommand('node ' + wrongEventCommandPathForHook);
+const wrongEvent = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_command_hook_wrong_event',
+  { command },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  wrongEvent.push(result);
+}
+if (wrongEvent.some(result => result.retry === true)) {
+  throw new Error('PermissionDenied wrong-event command output must not request retry: ' + JSON.stringify(wrongEvent));
+}
+const wrongEventError = wrongEvent.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_non_blocking_error' &&
+    String(attachment.stderr).includes("expected 'PermissionDenied'")
+  );
+});
+if (!wrongEventError) {
+  throw new Error('PermissionDenied wrong-event command output should surface non-blocking error: ' + JSON.stringify(wrongEvent));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PermissionDenied: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + noRetryCommandPathForHook,
+          timeout: 5,
+        },
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+const multiHookResults = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_command_hook',
+  { command },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  multiHookResults.push(result);
+}
+const retryCount = multiHookResults.filter(result => result.retry === true).length;
+if (retryCount !== 1) {
+  throw new Error('PermissionDenied command hooks should yield exactly one retry from mixed hooks: ' + JSON.stringify(multiHookResults));
 }
 
 registerPermissionDeniedCommand('node ' + timeoutCommandPathForHook, 0.5);
