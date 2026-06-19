@@ -5198,6 +5198,132 @@ console.log('stop failure hooks OK');`,
   assert.equal(output, 'stop failure hooks OK')
 })
 
+await test('StopFailure command hooks receive error metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-command-hook-test',
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'stop-failure-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'stop-failure-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'stop-failure-marker.json');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const error = 'stop failure command marker 2747';
+const errorDetails = 'stop failure command details marker 2747';
+const lastAssistantText = 'last assistant before stop failure command marker 2747';
+await writeFile(
+  commandPath,
+  [
+    "const { writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'StopFailure') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.error !== '" + error + "') { process.stderr.write('bad error ' + data.error); process.exit(4); }",
+    "if (data.error_details !== '" + errorDetails + "') { process.stderr.write('bad details ' + data.error_details); process.exit(5); }",
+    "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text ' + data.last_assistant_message); process.exit(6); }",
+    "await writeFile('" + markerPathForScript + "', JSON.stringify({ error: data.error, details: data.error_details }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeStopFailureHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  StopFailure: [
+    {
+      matcher: error,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    updater(appState);
+  },
+  updateAttributionState() {},
+};
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000002747',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_stop_failure_command_2747',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+await executeStopFailureHooks(lastMessage, context, 10000);
+const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+if (marker.error !== error || marker.details !== errorDetails) {
+  throw new Error('StopFailure command marker mismatch: ' + JSON.stringify(marker));
+}
+
+await rm(markerPath, { force: true });
+await executeStopFailureHooks(
+  { ...lastMessage, error: 'different failure marker 9173' },
+  context,
+  10000,
+);
+let skippedCreated = true;
+try {
+  await stat(markerPath);
+} catch {
+  skippedCreated = false;
+}
+if (skippedCreated) {
+  throw new Error('StopFailure command matcher should skip other errors');
+}
+
+console.log('stop failure command hook OK');`,
+  )
+  assert.equal(output, 'stop failure command hook OK')
+})
+
 await test('Notification hooks receive title and type metadata', async () => {
   const output = await buildAndRunSnippet(
     'notification-hook-test',
