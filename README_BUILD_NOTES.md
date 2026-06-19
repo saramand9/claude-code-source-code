@@ -3316,6 +3316,43 @@ ok - PermissionDenied command hooks can request retry
 98/98 build-safety tests passed.
 ```
 
+## 2026-06-19 PreToolUse command hook coverage
+
+This round extends `PreToolUse` coverage to real command hooks through the
+tool-service wrapper path.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture for a `Bash` `PreToolUse` event.
+  - Verifies command hooks receive tool name, tool use id, and original tool
+    input.
+  - Asserts structured command stdout can allow the tool, preserve a decision
+    reason, and rewrite the tool input.
+  - Verifies command-provided additional context is surfaced through the
+    wrapper attachment path.
+  - Asserts matcher misses skip unrelated tools without yielding hook results.
+
+Risk boundary update: pre-tool command hooks now have direct regression coverage
+for metadata delivery, allow decisions, input rewriting, additional context,
+and matcher filtering. Remaining gaps include command-hook deny/ask variants,
+prevent-continuation behavior, and multi-hook precedence across callback plus
+command hooks.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PreToolUse command hooks can allow and update input
+99/99 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

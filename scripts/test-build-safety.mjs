@@ -1764,6 +1764,158 @@ console.log('pretool hook deny metadata OK');`,
   assert.equal(output, 'pretool hook deny metadata OK')
 })
 
+await test('PreToolUse command hooks can allow and update input', async () => {
+  const output = await buildAndRunSnippet(
+    'pretool-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/pretool-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'pretool-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'pretool-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const originalCommand = 'echo pretool command hook original 3946';
+const updatedCommand = 'echo pretool command hook updated 3946';
+const additionalContext = 'pretool command hook context marker 3946';
+const allowReason = 'pretool command allow marker 3946';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PreToolUse') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad tool ' + data.tool_name); process.exit(4); }",
+    "if (data.tool_use_id !== 'toolu_pretool_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
+    "if (data.tool_input.command !== '" + originalCommand + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '" + allowReason + "', updatedInput: { command: '" + updatedCommand + "' }, additionalContext: '" + additionalContext + "' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { runPreToolUseHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/services/tools/toolHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const tool = {
+  name: 'Bash',
+  isMcp: false,
+  getToolUseSummary(input) {
+    return input.command;
+  },
+};
+const results = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  tool,
+  { command: originalCommand },
+  'toolu_pretool_command_hook',
+  'msg_pretool_command_hook',
+  'req_pretool_command_hook',
+  undefined,
+  undefined,
+)) {
+  results.push(result);
+}
+const permissionResult = results.find(result => result.type === 'hookPermissionResult')?.hookPermissionResult;
+if (permissionResult?.behavior !== 'allow') {
+  throw new Error('PreToolUse command hook should allow: ' + JSON.stringify(results));
+}
+if (permissionResult.updatedInput?.command !== updatedCommand) {
+  throw new Error('PreToolUse command hook should preserve updated input: ' + JSON.stringify(permissionResult));
+}
+if (permissionResult.decisionReason?.reason !== allowReason) {
+  throw new Error('PreToolUse command hook should preserve decision reason: ' + JSON.stringify(permissionResult));
+}
+const contextAttachment = results.find(result => {
+  const attachment = result.message?.message?.attachment;
+  return (
+    result.type === 'additionalContext' &&
+    attachment?.type === 'hook_additional_context' &&
+    attachment.hookEvent === 'PreToolUse' &&
+    attachment.hookName === 'PreToolUse:Bash' &&
+    Array.isArray(attachment.content) &&
+    attachment.content.includes(additionalContext)
+  );
+});
+if (!contextAttachment) {
+  throw new Error('PreToolUse command hook should attach additional context: ' + JSON.stringify(results));
+}
+
+const skipped = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  { name: 'Read', isMcp: false },
+  { file_path: 'ignored.txt' },
+  'toolu_pretool_command_hook_skip',
+  'msg_pretool_command_hook_skip',
+  'req_pretool_command_hook_skip',
+  undefined,
+  undefined,
+)) {
+  skipped.push(result);
+}
+if (skipped.length !== 0) {
+  throw new Error('PreToolUse command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+console.log('pretool command hook OK');`,
+  )
+  assert.equal(output, 'pretool command hook OK')
+})
+
 await test('PermissionRequest hooks decide headless permission prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-headless-hook-test',
