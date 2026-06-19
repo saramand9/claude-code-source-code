@@ -3173,6 +3173,36 @@ Expected output:
 ok - PermissionRequest hooks decide headless permission prompts
 ```
 
+## 2026-06-19 PermissionRequest denied-update guard
+
+This round tightens the regression coverage for the previous multi-hook
+PermissionRequest fix.
+
+- `scripts/test-build-safety.mjs`
+  - Keeps the fast `allow` / slow `deny` PermissionRequest hook scenario.
+  - Makes the fast allow include an `updatedPermissions` rule update.
+  - Captures the app state used by the permission check and verifies the final
+    deny decision does not leave behind the earlier allow rule.
+
+Risk boundary update: PermissionRequest hook denials now have direct coverage
+against both final authorization and partial allow-rule persistence. Remaining
+gaps are full keyboard-driven TTY interaction and broader hook concurrency
+cases outside PermissionRequest.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PermissionRequest hooks decide headless permission prompts
+```
+
 ## 2026-06-19 outside-REPL command hook failure coverage
 
 This round applies the same failed-command JSON decision guard to hooks executed

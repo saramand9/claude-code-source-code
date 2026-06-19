@@ -1719,13 +1719,18 @@ function makeContext() {
   };
 }
 async function runPermissionCheck() {
-  return await hasPermissionsToUseTool(
+  return (await runPermissionCheckWithContext()).decision;
+}
+async function runPermissionCheckWithContext() {
+  const context = makeContext();
+  const decision = await hasPermissionsToUseTool(
     tool,
     input,
-    makeContext(),
+    context,
     assistantMessage,
     'toolu_permission_request_headless_hook',
   );
+  return { decision, context };
 }
 
 const fallback = await runPermissionCheck();
@@ -1836,6 +1841,14 @@ registerHookCallbacks({
                 decision: {
                   behavior: 'allow',
                   updatedInput: { ...input, content: 'fast allow should lose' },
+                  updatedPermissions: [
+                    {
+                      type: 'addRules',
+                      rules: [{ toolName: 'Write' }],
+                      behavior: 'allow',
+                      destination: 'userSettings',
+                    },
+                  ],
                 },
               },
             };
@@ -1861,7 +1874,10 @@ registerHookCallbacks({
     },
   ],
 });
-const concurrentDenied = await runPermissionCheck();
+const {
+  decision: concurrentDenied,
+  context: concurrentContext,
+} = await runPermissionCheckWithContext();
 if (fastAllowCalls !== 1 || slowDenyCalls !== 1) {
   throw new Error('concurrent PermissionRequest hooks should both run: ' + fastAllowCalls + '/' + slowDenyCalls);
 }
@@ -1870,6 +1886,10 @@ if (concurrentDenied.behavior !== 'deny' || concurrentDenied.decisionReason?.hoo
 }
 if (concurrentDenied.message !== 'slow deny should win') {
   throw new Error('PermissionRequest deny should preserve slow deny message: ' + JSON.stringify(concurrentDenied));
+}
+const allowRulesAfterDeny = concurrentContext.getAppState().toolPermissionContext.alwaysAllowRules;
+if (Object.keys(allowRulesAfterDeny).length !== 0) {
+  throw new Error('denied PermissionRequest should not persist earlier allow updates: ' + JSON.stringify(allowRulesAfterDeny));
 }
 
 console.log('permission request headless hook OK');`,
