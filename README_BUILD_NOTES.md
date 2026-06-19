@@ -2631,3 +2631,33 @@ Expected new output:
 ```text
 ok - InstructionsLoaded hooks receive load metadata
 ```
+
+## 2026-06-19 SessionEnd hook build-safety coverage
+
+This round covers shutdown/clear hooks. `SessionEnd` hooks run outside the REPL
+and use the exit reason as their matcher, so a regression there would either
+miss shutdown audit hooks or run hooks for the wrong exit reason.
+
+- `scripts/test-build-safety.mjs`
+  - Registers a callback hook for `SessionEnd` with matcher `clear`.
+  - Asserts `executeSessionEndHooks("clear")` passes the `SessionEnd` event and
+    `clear` reason to the hook.
+  - Asserts `executeSessionEndHooks("logout")` does not invoke the `clear`
+    matcher.
+
+Risk boundary update: SessionEnd reason matching now has direct build-safety
+coverage. Remaining gaps are full terminal shutdown E2E, interactive
+PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - SessionEnd hooks receive exit reason metadata
+```

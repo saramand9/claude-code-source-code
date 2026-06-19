@@ -2317,6 +2317,88 @@ console.log('instructions loaded hook OK');`,
   assert.equal(output, 'instructions loaded hook OK')
 })
 
+await test('SessionEnd hooks receive exit reason metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'session-end-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/session-end-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeSessionEndHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+let calls = 0;
+registerHookCallbacks({
+  SessionEnd: [
+    {
+      matcher: 'clear',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'SessionEnd') {
+              throw new Error('unexpected event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.reason !== 'clear') {
+              throw new Error('unexpected reason: ' + hookInput.reason);
+            }
+            return { systemMessage: 'session end marker 7264' };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+await executeSessionEndHooks('clear', {
+  getAppState: () => appState,
+  setAppState: updater => {
+    updater(appState);
+  },
+  timeoutMs: 10000,
+});
+if (calls !== 1) {
+  throw new Error('SessionEnd hook should run once, got ' + calls);
+}
+
+await executeSessionEndHooks('logout', {
+  getAppState: () => appState,
+  setAppState: updater => {
+    updater(appState);
+  },
+  timeoutMs: 10000,
+});
+if (calls !== 1) {
+  throw new Error('SessionEnd matcher should skip other reasons, got ' + calls);
+}
+
+console.log('session end hook OK');`,
+  )
+  assert.equal(output, 'session end hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
