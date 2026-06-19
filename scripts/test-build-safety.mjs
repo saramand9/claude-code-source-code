@@ -1802,6 +1802,109 @@ console.log('post tool use hook OK');`,
   assert.equal(output, 'post tool use hook OK')
 })
 
+await test('PermissionDenied hooks can request retry', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-denied-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/permission-denied-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executePermissionDeniedHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const input = { command: 'echo permission-denied-hook marker 9821' };
+const deniedReason = 'permission denied hook reason marker 9821';
+let calls = 0;
+registerHookCallbacks({
+  PermissionDenied: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'PermissionDenied') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.tool_name !== 'Bash') {
+              throw new Error('unexpected hook tool: ' + hookInput.tool_name);
+            }
+            if (hookInput.tool_use_id !== 'toolu_permission_denied_hook') {
+              throw new Error('unexpected tool use id: ' + hookInput.tool_use_id);
+            }
+            if (hookInput.tool_input.command !== input.command) {
+              throw new Error('unexpected tool input: ' + JSON.stringify(hookInput.tool_input));
+            }
+            if (!String(hookInput.reason).includes(deniedReason)) {
+              throw new Error('missing denied reason in hook input: ' + hookInput.reason);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionDenied',
+                retry: true,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return {
+      sessionHooks: new Map(),
+      toolPermissionContext: {
+        mode: 'auto',
+        additionalWorkingDirectories: new Map(),
+        alwaysAllowRules: {},
+        alwaysDenyRules: {},
+        alwaysAskRules: {},
+        isBypassPermissionsModeAvailable: false,
+      },
+    };
+  },
+  setAppState() {},
+  updateAttributionState() {},
+};
+const results = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_hook',
+  input,
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  results.push(result);
+}
+if (calls !== 1) {
+  throw new Error('PermissionDenied hook should run once, got ' + calls);
+}
+if (!results.some(result => result.retry === true)) {
+  throw new Error('PermissionDenied hook retry flag was not yielded: ' + JSON.stringify(results));
+}
+
+console.log('permission denied hook OK');`,
+  )
+  assert.equal(output, 'permission denied hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

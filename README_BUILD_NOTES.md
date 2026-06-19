@@ -2472,3 +2472,34 @@ Expected new output:
 ```text
 ok - PostToolUse hooks can update MCP output
 ```
+
+## 2026-06-19 PermissionDenied hook retry build-safety coverage
+
+This round covers the permission-denial hook lifecycle. `PermissionDenied`
+hooks are used after an auto/classifier denial to let hook logic signal that a
+command can be retried.
+
+- `scripts/test-build-safety.mjs`
+  - Imports real `executePermissionDeniedHooks`.
+  - Registers a callback hook for `PermissionDenied` matching `Bash`.
+  - Asserts the hook input includes event name, tool name, tool use id,
+    original tool input, and denial reason.
+  - Asserts hook `retry: true` is yielded back to the caller.
+
+Risk boundary update: PermissionDenied retry signaling now has direct
+build-safety coverage. Remaining hook gaps are mainly full CLI E2E around auto
+classifier denials, interactive PermissionRequest UI, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionDenied hooks can request retry
+```
