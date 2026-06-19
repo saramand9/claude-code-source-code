@@ -3058,7 +3058,7 @@ console.log('post tool use hook OK');`,
 await test('PostToolUse command hooks can update MCP output', async () => {
   const output = await buildAndRunSnippet(
     'post-tool-use-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-command-hook-config';
@@ -3071,6 +3071,12 @@ const commandPath = join(commandDir, 'post-tool-use-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
 const malformedCommandPath = join(commandDir, 'post-tool-use-malformed-command-hook.mjs');
 const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'post-tool-use-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'post-tool-use-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'post-tool-use-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const toolName = 'mcp__fixture__command_lookup';
 const inputQuery = 'post tool command input marker 4286';
 const originalText = 'original command output marker 4286';
@@ -3097,6 +3103,19 @@ await writeFile(
   [
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: true } }));",
     "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: { content: [{ type: 'text', text: 'late timeout replacement should not apply' }] } } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late post tool timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -3254,6 +3273,59 @@ const malformedError = malformed.find(update => {
 });
 if (!malformedError) {
   throw new Error('PostToolUse malformed command output should surface non-blocking error: ' + JSON.stringify(malformed));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostToolUse: [
+    {
+      matcher: toolName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timedOut = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  tool,
+  'toolu_post_tool_command_hook_timeout',
+  'msg_post_tool_command_hook_timeout',
+  { query: inputQuery },
+  originalOutput,
+  'req_post_tool_command_hook_timeout',
+  'stdio',
+  undefined,
+)) {
+  timedOut.push(update);
+}
+if (timedOut.some(update => update.updatedMCPToolOutput)) {
+  throw new Error('PostToolUse timed-out command output must not update MCP output: ' + JSON.stringify(timedOut));
+}
+const timeoutAttachment = timedOut.find(update => {
+  const attachment = update.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'PostToolUse';
+});
+if (!timeoutAttachment) {
+  throw new Error('PostToolUse timed-out command should surface cancellation: ' + JSON.stringify(timedOut));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('PostToolUse timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('PostToolUse timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('post tool use command hook OK');`,

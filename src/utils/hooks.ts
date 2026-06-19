@@ -1036,6 +1036,7 @@ async function execCommandHook(
       isWindows &&
       (hookEvent === 'StatusLine' ||
         hookEvent === 'FileSuggestion' ||
+        hookEvent === 'PostToolUse' ||
         hookEvent === 'PermissionDenied')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null

@@ -3296,6 +3296,46 @@ ok - PostToolUse command hooks can update MCP output
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PostToolUse command timeout cleanup
+
+This round closes the `PostToolUse` command-hook timeout cleanup gap for common
+simple helper commands.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn fast path for simple helper commands to
+    `PostToolUse`, so commands such as `node hook.mjs` can be cancelled through
+    the held child-process handle instead of relying only on Git Bash process
+    tree cleanup.
+  - Keeps complex shell commands on the existing Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the `PostToolUse` command-hook fixture with a timeout helper that
+    flushes an MCP output replacement before hanging.
+  - Verifies the timed-out helper produces a cancellation attachment and does
+    not update MCP tool output.
+  - Verifies the helper starts but is killed before writing its late marker.
+
+Risk boundary update: `PostToolUse` command hooks now have build-safety
+coverage for successful MCP output replacement, matcher filtering,
+wrong-event JSON output, and simple-helper timeout cleanup. Remaining gaps
+include prevent-continuation behavior for post-tool hooks and complex-shell
+timeout cleanup.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PostToolUse command hooks can update MCP output
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.
