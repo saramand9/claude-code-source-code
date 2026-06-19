@@ -3559,6 +3559,88 @@ console.log('stop failure hooks OK');`,
   assert.equal(output, 'stop failure hooks OK')
 })
 
+await test('Notification hooks receive title and type metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'notification-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/notification-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeNotificationHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const notificationType = 'permission_prompt';
+const message = 'notification hook message marker 8126';
+const title = 'notification hook title marker 8126';
+let calls = 0;
+registerHookCallbacks({
+  Notification: [
+    {
+      matcher: notificationType,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'Notification') {
+              throw new Error('unexpected notification event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.notification_type !== notificationType) {
+              throw new Error('unexpected notification type: ' + hookInput.notification_type);
+            }
+            if (hookInput.message !== message) {
+              throw new Error('unexpected notification message: ' + hookInput.message);
+            }
+            if (hookInput.title !== title) {
+              throw new Error('unexpected notification title: ' + hookInput.title);
+            }
+            return { systemMessage: 'notification hook observed 8126' };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+await executeNotificationHooks(
+  {
+    notificationType,
+    message,
+    title,
+  },
+  10000,
+);
+if (calls !== 1) {
+  throw new Error('Notification hook should run once, got ' + calls);
+}
+
+await executeNotificationHooks(
+  {
+    notificationType: 'idle_prompt',
+    message,
+    title,
+  },
+  10000,
+);
+if (calls !== 1) {
+  throw new Error('Notification matcher should skip other types, got ' + calls);
+}
+
+console.log('notification hooks OK');`,
+  )
+  assert.equal(output, 'notification hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

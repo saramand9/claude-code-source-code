@@ -2902,3 +2902,31 @@ Expected new output:
 ```text
 ok - StopFailure hooks receive error metadata
 ```
+
+## 2026-06-19 Notification hook build-safety coverage
+
+This round covers `Notification` hook metadata. Notification hooks are
+fire-and-forget, but integrations still depend on accurate notification type,
+title, and message fields.
+
+- `scripts/test-build-safety.mjs`
+  - Registers a `Notification` callback hook with a notification-type matcher.
+  - Verifies hook input includes notification type, message, and title.
+  - Asserts unrelated notification types are skipped.
+
+Risk boundary update: Notification hook metadata and matcher behavior now have
+direct build-safety coverage. Remaining gaps are interactive PermissionRequest
+UI and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - Notification hooks receive title and type metadata
+```
