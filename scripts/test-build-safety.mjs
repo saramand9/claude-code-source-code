@@ -3737,6 +3737,7 @@ process.env.CLAUDE_CONFIG_DIR = configDir;
 delete process.env.CLAUDE_CODE_SIMPLE;
 
 const received = [];
+let slowRequestCount = 0;
 const server = createServer((req, res) => {
   let body = '';
   req.setEncoding('utf8');
@@ -3744,6 +3745,16 @@ const server = createServer((req, res) => {
     body += chunk;
   });
   req.on('end', () => {
+    if (req.url === '/slow') {
+      slowRequestCount += 1;
+      setTimeout(() => {
+        if (!res.destroyed) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ decision: 'block', reason: 'late http timeout marker 7314' }));
+        }
+      }, 1200);
+      return;
+    }
     received.push({
       method: req.method,
       url: req.url,
@@ -3758,6 +3769,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const { port } = server.address();
 const hookUrl = 'http://127.0.0.1:' + port + '/hook';
 const blockedUrl = 'http://127.0.0.1:' + port + '/blocked';
+const slowUrl = 'http://127.0.0.1:' + port + '/slow';
 const localSettingsPath = join(configDir, 'local-settings.json');
 const localSettingsPathForHook = localSettingsPath.replace(/\\\\/g, '/');
 process.env.HTTP_HOOK_TOKEN_7314 = 'token-value-7314';
@@ -3767,7 +3779,7 @@ await writeFile(
   join(configDir, 'settings.json'),
   JSON.stringify(
     {
-      allowedHttpHookUrls: [hookUrl],
+      allowedHttpHookUrls: [hookUrl, slowUrl],
       httpHookAllowedEnvVars: ['HTTP_HOOK_TOKEN_7314'],
       hooks: {
         ConfigChange: [
@@ -3796,6 +3808,16 @@ await writeFile(
                 type: 'http',
                 url: blockedUrl,
                 timeout: 5,
+              },
+            ],
+          },
+          {
+            matcher: 'skills',
+            hooks: [
+              {
+                type: 'http',
+                url: slowUrl,
+                timeout: 0.2,
               },
             ],
           },
@@ -3876,6 +3898,26 @@ try {
   }
   if (received.length !== 1) {
     throw new Error('disallowed HTTP hook URL should not reach server: ' + JSON.stringify(received));
+  }
+
+  const slowStarted = Date.now();
+  const slowResults = await executeConfigChangeHooks(
+    'skills',
+    join(configDir, 'skill-settings.json'),
+    10000,
+  );
+  const slowDurationMs = Date.now() - slowStarted;
+  if (slowRequestCount !== 1) {
+    throw new Error('slow HTTP hook should reach server once: ' + slowRequestCount);
+  }
+  if (slowDurationMs > 1000) {
+    throw new Error('slow HTTP hook should respect timeout before late response, took ' + slowDurationMs + 'ms');
+  }
+  if (slowResults.length !== 1 || slowResults[0].succeeded !== false || slowResults[0].blocked !== false) {
+    throw new Error('timed-out HTTP hook should be a non-blocking failure: ' + JSON.stringify(slowResults));
+  }
+  if (String(slowResults[0].output).includes('late http timeout marker 7314')) {
+    throw new Error('timed-out HTTP hook should not consume late response: ' + JSON.stringify(slowResults));
   }
 } finally {
   server.close();

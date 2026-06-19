@@ -3225,6 +3225,43 @@ ok - powershell session environment hook files are isolated and injected
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 HTTP hook timeout coverage
+
+This round closes the direct build-safety coverage gap for HTTP hook timeout
+cancellation.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the local loopback HTTP hook fixture with a `/slow` endpoint that
+    accepts the request but delays its JSON response beyond the configured hook
+    timeout.
+  - Verifies the slow hook reaches the server exactly once.
+  - Verifies `executeConfigChangeHooks()` returns before the delayed response
+    window, reports a non-blocking failure, and does not consume the late block
+    response body.
+  - Keeps the existing allowlist and header-interpolation assertions in the
+    same fixture.
+
+Risk boundary update: HTTP hooks now have build-safety coverage for local
+request delivery, response parsing, URL allowlists, header env interpolation,
+and timeout cancellation. Remaining gaps include sandbox-proxy routing,
+non-loopback SSRF guard behavior, and redirect-specific behavior.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - HTTP hooks post JSON input and enforce allowlists
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.
