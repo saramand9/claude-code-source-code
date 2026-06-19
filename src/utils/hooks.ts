@@ -1043,7 +1043,9 @@ async function execCommandHook(
         hookEvent === 'ElicitationResult' ||
         hookEvent === 'WorktreeCreate' ||
         hookEvent === 'WorktreeRemove' ||
-        hookEvent === 'ConfigChange')
+        hookEvent === 'ConfigChange' ||
+        hookEvent === 'CwdChanged' ||
+        hookEvent === 'FileChanged')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null
     const shell = isWindows ? findGitBashPath() : true

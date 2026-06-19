@@ -3409,6 +3409,46 @@ ok - PreToolUse command hooks can allow and update input
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 Environment command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for environment command
+hooks.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `CwdChanged` and
+    `FileChanged` command hooks, so simple helpers such as `node hook.mjs` get
+    the same timeout cleanup behavior as the other short helper lifecycles.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the environment command hook regression with a timeout helper for
+    `CwdChanged`.
+  - Verifies the timed-out helper returns one failed, non-blocking
+    `Hook cancelled` result.
+  - Verifies flushed watch paths and system messages are not exposed after
+    timeout, and the helper is killed before writing a late marker.
+
+Risk boundary update: environment command hooks now have direct build-safety
+coverage for JSON input delivery, `CLAUDE_ENV_FILE` injection, watch paths,
+system messages, matcher filtering, and simple-helper timeout cleanup. Remaining
+gaps include complex-shell timeout cleanup, malformed env-file content variants,
+and full watcher integration E2E.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - environment command hooks receive input and env files
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 PreToolUse command stop coverage
 
 This round closes the direct command-hook coverage gap for `PreToolUse`

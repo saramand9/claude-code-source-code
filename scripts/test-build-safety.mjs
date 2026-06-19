@@ -4748,14 +4748,17 @@ const [
   { executeCwdChangedHooks, executeFileChangedHooks },
   { setIsInteractive },
   { resetHooksConfigSnapshot },
+  { resetSettingsCache },
 ] = await Promise.all([
   import('./src/utils/hooks.ts'),
   import('./src/bootstrap/state.ts'),
   import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
 ]);
 
 setIsInteractive(false);
 resetHooksConfigSnapshot();
+resetSettingsCache();
 
 const cwdResult = await executeCwdChangedHooks(
   join(process.cwd(), 'old-cwd'),
@@ -4797,7 +4800,7 @@ console.log('environment watch hooks OK');`,
 await test('environment command hooks receive input and env files', async () => {
   const output = await buildAndRunSnippet(
     'environment-command-input-hook-test',
-    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
 const { basename, join } = await import('node:path');
 
 const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'environment-command-input-hook-config');
@@ -4808,8 +4811,14 @@ delete process.env.CLAUDE_CODE_SIMPLE;
 
 const commandPath = join(configDir, 'environment-command-input-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(configDir, 'environment-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const markerPath = join(configDir, 'environment-command-marker.jsonl');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(configDir, 'environment-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(configDir, 'environment-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const oldCwd = join(process.cwd(), 'build-src', 'test-artifacts', 'old-env-cwd-8462').replace(/\\\\/g, '/');
 const newCwd = process.cwd().replace(/\\\\/g, '/');
 const changedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'tracked-command-env-file-8462.env');
@@ -4845,6 +4854,19 @@ await writeFile(
     "}",
     "process.stderr.write('bad event ' + data.hook_event_name);",
     "process.exit(8);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ systemMessage: 'late env timeout message should not apply', hookSpecificOutput: { hookEventName: 'CwdChanged', watchPaths: ['late-env-timeout-watch'] } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late environment timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -4889,10 +4911,12 @@ const [
   { executeCwdChangedHooks, executeFileChangedHooks },
   { setIsInteractive },
   { resetHooksConfigSnapshot },
+  { resetSettingsCache },
 ] = await Promise.all([
   import('./src/utils/hooks.ts'),
   import('./src/bootstrap/state.ts'),
   import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
 ]);
 
 setIsInteractive(false);
@@ -4938,6 +4962,57 @@ const skippedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'ignored-
 const skippedResult = await executeFileChangedHooks(skippedFile, 'add', 10000);
 if (skippedResult.results.length !== 0) {
   throw new Error('FileChanged command matcher should skip other basenames: ' + JSON.stringify(skippedResult));
+}
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        CwdChanged: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + timeoutCommandPathForHook,
+                timeout: 0.5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+const timeoutResult = await executeCwdChangedHooks(oldCwd, newCwd, 10000);
+if (timeoutResult.results.length !== 1) {
+  throw new Error('CwdChanged timeout command should return one result: ' + JSON.stringify(timeoutResult));
+}
+if (timeoutResult.results[0].succeeded !== false || timeoutResult.results[0].blocked !== false) {
+  throw new Error('CwdChanged timed-out command must not succeed or block: ' + JSON.stringify(timeoutResult));
+}
+if (!String(timeoutResult.results[0].output).includes('Hook cancelled')) {
+  throw new Error('CwdChanged timed-out command should report cancellation: ' + JSON.stringify(timeoutResult));
+}
+if (timeoutResult.watchPaths.length !== 0 || timeoutResult.systemMessages.length !== 0) {
+  throw new Error('CwdChanged timed-out command must not expose flushed watch paths or messages: ' + JSON.stringify(timeoutResult));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('CwdChanged timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('CwdChanged timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('environment command input hooks OK');`,
