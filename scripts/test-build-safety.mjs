@@ -5242,6 +5242,138 @@ console.log('stop hooks OK');`,
   assert.equal(output, 'stop hooks OK')
 })
 
+await test('Stop command hooks block and prevent continuation', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'stop-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'stop-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const lastAssistantText = 'main stop command assistant marker 1964';
+const blockReason = 'main stop command block marker 1964';
+const stopReason = 'main stop command continuation marker 1964';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'Stop') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.stop_hook_active !== true) { process.stderr.write('bad active flag'); process.exit(4); }",
+    "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text'); process.exit(5); }",
+    "if (data.permission_mode !== 'default') { process.stderr.write('bad permission mode'); process.exit(6); }",
+    "process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + stopReason + "', decision: 'block', reason: '" + blockReason + "' }));",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeStopHooks, getStopHookMessage },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  Stop: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const messages = [
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000001964',
+    timestamp: '2026-06-19T00:00:00.000Z',
+    message: {
+      id: 'msg_stop_command_1964',
+      role: 'assistant',
+      content: [{ type: 'text', text: lastAssistantText }],
+    },
+  },
+];
+
+const results = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  true,
+  undefined,
+  context,
+  messages,
+)) {
+  results.push(result);
+}
+
+const blocking = results.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  String(result.blockingError?.command).includes('stop-command-hook.mjs')
+);
+if (!blocking) {
+  throw new Error('Stop command hook should return blocking feedback: ' + JSON.stringify(results));
+}
+const prevented = results.find(result =>
+  result.preventContinuation === true &&
+  result.stopReason === stopReason
+);
+if (!prevented) {
+  throw new Error('Stop command hook should prevent continuation: ' + JSON.stringify(results));
+}
+if (!getStopHookMessage({ blockingError: blockReason, command: commandPathForHook }).includes(blockReason)) {
+  throw new Error('Stop command hook message helper should include block reason');
+}
+
+console.log('stop command hook OK');`,
+  )
+  assert.equal(output, 'stop command hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

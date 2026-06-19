@@ -3217,6 +3217,42 @@ ok - PreToolUse permission aggregation preserves deny metadata
 83/83 build-safety tests passed.
 ```
 
+## 2026-06-19 Stop command hook build-safety coverage
+
+This round extends Stop hook coverage from SDK callback hooks to command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a real Node command hook fixture registered for `Stop`.
+  - Verifies the command receives `hook_event_name`, `stop_hook_active`,
+    `last_assistant_message`, and `permission_mode`.
+  - Asserts command JSON output with `decision: "block"` returns blocking
+    feedback.
+  - Asserts `continue: false` and `stopReason` propagate through
+    `executeStopHooks()`.
+  - Verifies `getStopHookMessage()` preserves the block reason for command
+    hook feedback.
+
+Risk boundary update: settings-style Stop command hooks now have direct
+build-safety coverage alongside callback Stop hooks. Remaining gaps are prompt
+and agent Stop hook execution outside the REPL path, plus full keyboard-driven
+TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - Stop command hooks block and prevent continuation
+84/84 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI
