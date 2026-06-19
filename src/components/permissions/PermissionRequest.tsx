@@ -56,7 +56,9 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import type { z } from 'zod/v4';
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js';
 import type { WorkerBadgeProps } from './WorkerBadge.js';
-function permissionComponentForTool(tool: Tool): React.ComponentType<PermissionRequestProps> {
+export function permissionComponentForTool(
+  tool: Tool,
+): React.ComponentType<PermissionRequestProps> {
   switch (tool) {
     case FileEditTool:
       return FileEditPermissionRequest;

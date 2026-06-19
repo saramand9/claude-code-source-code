@@ -1289,6 +1289,97 @@ console.log('verify plan tool OK');`,
   assert.equal(output, 'verify plan tool OK')
 })
 
+await test('PermissionRequest maps tools to interactive components', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-request-component-map-test',
+    `const [
+  { permissionComponentForTool },
+  { FallbackPermissionRequest },
+  { FileEditTool },
+  { FileWriteTool },
+  { BashTool },
+  { PowerShellTool },
+  { WebFetchTool },
+  { NotebookEditTool },
+  { ExitPlanModeV2Tool },
+  { EnterPlanModeTool },
+  { SkillTool },
+  { AskUserQuestionTool },
+  { GlobTool },
+  { GrepTool },
+  { FileReadTool },
+  { FileEditPermissionRequest },
+  { FileWritePermissionRequest },
+  { BashPermissionRequest },
+  { PowerShellPermissionRequest },
+  { WebFetchPermissionRequest },
+  { NotebookEditPermissionRequest },
+  { ExitPlanModePermissionRequest },
+  { EnterPlanModePermissionRequest },
+  { SkillPermissionRequest },
+  { AskUserQuestionPermissionRequest },
+  { FilesystemPermissionRequest },
+] = await Promise.all([
+  import('./src/components/permissions/PermissionRequest.tsx'),
+  import('./src/components/permissions/FallbackPermissionRequest.tsx'),
+  import('./src/tools/FileEditTool/FileEditTool.ts'),
+  import('./src/tools/FileWriteTool/FileWriteTool.ts'),
+  import('./src/tools/BashTool/BashTool.tsx'),
+  import('./src/tools/PowerShellTool/PowerShellTool.tsx'),
+  import('./src/tools/WebFetchTool/WebFetchTool.ts'),
+  import('./src/tools/NotebookEditTool/NotebookEditTool.ts'),
+  import('./src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts'),
+  import('./src/tools/EnterPlanModeTool/EnterPlanModeTool.ts'),
+  import('./src/tools/SkillTool/SkillTool.ts'),
+  import('./src/tools/AskUserQuestionTool/AskUserQuestionTool.tsx'),
+  import('./src/tools/GlobTool/GlobTool.ts'),
+  import('./src/tools/GrepTool/GrepTool.ts'),
+  import('./src/tools/FileReadTool/FileReadTool.ts'),
+  import('./src/components/permissions/FileEditPermissionRequest/FileEditPermissionRequest.tsx'),
+  import('./src/components/permissions/FileWritePermissionRequest/FileWritePermissionRequest.tsx'),
+  import('./src/components/permissions/BashPermissionRequest/BashPermissionRequest.tsx'),
+  import('./src/components/permissions/PowerShellPermissionRequest/PowerShellPermissionRequest.tsx'),
+  import('./src/components/permissions/WebFetchPermissionRequest/WebFetchPermissionRequest.tsx'),
+  import('./src/components/permissions/NotebookEditPermissionRequest/NotebookEditPermissionRequest.tsx'),
+  import('./src/components/permissions/ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.tsx'),
+  import('./src/components/permissions/EnterPlanModePermissionRequest/EnterPlanModePermissionRequest.tsx'),
+  import('./src/components/permissions/SkillPermissionRequest/SkillPermissionRequest.tsx'),
+  import('./src/components/permissions/AskUserQuestionPermissionRequest/AskUserQuestionPermissionRequest.tsx'),
+  import('./src/components/permissions/FilesystemPermissionRequest/FilesystemPermissionRequest.tsx'),
+]);
+
+const expected = [
+  [FileEditTool, FileEditPermissionRequest, 'FileEdit'],
+  [FileWriteTool, FileWritePermissionRequest, 'FileWrite'],
+  [BashTool, BashPermissionRequest, 'Bash'],
+  [PowerShellTool, PowerShellPermissionRequest, 'PowerShell'],
+  [WebFetchTool, WebFetchPermissionRequest, 'WebFetch'],
+  [NotebookEditTool, NotebookEditPermissionRequest, 'NotebookEdit'],
+  [ExitPlanModeV2Tool, ExitPlanModePermissionRequest, 'ExitPlanMode'],
+  [EnterPlanModeTool, EnterPlanModePermissionRequest, 'EnterPlanMode'],
+  [SkillTool, SkillPermissionRequest, 'Skill'],
+  [AskUserQuestionTool, AskUserQuestionPermissionRequest, 'AskUserQuestion'],
+  [GlobTool, FilesystemPermissionRequest, 'Glob'],
+  [GrepTool, FilesystemPermissionRequest, 'Grep'],
+  [FileReadTool, FilesystemPermissionRequest, 'Read'],
+];
+for (const [tool, component, label] of expected) {
+  const actual = permissionComponentForTool(tool);
+  if (actual !== component) {
+    throw new Error(label + ' mapped to wrong permission component: ' + (actual?.name ?? '<unknown>'));
+  }
+}
+
+const unknownTool = { name: 'UnknownPermissionTool' };
+if (permissionComponentForTool(unknownTool) !== FallbackPermissionRequest) {
+  throw new Error('unknown tools should use fallback permission request');
+}
+
+console.log('permission request component mapping OK');`,
+  )
+  assert.equal(output, 'permission request component mapping OK')
+})
+
 await test('permission sync replaces stale settings-source rules', async () => {
   const output = await buildAndRunSnippet(
     'permission-sync-rules-test',

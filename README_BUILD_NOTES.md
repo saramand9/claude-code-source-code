@@ -3100,6 +3100,42 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 PermissionRequest component mapping coverage
+
+This round adds a stable build-safety check for the interactive permission UI
+selection layer.
+
+- `src/components/permissions/PermissionRequest.tsx`
+  - Exports the existing `permissionComponentForTool()` selector so tests can
+    verify the mapping without driving a full TTY interaction.
+- `scripts/test-build-safety.mjs`
+  - Verifies core tools map to their dedicated permission request components:
+    file edit/write, Bash, PowerShell, WebFetch, NotebookEdit, plan mode, Skill,
+    and AskUserQuestion.
+  - Verifies filesystem discovery/read tools (`Glob`, `Grep`, `Read`) map to
+    the shared filesystem permission component.
+  - Verifies unknown tools still fall back to `FallbackPermissionRequest`.
+
+Risk boundary update: the interactive PermissionRequest UI selection layer now
+has direct build-safety coverage, reducing the chance that external
+feature-gate cleanup or imports silently demote real tools to the generic
+fallback. Remaining gaps are full keyboard-driven TTY interaction and broader
+multi-hook ordering/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionRequest maps tools to interactive components
+```
+
 ## 2026-06-19 outside-REPL command hook failure coverage
 
 This round applies the same failed-command JSON decision guard to hooks executed
