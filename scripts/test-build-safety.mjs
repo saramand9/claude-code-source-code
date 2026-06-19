@@ -7426,6 +7426,261 @@ console.log('stop failure command hook OK');`,
   assert.equal(output, 'stop failure command hook OK')
 })
 
+await test('StopFailure prompt hooks execute outside REPL with context', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-prompt-hook-test',
+    `const { createServer } = await import('node:http');
+const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-prompt-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+delete process.env.CLAUDE_CODE_USE_BEDROCK;
+delete process.env.CLAUDE_CODE_USE_VERTEX;
+delete process.env.CLAUDE_CODE_USE_FOUNDRY;
+process.env.ANTHROPIC_API_KEY = 'test-stop-failure-prompt-hook-key';
+process.env.API_TIMEOUT_MS = '10000';
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'stop-failure-prompt-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+
+const error = 'stop failure prompt marker 6194';
+const errorDetails = 'stop failure prompt details marker 6194';
+const lastAssistantText = 'last assistant before prompt stop failure marker 6194';
+const promptText = 'Check stop failure prompt hook $ARGUMENTS';
+const hookReason = 'prompt hook outside repl block marker 6194';
+const requests = [];
+
+function writeSseFrame(res, event, data) {
+  res.write('event: ' + event + '\\n');
+  res.write('data: ' + JSON.stringify(data) + '\\n\\n');
+}
+
+function writeStreamingMessage(res, text) {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'request-id': 'req_stop_failure_prompt_6194',
+  });
+  writeSseFrame(res, 'message_start', {
+    type: 'message_start',
+    message: {
+      id: 'msg_stop_failure_prompt_6194',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test-prompt-hook',
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: {
+        input_tokens: 10,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+      },
+    },
+  });
+  writeSseFrame(res, 'content_block_start', {
+    type: 'content_block_start',
+    index: 0,
+    content_block: { type: 'text', text: '' },
+  });
+  writeSseFrame(res, 'content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'text_delta', text },
+  });
+  writeSseFrame(res, 'content_block_stop', {
+    type: 'content_block_stop',
+    index: 0,
+  });
+  writeSseFrame(res, 'message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: Math.max(1, Math.ceil(text.length / 4)) },
+  });
+  writeSseFrame(res, 'message_stop', { type: 'message_stop' });
+  res.end();
+}
+
+const server = createServer((req, res) => {
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', chunk => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    const parsed = body ? JSON.parse(body) : {};
+    const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    requests.push({ path: pathname, body: parsed });
+    if (pathname.endsWith('/messages/count_tokens')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ input_tokens: 10 }));
+      return;
+    }
+    if (!pathname.endsWith('/messages')) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const bodyText = JSON.stringify(parsed);
+    if (!bodyText.includes(promptText.replace(' $ARGUMENTS', ''))) {
+      res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('prompt text missing from model request: ' + bodyText);
+      return;
+    }
+    if (!bodyText.includes(error) || !bodyText.includes(errorDetails) || !bodyText.includes(lastAssistantText)) {
+      res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('hook input missing from prompt request: ' + bodyText);
+      return;
+    }
+    writeStreamingMessage(
+      res,
+      JSON.stringify({ ok: false, reason: hookReason }),
+    );
+  });
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:' + server.address().port;
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        StopFailure: [
+          {
+            matcher: error,
+            hooks: [
+              {
+                type: 'prompt',
+                prompt: promptText,
+                model: 'claude-test-prompt-hook',
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeStopFailureHooks, getMatchingHooks },
+  { setIsInteractive },
+  { enableConfigs },
+  { getHooksConfigFromSnapshot, resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/config.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+let responseLength = 0;
+const appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true, tools: [] },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    updater(appState);
+  },
+  setResponseLength(updater) {
+    responseLength = updater(responseLength);
+  },
+  updateAttributionState() {},
+};
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000006194',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_stop_failure_prompt_6194',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+try {
+  setIsInteractive(false);
+  enableConfigs();
+  resetHooksConfigSnapshot();
+  resetSettingsCache();
+  const snapshotHooks = getHooksConfigFromSnapshot()?.StopFailure ?? [];
+  if (!snapshotHooks.some(matcher =>
+    matcher.matcher === error &&
+    matcher.hooks.some(hook => hook.type === 'prompt' && hook.prompt === promptText)
+  )) {
+    throw new Error('StopFailure prompt hook should load from settings snapshot: ' + JSON.stringify(snapshotHooks));
+  }
+  const matchedHooks = await getMatchingHooks(
+    appState,
+    'main-session-stop-failure-prompt-6194',
+    'StopFailure',
+    {
+      hook_event_name: 'StopFailure',
+      session_id: 'main-session-stop-failure-prompt-6194',
+      transcript_path: 'build-src/test-artifacts/stop-failure-prompt-transcript.jsonl',
+      cwd: process.cwd(),
+      permission_mode: 'default',
+      error,
+      error_details: errorDetails,
+      last_assistant_message: lastAssistantText,
+    },
+  );
+  if (!matchedHooks.some(match => match.hook.type === 'prompt' && match.hook.prompt === promptText)) {
+    throw new Error('StopFailure prompt hook should match hook input: ' + JSON.stringify(matchedHooks));
+  }
+  const stopFailureResults = await executeStopFailureHooks(lastMessage, context, 10000);
+  if (!stopFailureResults.some(result => result.command === promptText)) {
+    throw new Error('StopFailure prompt hook should return an outside-REPL result: ' + JSON.stringify(stopFailureResults));
+  }
+  if (stopFailureResults.some(result => !result.succeeded && !result.blocked)) {
+    throw new Error('StopFailure prompt hook should not fail non-blocking: ' + JSON.stringify(stopFailureResults));
+  }
+} finally {
+  await new Promise(resolve => server.close(resolve));
+}
+
+const messageRequests = requests.filter(request => request.path.endsWith('/messages'));
+if (messageRequests.length !== 1) {
+  throw new Error('StopFailure prompt hook should issue one model request: ' + JSON.stringify(requests));
+}
+if (messageRequests[0].body.stream !== true) {
+  throw new Error('StopFailure prompt hook should use streaming model request: ' + JSON.stringify(messageRequests[0].body));
+}
+if (responseLength <= 0) {
+  throw new Error('StopFailure prompt hook should consume model response content');
+}
+
+console.log('stop failure prompt hook OK');`,
+  )
+  assert.equal(output, 'stop failure prompt hook OK')
+})
+
 await test('Notification hooks receive title and type metadata', async () => {
   const output = await buildAndRunSnippet(
     'notification-hook-test',

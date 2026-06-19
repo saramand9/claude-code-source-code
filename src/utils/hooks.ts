@@ -3010,6 +3010,47 @@ export function hasBlockingResult(results: HookOutsideReplResult[]): boolean {
   return results.some(r => r.blocked)
 }
 
+function hookResultToOutsideReplResult(
+  result: HookResult,
+  command: string,
+): HookOutsideReplResult {
+  const attachment =
+    result.message?.type === 'attachment' ? result.message.attachment : null
+  let output = result.systemMessage ?? result.blockingError?.blockingError ?? ''
+
+  if (!output && attachment) {
+    switch (attachment.type) {
+      case 'hook_success':
+      case 'hook_error_during_execution':
+      case 'hook_system_message':
+        output = attachment.content
+        break
+      case 'hook_non_blocking_error':
+        output = [attachment.stderr, attachment.stdout].filter(Boolean).join(
+          '\n',
+        )
+        break
+      case 'hook_blocking_error':
+        output = attachment.blockingError.blockingError
+        break
+      case 'hook_cancelled':
+        output = 'Hook cancelled'
+        break
+      default:
+        output = ''
+    }
+  }
+
+  return {
+    command,
+    succeeded: result.outcome === 'success',
+    output,
+    blocked: result.outcome === 'blocking',
+    watchPaths: result.watchPaths,
+    systemMessage: result.systemMessage,
+  }
+}
+
 /**
  * Execute hooks outside of the REPL (e.g. notifications, session end)
  *
@@ -3023,6 +3064,7 @@ export function hasBlockingResult(results: HookOutsideReplResult[]): boolean {
  * @param hookInput The structured hook input that will be validated and converted to JSON
  * @param matchQuery The query to match against hook matchers
  * @param signal Optional AbortSignal to cancel hook execution
+ * @param toolUseContext Optional ToolUseContext for prompt-based hooks
  * @param timeoutMs Optional timeout in milliseconds for hook execution
  * @returns Array of HookOutsideReplResult objects containing command, succeeded, and output
  */
@@ -3031,12 +3073,14 @@ async function executeHooksOutsideREPL({
   hookInput,
   matchQuery,
   signal,
+  toolUseContext,
   timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
 }: {
   getAppState?: () => AppState
   hookInput: HookInput
   matchQuery?: string
   signal?: AbortSignal
+  toolUseContext?: ToolUseContext
   timeoutMs: number
 }): Promise<HookOutsideReplResult[]> {
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
@@ -3175,13 +3219,36 @@ async function executeHooksOutsideREPL({
         }
       }
 
-      // TODO: Implement prompt stop hooks outside REPL
       if (hook.type === 'prompt') {
-        return {
-          command: hook.prompt,
-          succeeded: false,
-          output: 'Prompt stop hooks are not yet supported outside REPL',
-          blocked: false,
+        if (!toolUseContext) {
+          return {
+            command: hook.prompt,
+            succeeded: false,
+            output:
+              'ToolUseContext is required for prompt hooks outside REPL context',
+            blocked: false,
+          }
+        }
+
+        const promptTimeoutMs = hook.timeout ? hook.timeout * 1000 : timeoutMs
+        const { signal: abortSignal, cleanup } = createCombinedAbortSignal(
+          signal,
+          { timeoutMs: promptTimeoutMs },
+        )
+        try {
+          const promptResult = await execPromptHook(
+            hook,
+            hookName,
+            hookEvent,
+            jsonInput,
+            abortSignal,
+            toolUseContext,
+            undefined,
+            randomUUID(),
+          )
+          return hookResultToOutsideReplResult(promptResult, hook.prompt)
+        } finally {
+          cleanup?.()
         }
       }
 
@@ -3625,13 +3692,13 @@ export async function executeStopFailureHooks(
   lastMessage: AssistantMessage,
   toolUseContext?: ToolUseContext,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
-): Promise<void> {
+): Promise<HookOutsideReplResult[]> {
   const appState = toolUseContext?.getAppState()
   // executeHooksOutsideREPL hardcodes main sessionId (:2738). Agent frontmatter
   // hooks (registerFrontmatterHooks) key by agentId; gating with agentId here
   // would pass the gate but fail execution. Align gate with execution.
   const sessionId = getSessionId()
-  if (!hasHookForEvent('StopFailure', appState, sessionId)) return
+  if (!hasHookForEvent('StopFailure', appState, sessionId)) return []
 
   const lastAssistantText =
     extractTextContent(lastMessage.message.content, '\n').trim() || undefined
@@ -3648,11 +3715,12 @@ export async function executeStopFailureHooks(
     last_assistant_message: lastAssistantText,
   }
 
-  await executeHooksOutsideREPL({
+  return await executeHooksOutsideREPL({
     getAppState: toolUseContext?.getAppState,
     hookInput,
     timeoutMs,
     matchQuery: error,
+    toolUseContext,
   })
 }
 
