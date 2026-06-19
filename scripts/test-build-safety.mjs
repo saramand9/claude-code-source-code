@@ -6335,7 +6335,7 @@ console.log('user prompt submit hook OK');`,
 await test('UserPromptSubmit command hooks attach context and block prompts', async () => {
   const output = await buildAndRunSnippet(
     'user-prompt-submit-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/user-prompt-submit-command-hook-config';
@@ -6346,10 +6346,19 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'user-prompt-submit-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'user-prompt-submit-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'user-prompt-submit-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'user-prompt-submit-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const contextPrompt = 'user prompt submit command context marker 9138';
 const blockPrompt = 'user prompt submit command block marker 9138';
+const timeoutPrompt = 'user prompt submit command timeout marker 9138';
 const additionalContext = 'user prompt submit command extra context marker 9138';
 const blockReason = 'blocked prompt submit command marker 9138';
+const timeoutAdditionalContext = 'late user prompt submit context should not attach marker 9138';
+const timeoutBlockReason = 'late user prompt submit block should not apply marker 9138';
 await writeFile(
   commandPath,
   [
@@ -6368,6 +6377,18 @@ await writeFile(
     "}",
     "process.stderr.write('bad prompt ' + data.prompt);",
     "process.exit(5);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + timeoutBlockReason + "', hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '" + timeoutAdditionalContext + "' } }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -6463,6 +6484,55 @@ const blockingAttachment = blockedResults.find(result => {
 });
 if (!blockingAttachment) {
   throw new Error('UserPromptSubmit command should return blocking attachment: ' + JSON.stringify(blockedResults));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  timeoutPrompt,
+  'default',
+  context,
+)) {
+  timeoutResults.push(result);
+}
+if (timeoutResults.some(result =>
+  (Array.isArray(result.additionalContexts) && result.additionalContexts.includes(timeoutAdditionalContext)) ||
+  result.blockingError?.blockingError === timeoutBlockReason ||
+  result.message?.attachment?.blockingError?.blockingError === timeoutBlockReason
+)) {
+  throw new Error('UserPromptSubmit timed-out command should not apply late output: ' + JSON.stringify(timeoutResults));
+}
+if (!timeoutResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'UserPromptSubmit';
+})) {
+  throw new Error('UserPromptSubmit timed-out command should report cancellation: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('UserPromptSubmit timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('UserPromptSubmit timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('user prompt submit command hook OK');`,

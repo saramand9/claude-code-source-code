@@ -1045,6 +1045,7 @@ async function execCommandHook(
         hookEvent === 'TaskCompleted' ||
         hookEvent === 'Stop' ||
         hookEvent === 'StopFailure' ||
+        hookEvent === 'UserPromptSubmit' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||

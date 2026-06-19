@@ -5170,6 +5170,44 @@ ok - UserPromptSubmit command hooks attach context and block prompts
 91/91 build-safety tests passed.
 ```
 
+## 2026-06-19 UserPromptSubmit command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for
+`UserPromptSubmit` command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `UserPromptSubmit` through the same direct Windows helper path used
+    by other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the `UserPromptSubmit` command-hook fixture with a timed-out helper
+    that would otherwise emit both `additionalContext` and a blocking decision.
+  - Verifies late context and blocking output are not applied.
+  - Verifies the cancelled helper surfaces a `hook_cancelled` attachment.
+  - Asserts the helper process starts but is killed before writing its late
+    marker.
+
+Risk boundary update: `UserPromptSubmit` command hooks now have build-safety
+coverage for prompt metadata, additional context, blocking behavior, and
+simple-helper timeout cleanup. Remaining gaps include prompt/agent
+UserPromptSubmit hooks, complex-shell timeout cleanup, and full interactive
+prompt submission E2E.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - UserPromptSubmit command hooks attach context and block prompts
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 SubagentStart command hook coverage
 
 This round extends subagent-start hook coverage from SDK callback hooks to
