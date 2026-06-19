@@ -3488,6 +3488,38 @@ ok - UserPromptSubmit command hooks attach context and block prompts
 91/91 build-safety tests passed.
 ```
 
+## 2026-06-19 SubagentStart command hook coverage
+
+This round extends subagent-start hook coverage from SDK callback hooks to
+command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a real Node command hook fixture registered for `SubagentStart`.
+  - Verifies the command receives agent id and agent type metadata.
+  - Asserts command JSON output propagates `additionalContext`.
+  - Asserts agent-type matchers skip unrelated subagent starts.
+
+Risk boundary update: settings-style SubagentStart command hooks now have direct
+build-safety coverage alongside callback hooks. Remaining gaps are prompt and
+agent hook execution outside the REPL path, plus full keyboard-driven TTY
+interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - SubagentStart command hooks attach context with agent metadata
+92/92 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI

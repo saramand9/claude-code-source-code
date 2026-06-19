@@ -4339,6 +4339,100 @@ console.log('subagent lifecycle hooks OK');`,
   assert.equal(output, 'subagent lifecycle hooks OK')
 })
 
+await test('SubagentStart command hooks attach context with agent metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'subagent-start-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/subagent-start-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'subagent-start-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'subagent-start-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const agentId = 'agent-start-command-7143';
+const agentType = 'reviewer-start-command-7143';
+const additionalContext = 'subagent start command context marker 7143';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'SubagentStart') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.agent_id !== '" + agentId + "') { process.stderr.write('bad agent id ' + data.agent_id); process.exit(4); }",
+    "if (data.agent_type !== '" + agentType + "') { process.stderr.write('bad agent type ' + data.agent_type); process.exit(5); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: '" + additionalContext + "' } }));",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeSubagentStartHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  SubagentStart: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const startResults = [];
+for await (const result of executeSubagentStartHooks(
+  agentId,
+  agentType,
+  undefined,
+  10000,
+)) {
+  startResults.push(result);
+}
+if (!startResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(additionalContext)
+)) {
+  throw new Error('SubagentStart command hook should return additional context: ' + JSON.stringify(startResults));
+}
+
+const skippedStart = [];
+for await (const result of executeSubagentStartHooks(
+  agentId,
+  'other-agent-type-command-7143',
+  undefined,
+  10000,
+)) {
+  skippedStart.push(result);
+}
+if (skippedStart.length !== 0) {
+  throw new Error('SubagentStart command matcher should skip other agent type: ' + JSON.stringify(skippedStart));
+}
+
+console.log('subagent start command hook OK');`,
+  )
+  assert.equal(output, 'subagent start command hook OK')
+})
+
 await test('SubagentStop command hooks block with agent metadata', async () => {
   const output = await buildAndRunSnippet(
     'subagent-stop-command-hook-test',
