@@ -1038,7 +1038,9 @@ async function execCommandHook(
         hookEvent === 'FileSuggestion' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
-        hookEvent === 'PermissionDenied')
+        hookEvent === 'PermissionDenied' ||
+        hookEvent === 'Elicitation' ||
+        hookEvent === 'ElicitationResult')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null
     const shell = isWindows ? findGitBashPath() : true

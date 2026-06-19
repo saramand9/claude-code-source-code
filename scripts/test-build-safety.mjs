@@ -7267,7 +7267,7 @@ console.log('elicitation hooks OK');`,
 await test('elicitation command hooks can answer and block results', async () => {
   const output = await buildAndRunSnippet(
     'elicitation-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/elicitation-command-hook-config';
@@ -7278,6 +7278,18 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'elicitation-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutRequestCommandPath = join(commandDir, 'elicitation-timeout-command-hook.mjs');
+const timeoutRequestCommandPathForHook = timeoutRequestCommandPath.replace(/\\\\/g, '/');
+const timeoutRequestStartMarkerPath = join(commandDir, 'elicitation-timeout-started.txt');
+const timeoutRequestStartMarkerPathForScript = timeoutRequestStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutRequestLateMarkerPath = join(commandDir, 'elicitation-timeout-late.txt');
+const timeoutRequestLateMarkerPathForScript = timeoutRequestLateMarkerPath.replace(/\\\\/g, '/');
+const timeoutResultCommandPath = join(commandDir, 'elicitation-result-timeout-command-hook.mjs');
+const timeoutResultCommandPathForHook = timeoutResultCommandPath.replace(/\\\\/g, '/');
+const timeoutResultStartMarkerPath = join(commandDir, 'elicitation-result-timeout-started.txt');
+const timeoutResultStartMarkerPathForScript = timeoutResultStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutResultLateMarkerPath = join(commandDir, 'elicitation-result-timeout-late.txt');
+const timeoutResultLateMarkerPathForScript = timeoutResultLateMarkerPath.replace(/\\\\/g, '/');
 const serverName = 'fixture-elicit-command-server-7521';
 const elicitationId = 'elicit-command-7521';
 const acceptedNote = 'accepted by command hook 7521';
@@ -7308,6 +7320,32 @@ await writeFile(
     "}",
     "process.stderr.write('bad event ' + data.hook_event_name);",
     "process.exit(12);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutRequestCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutRequestStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { approved: true, note: 'late elicitation accept should not apply' } } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutRequestLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late elicitation timeout output');",
+    "}, 1600);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutResultCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutResultStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ reason: 'late elicitation result decline should not block', hookSpecificOutput: { hookEventName: 'ElicitationResult', action: 'decline', content: { approved: false, note: 'late result decline should not apply' } } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutResultLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late elicitation result timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -7420,6 +7458,89 @@ const skippedResult = await executeElicitationResultHooks({
 });
 if (skippedResult.elicitationResultResponse || skippedResult.blockingError) {
   throw new Error('skipped ElicitationResult command should be empty: ' + JSON.stringify(skippedResult));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  Elicitation: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutRequestCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timedOutRequest = await executeElicitationHooks({
+  serverName,
+  message: 'Approve command fixture access?',
+  requestedSchema,
+  permissionMode: 'default',
+  mode: 'form',
+  url: 'https://example.invalid/command-form',
+  elicitationId,
+  timeoutMs: 10000,
+});
+if (timedOutRequest.elicitationResponse || timedOutRequest.blockingError) {
+  throw new Error('timed-out Elicitation command output must not answer: ' + JSON.stringify(timedOutRequest));
+}
+try {
+  await stat(timeoutRequestStartMarkerPath);
+} catch (error) {
+  throw new Error('Elicitation timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutRequestLateMarkerPath);
+  throw new Error('Elicitation timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  ElicitationResult: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutResultCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timedOutResult = await executeElicitationResultHooks({
+  serverName,
+  elicitationId,
+  mode: 'form',
+  action: 'accept',
+  content: requestResult.elicitationResponse.content,
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (timedOutResult.elicitationResultResponse || timedOutResult.blockingError) {
+  throw new Error('timed-out ElicitationResult command output must not override response: ' + JSON.stringify(timedOutResult));
+}
+try {
+  await stat(timeoutResultStartMarkerPath);
+} catch (error) {
+  throw new Error('ElicitationResult timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutResultLateMarkerPath);
+  throw new Error('ElicitationResult timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('elicitation command hooks OK');`,

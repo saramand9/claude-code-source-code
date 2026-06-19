@@ -3141,6 +3141,48 @@ ok - PostToolUseFailure command hooks attach additional context
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 Elicitation command timeout cleanup
+
+This round closes the command-hook timeout race for MCP elicitation hooks.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `Elicitation` and
+    `ElicitationResult` command hooks, so short helper commands get the same
+    process cleanup behavior as status, file suggestion, post-tool, and
+    permission-denied hooks.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the `elicitation command hooks can answer and block results`
+    regression with timeout fixtures for both `Elicitation` and
+    `ElicitationResult`.
+  - Each fixture writes a start marker, flushes a valid structured JSON
+    response, then hangs long enough to try writing a late marker.
+  - Verifies timed-out request hooks do not accept an elicitation, timed-out
+    result hooks do not override or block the result, and both helpers are
+    killed before their late markers can be written.
+
+Risk boundary update: Elicitation command hooks now have direct build-safety
+coverage for success, matcher filtering, structured result parsing, and
+simple-helper timeout cleanup. Remaining gaps include interactive elicitation UI
+behavior, complex-shell timeout cleanup, and broader multi-hook
+ordering/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - elicitation command hooks can answer and block results
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.
