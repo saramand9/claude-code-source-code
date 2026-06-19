@@ -3100,6 +3100,47 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 PostToolUseFailure command timeout cleanup
+
+This round closes the failed-tool command-hook malformed-output and timeout
+cleanup gap for common short helper commands.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `PostToolUseFailure`
+    command hooks, matching the existing `StatusLine`, `FileSuggestion`,
+    `PostToolUse`, and `PermissionDenied` timeout cleanup behavior.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the `PostToolUseFailure` command-hook regression with a wrong-event
+    JSON output case and verifies it surfaces as a non-blocking error instead
+    of attaching context.
+  - Adds a live timeout fixture that writes a start marker, flushes a valid
+    `PostToolUseFailure` additional-context JSON payload, then hangs long
+    enough to try writing a late marker.
+  - Verifies the timed-out command yields hook cancellation, does not attach
+    the flushed context, and is killed before the late marker can be written.
+
+Risk boundary update: `PostToolUseFailure` command hooks now have direct
+build-safety coverage for success, matcher filtering, malformed event-specific
+output, and simple-helper timeout cleanup. Remaining gaps include complex-shell
+timeout cleanup and full CLI E2E around failed-tool hook side effects.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PostToolUseFailure command hooks attach additional context
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

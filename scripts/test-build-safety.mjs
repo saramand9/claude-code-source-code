@@ -2781,7 +2781,7 @@ console.log('post tool use failure hook OK');`,
 await test('PostToolUseFailure command hooks attach additional context', async () => {
   const output = await buildAndRunSnippet(
     'post-tool-use-failure-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-failure-command-hook-config';
@@ -2792,6 +2792,14 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'post-tool-use-failure-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const malformedCommandPath = join(commandDir, 'post-tool-use-failure-malformed-command-hook.mjs');
+const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'post-tool-use-failure-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'post-tool-use-failure-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'post-tool-use-failure-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const inputPath = 'build-src/test-artifacts/missing-post-failure-command.txt';
 const failureMessage = 'ENOENT missing-post-failure command marker 7319';
 const additionalContext = 'post failure command hook context marker 7319';
@@ -2809,6 +2817,27 @@ await writeFile(
     "if (data.is_interrupt !== true) { process.stderr.write('bad interrupt flag ' + data.is_interrupt); process.exit(8); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: '" + additionalContext + "' } }));",
     "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  malformedCommandPath,
+  [
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'wrong event context should not attach' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: 'late timeout failure context should not attach' } }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late post tool failure timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -2910,6 +2939,105 @@ for await (const update of runPostToolUseFailureHooks(
 }
 if (skipped.length !== 0) {
   throw new Error('PostToolUseFailure command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostToolUseFailure: [
+    {
+      matcher: 'Read',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + malformedCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const malformed = [];
+for await (const update of runPostToolUseFailureHooks(
+  context,
+  { name: 'Read', isMcp: false },
+  'toolu_post_failure_command_hook_malformed',
+  'msg_post_failure_command_hook_malformed',
+  { file_path: inputPath },
+  failureMessage,
+  true,
+  'req_post_failure_command_hook_malformed',
+  undefined,
+  undefined,
+)) {
+  malformed.push(update);
+}
+if (malformed.some(update => update.message?.attachment?.type === 'hook_additional_context')) {
+  throw new Error('PostToolUseFailure malformed command output must not attach context: ' + JSON.stringify(malformed));
+}
+const malformedError = malformed.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_non_blocking_error' &&
+    String(attachment.stderr).includes("expected 'PostToolUseFailure'")
+  );
+});
+if (!malformedError) {
+  throw new Error('PostToolUseFailure malformed command output should surface non-blocking error: ' + JSON.stringify(malformed));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostToolUseFailure: [
+    {
+      matcher: 'Read',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timedOut = [];
+for await (const update of runPostToolUseFailureHooks(
+  context,
+  { name: 'Read', isMcp: false },
+  'toolu_post_failure_command_hook_timeout',
+  'msg_post_failure_command_hook_timeout',
+  { file_path: inputPath },
+  failureMessage,
+  true,
+  'req_post_failure_command_hook_timeout',
+  undefined,
+  undefined,
+)) {
+  timedOut.push(update);
+}
+if (timedOut.some(update => update.message?.attachment?.type === 'hook_additional_context')) {
+  throw new Error('PostToolUseFailure timed-out command output must not attach context: ' + JSON.stringify(timedOut));
+}
+const timeoutAttachment = timedOut.find(update => {
+  const attachment = update.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'PostToolUseFailure';
+});
+if (!timeoutAttachment) {
+  throw new Error('PostToolUseFailure timed-out command should surface cancellation: ' + JSON.stringify(timedOut));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('PostToolUseFailure timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('PostToolUseFailure timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('post tool use failure command hook OK');`,
