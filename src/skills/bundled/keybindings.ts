@@ -81,6 +81,8 @@ export function inferContextFromAction(action: string): string {
     settings: 'Settings',
     plugin: 'Plugin',
     permission: 'Confirmation',
+    scroll: 'Scroll',
+    selection: 'Scroll',
     voice: 'Chat',
   }
   return prefixToContext[prefix ?? ''] ?? 'Unknown'

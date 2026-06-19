@@ -21,6 +21,7 @@ export const KEYBINDING_CONTEXTS = [
   'ThemePicker',
   'Settings',
   'Tabs',
+  'Scroll',
   // New contexts for keybindings migration
   'Attachments',
   'Footer',
@@ -49,6 +50,7 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
   ThemePicker: 'When the theme picker is open',
   Settings: 'When the settings menu is open',
   Tabs: 'When tab navigation is active',
+  Scroll: 'When scrollback or scrollable content is focused',
   Attachments: 'When navigating image attachments in a select dialog',
   Footer: 'When footer indicators are focused',
   MessageSelector: 'When the message selector (rewind) is open',
@@ -109,6 +111,18 @@ export const KEYBINDING_ACTIONS = [
   // Tabs navigation actions
   'tabs:next',
   'tabs:previous',
+  // Scrollback and selection actions
+  'scroll:pageUp',
+  'scroll:pageDown',
+  'scroll:lineUp',
+  'scroll:lineDown',
+  'scroll:top',
+  'scroll:bottom',
+  'scroll:halfPageUp',
+  'scroll:halfPageDown',
+  'scroll:fullPageUp',
+  'scroll:fullPageDown',
+  'selection:copy',
   // Transcript viewer actions
   'transcript:toggleShowAll',
   'transcript:exit',

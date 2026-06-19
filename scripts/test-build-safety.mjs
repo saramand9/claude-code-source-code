@@ -13235,6 +13235,62 @@ console.log('keybinding action validation OK');`,
   assert.equal(output, 'keybinding action validation OK')
 })
 
+await test('default keybindings stay aligned with schema actions', async () => {
+  const output = await buildAndRunSnippet(
+    'keybinding-default-schema-alignment-test',
+    `import { DEFAULT_BINDINGS } from './src/keybindings/defaultBindings.ts';
+import {
+  KEYBINDING_ACTIONS,
+  KEYBINDING_CONTEXTS,
+} from './src/keybindings/schema.ts';
+import { validateUserConfig } from './src/keybindings/validate.ts';
+const contexts = new Set(KEYBINDING_CONTEXTS);
+const actions = new Set(KEYBINDING_ACTIONS);
+const missingContexts = [];
+const missingActions = [];
+for (const block of DEFAULT_BINDINGS) {
+  if (!contexts.has(block.context)) missingContexts.push(block.context);
+  for (const action of Object.values(block.bindings)) {
+    if (action !== null && !actions.has(action)) {
+      missingActions.push(action);
+    }
+  }
+}
+if (missingContexts.length > 0 || missingActions.length > 0) {
+  throw new Error(
+    'default keybindings missing schema entries: ' +
+      JSON.stringify({
+        contexts: [...new Set(missingContexts)],
+        actions: [...new Set(missingActions)],
+      }),
+  );
+}
+const warnings = validateUserConfig([
+  {
+    context: 'Scroll',
+    bindings: {
+      'ctrl+u': 'scroll:halfPageUp',
+      'ctrl+d': 'scroll:halfPageDown',
+      'ctrl+y': 'scroll:lineUp',
+      'ctrl+e': 'scroll:lineDown',
+      'ctrl+shift+c': 'selection:copy',
+    },
+  },
+]);
+if (
+  warnings.some(
+    w => w.type === 'invalid_context' || w.type === 'invalid_action',
+  )
+) {
+  throw new Error(
+    'scroll keybindings should validate: ' + JSON.stringify(warnings),
+  );
+}
+console.log('keybinding default schema alignment OK');`,
+  )
+  assert.equal(output, 'keybinding default schema alignment OK')
+})
+
 await test('keybinding bundled skill infers contexts for documented actions', async () => {
   const output = await buildAndRunSnippet(
     'keybinding-skill-context-inference-test',
@@ -13242,6 +13298,8 @@ await test('keybinding bundled skill infers contexts for documented actions', as
 const expected = {
   'settings:search': 'Settings',
   'plugin:install': 'Plugin',
+  'scroll:pageUp': 'Scroll',
+  'selection:copy': 'Scroll',
   'voice:pushToTalk': 'Chat',
   'unknown:action': 'Unknown',
 };

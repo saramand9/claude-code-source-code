@@ -3242,6 +3242,47 @@ ok - keybinding bundled skill infers contexts for documented actions
 116/116 build-safety tests passed.
 ```
 
+## 2026-06-19 keybinding schema scroll alignment
+
+This round closes a schema drift gap between default keybindings and user
+customization validation.
+
+- `src/keybindings/schema.ts`
+  - Adds the `Scroll` context to `KEYBINDING_CONTEXTS` with a user-facing
+    description.
+  - Adds scrollback actions (`scroll:pageUp`, `scroll:lineUp`, etc.) and
+    `selection:copy` to `KEYBINDING_ACTIONS`.
+  - Includes non-default but implemented scroll actions such as
+    `scroll:halfPageUp` and `scroll:fullPageDown`, so users can bind them.
+- `src/skills/bundled/keybindings.ts`
+  - Maps `scroll:*` and `selection:*` to the `Scroll` context in generated
+    keybindings help.
+- `scripts/test-build-safety.mjs`
+  - Adds a default-binding/schema alignment regression so every default
+    context and action must be present in the schema.
+  - Verifies user-provided `Scroll` bindings validate without
+    `invalid_context` or `invalid_action` warnings.
+
+Risk boundary update: user keybinding customization can now express the
+scrollback and selection bindings that already exist in the default keybinding
+table, matching the runtime behavior more closely.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - default keybindings stay aligned with schema actions
+117/117 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for
