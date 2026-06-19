@@ -3140,6 +3140,44 @@ ok - PermissionRequest hooks prefer denials in interactive permission context
 81/81 build-safety tests passed.
 ```
 
+## 2026-06-19 interactive PermissionRequest hook failure fallback
+
+This round hardens the background PermissionRequest hook check used by the
+interactive permission prompt.
+
+- `src/hooks/toolPermission/handlers/interactiveHandler.ts`
+  - Adds an explicit `.catch()` to the fire-and-forget PermissionRequest hook
+    task.
+  - Logs hook failures and leaves the prompt available so the user can decide
+    manually, matching the fail-open fallback already used by coordinator and
+    headless automated checks.
+- `scripts/test-build-safety.mjs`
+  - Adds a direct `handleInteractivePermission()` regression test with a
+    throwing `runHooks()` implementation.
+  - Verifies the prompt stays queued, the permission is not resolved, and the
+    hook failure does not leak an unhandled rejection.
+
+Risk boundary update: a broken interactive PermissionRequest hook can no longer
+turn into an unhandled async rejection while the user-facing approval prompt is
+active. Remaining gaps are full keyboard-driven TTY interaction and broader hook
+concurrency cases outside PermissionRequest.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - interactive PermissionRequest hook failures keep prompt alive
+82/82 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI

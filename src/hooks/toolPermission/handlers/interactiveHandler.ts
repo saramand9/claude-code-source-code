@@ -428,7 +428,12 @@ function handleInteractivePermission(
       channelUnsubscribe?.()
       ctx.removeFromQueue()
       resolveOnce(hookDecision)
-    })()
+    })().catch(error => {
+      logForDebugging(
+        `PermissionRequest hook check failed: ${errorMessage(error)}`,
+        { level: 'error' },
+      )
+    })
   }
 
   // Execute bash classifier check asynchronously (if applicable)

@@ -2081,6 +2081,119 @@ console.log('permission request interactive hook OK');`,
   assert.equal(output, 'permission request interactive hook OK')
 })
 
+await test('interactive PermissionRequest hook failures keep prompt alive', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-request-interactive-hook-failure-test',
+    `delete process.env.CLAUDE_CODE_SIMPLE;
+
+const { handleInteractivePermission } = await import('./src/hooks/toolPermission/handlers/interactiveHandler.ts');
+
+let queuedItem = null;
+let resolvedDecision = null;
+let removedFromQueue = false;
+let unhandledRejection = null;
+const onUnhandledRejection = reason => {
+  unhandledRejection = reason;
+};
+process.once('unhandledRejection', onUnhandledRejection);
+
+const ctx = {
+  tool: {
+    name: 'Write',
+  },
+  input: {
+    file_path: 'build-src/test-artifacts/permission-request-interactive-failure.txt',
+    content: 'interactive hook failure',
+  },
+  toolUseID: 'toolu_permission_request_interactive_hook_failure',
+  assistantMessage: {
+    uuid: 'assistant-test-uuid',
+    message: {
+      id: 'msg_permission_request_interactive_hook_failure',
+      role: 'assistant',
+      content: [],
+    },
+  },
+  toolUseContext: {
+    abortController: new AbortController(),
+    options: { isNonInteractiveSession: false },
+    getAppState() {
+      return {
+        mcp: { clients: [] },
+        toolPermissionContext: {
+          mode: 'default',
+        },
+      };
+    },
+  },
+  pushToQueue(item) {
+    queuedItem = item;
+  },
+  updateQueueItem() {},
+  removeFromQueue() {
+    removedFromQueue = true;
+  },
+  async runHooks() {
+    throw new Error('interactive hook failure marker');
+  },
+  logCancelled() {},
+  logDecision() {},
+  cancelAndAbort(message) {
+    return { behavior: 'ask', message: message ?? 'cancelled' };
+  },
+  async handleUserAllow(updatedInput) {
+    return {
+      behavior: 'allow',
+      updatedInput,
+      userModified: false,
+    };
+  },
+  buildAllow(updatedInput) {
+    return {
+      behavior: 'allow',
+      updatedInput,
+      userModified: false,
+    };
+  },
+};
+
+handleInteractivePermission(
+  {
+    ctx,
+    description: 'Write file',
+    result: {
+      behavior: 'ask',
+      message: 'permission required',
+      suggestions: [],
+    },
+    awaitAutomatedChecksBeforeDialog: false,
+  },
+  decision => {
+    resolvedDecision = decision;
+  },
+);
+
+await new Promise(resolve => setTimeout(resolve, 50));
+process.removeListener('unhandledRejection', onUnhandledRejection);
+
+if (!queuedItem) {
+  throw new Error('interactive prompt was not queued');
+}
+if (removedFromQueue) {
+  throw new Error('hook failure should leave the permission prompt active');
+}
+if (resolvedDecision) {
+  throw new Error('hook failure should not resolve the permission decision: ' + JSON.stringify(resolvedDecision));
+}
+if (unhandledRejection) {
+  throw new Error('hook failure leaked an unhandled rejection: ' + String(unhandledRejection?.message ?? unhandledRejection));
+}
+
+console.log('interactive hook failure OK');`,
+  )
+  assert.equal(output, 'interactive hook failure OK')
+})
+
 await test('PermissionRequest command hooks decide Bash headless prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-command-hook-test',
