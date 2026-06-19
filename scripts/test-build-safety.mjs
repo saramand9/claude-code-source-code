@@ -5280,6 +5280,107 @@ console.log('notification hooks OK');`,
   assert.equal(output, 'notification hooks OK')
 })
 
+await test('Notification command hooks receive title and type metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'notification-command-hook-test',
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/notification-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'notification-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'notification-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'notification-marker.json');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const notificationType = 'permission_prompt';
+const message = 'notification command message marker 8127';
+const title = 'notification command title marker 8127';
+await writeFile(
+  commandPath,
+  [
+    "const { writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'Notification') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.notification_type !== '" + notificationType + "') { process.stderr.write('bad type ' + data.notification_type); process.exit(4); }",
+    "if (data.message !== '" + message + "') { process.stderr.write('bad message ' + data.message); process.exit(5); }",
+    "if (data.title !== '" + title + "') { process.stderr.write('bad title ' + data.title); process.exit(6); }",
+    "await writeFile('" + markerPathForScript + "', JSON.stringify({ type: data.notification_type, title: data.title }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeNotificationHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  Notification: [
+    {
+      matcher: notificationType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+await executeNotificationHooks(
+  {
+    notificationType,
+    message,
+    title,
+  },
+  10000,
+);
+const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+if (marker.type !== notificationType || marker.title !== title) {
+  throw new Error('Notification command marker mismatch: ' + JSON.stringify(marker));
+}
+
+await rm(markerPath, { force: true });
+await executeNotificationHooks(
+  {
+    notificationType: 'idle_prompt',
+    message,
+    title,
+  },
+  10000,
+);
+let skippedCreated = true;
+try {
+  await stat(markerPath);
+} catch {
+  skippedCreated = false;
+}
+if (skippedCreated) {
+  throw new Error('Notification command matcher should skip idle_prompt');
+}
+
+console.log('notification command hooks OK');`,
+  )
+  assert.equal(output, 'notification command hooks OK')
+})
+
 await test('SessionStart and Setup hooks expose startup context', async () => {
   const output = await buildAndRunSnippet(
     'session-start-setup-hook-test',
