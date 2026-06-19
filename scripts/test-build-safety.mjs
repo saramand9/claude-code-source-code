@@ -13131,6 +13131,53 @@ await test('runtime native imports use optional loader wrappers', async () => {
   assert.deepEqual(offenders, [])
 })
 
+await test('shortcut display fallbacks are backed by default bindings', async () => {
+  const displayCalls = []
+  const literalDisplayCallPattern =
+    /(?:useShortcutDisplay|getShortcutDisplay)\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*,\s*(['"])(.*?)\5/g
+
+  for await (const file of walkFiles(join(ROOT, 'src'))) {
+    if (!/\.[jt]sx?$/.test(file)) continue
+    const source = await readFile(file, 'utf8')
+    const sourceWithoutComments = source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+    for (const match of sourceWithoutComments.matchAll(
+      literalDisplayCallPattern,
+    )) {
+      displayCalls.push({
+        file: relative(ROOT, file).replace(/\\/g, '/'),
+        action: match[2],
+        context: match[4],
+        fallback: match[6],
+      })
+    }
+  }
+
+  const output = await buildAndRunSnippet(
+    'shortcut-display-defaults-test',
+    `import { resolveShortcutDisplay } from './src/keybindings/shortcutFormat.ts';
+const displayCalls = ${JSON.stringify(displayCalls)};
+const featureGated = new Set([
+  'app:toggleTerminal:Global',
+  'voice:pushToTalk:Chat',
+]);
+const missing = [];
+for (const call of displayCalls) {
+  const resolved = resolveShortcutDisplay(call.action, call.context);
+  const key = call.action + ':' + call.context;
+  if (resolved === undefined && !featureGated.has(key)) {
+    missing.push(call.file + ' ' + key + ' fallback=' + call.fallback);
+  }
+}
+if (missing.length > 0) {
+  throw new Error('shortcut display defaults missing:\\n' + missing.join('\\n'));
+}
+console.log('shortcut display defaults OK');`,
+  )
+  assert.equal(output, 'shortcut display defaults OK')
+})
+
 await test('modifiers native fallback returns false on missing native package', async () => {
   const output = await buildAndRunSnippet(
     'modifiers-fallback-test',

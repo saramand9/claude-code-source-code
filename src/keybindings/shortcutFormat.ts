@@ -19,6 +19,18 @@ import type { KeybindingContextName } from './types.js'
 const LOGGED_FALLBACKS = new Set<string>()
 
 /**
+ * Resolve display text for a configured shortcut without applying the legacy
+ * hardcoded fallback.
+ */
+export function resolveShortcutDisplay(
+  action: string,
+  context: KeybindingContextName,
+): string | undefined {
+  const bindings = loadKeybindingsSync()
+  return getBindingDisplayText(action, context, bindings)
+}
+
+/**
  * Get the display text for a configured shortcut without React hooks.
  * Use this in non-React contexts (commands, services, etc.).
  *
@@ -40,8 +52,7 @@ export function getShortcutDisplay(
   context: KeybindingContextName,
   fallback: string,
 ): string {
-  const bindings = loadKeybindingsSync()
-  const resolved = getBindingDisplayText(action, context, bindings)
+  const resolved = resolveShortcutDisplay(action, context)
   if (resolved === undefined) {
     const key = `${action}:${context}`
     if (!LOGGED_FALLBACKS.has(key)) {

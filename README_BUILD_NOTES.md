@@ -3100,6 +3100,50 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 shortcut display default resolution
+
+This round tightens keybinding display behavior when a React shortcut hint is
+rendered outside `KeybindingSetup`.
+
+- `src/keybindings/shortcutFormat.ts`
+  - Adds `resolveShortcutDisplay()` so callers can ask the configured/default
+    keybinding resolver for display text without immediately applying the
+    legacy hardcoded fallback.
+  - Keeps `getShortcutDisplay()` fallback logging behavior for non-React
+    callers when no configured/default binding exists.
+- `src/keybindings/useShortcutDisplay.ts`
+  - Uses synchronous keybinding resolution when the React keybinding context is
+    unavailable, so hints still reflect platform-specific defaults such as
+    Windows image paste or mode cycling instead of stale hardcoded fallbacks.
+  - Leaves the legacy fallback parameter in place for genuinely missing
+    bindings while reducing false fallback analytics for provider-less renders.
+- `scripts/test-build-safety.mjs`
+  - Adds a source scan for literal `useShortcutDisplay()` and
+    `getShortcutDisplay()` callsites.
+  - Verifies every non-feature-gated display action resolves from the generated
+    default keybinding table.
+
+Risk boundary update: shortcut hint rendering is now closer to the configured
+default keybinding system, including provider-less renders. Feature-gated
+actions that are intentionally absent from the external build remain explicit
+test allowlist entries.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - shortcut display fallbacks are backed by default bindings
+114/114 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for

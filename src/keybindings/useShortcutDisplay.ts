@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
 import { useOptionalKeybindingContext } from './KeybindingContext.js'
+import { resolveShortcutDisplay } from './shortcutFormat.js'
 import type { KeybindingContextName } from './types.js'
 
 // TODO(keybindings-migration): Remove fallback parameter after migration is complete
@@ -15,7 +16,8 @@ import type { KeybindingContextName } from './types.js'
 
 /**
  * Hook to get the display text for a configured shortcut.
- * Returns the configured binding or a fallback if unavailable.
+ * Returns the configured binding, the synchronous keybinding default when
+ * rendered outside KeybindingSetup, or a fallback if unavailable.
  *
  * @param action - The action name (e.g., 'app:toggleTranscript')
  * @param context - The keybinding context (e.g., 'Global')
@@ -32,9 +34,15 @@ export function useShortcutDisplay(
   fallback: string,
 ): string {
   const keybindingContext = useOptionalKeybindingContext()
-  const resolved = keybindingContext?.getDisplayText(action, context)
+  const syncResolved = useMemo(
+    () =>
+      keybindingContext ? undefined : resolveShortcutDisplay(action, context),
+    [action, context, keybindingContext],
+  )
+  const resolved =
+    keybindingContext?.getDisplayText(action, context) ?? syncResolved
   const isFallback = resolved === undefined
-  const reason = keybindingContext ? 'action_not_found' : 'no_context'
+  const reason = 'action_not_found'
 
   // Log fallback usage once per mount (not on every render) to avoid
   // flooding analytics with events from frequent re-renders.
