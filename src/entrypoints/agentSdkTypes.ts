@@ -13,6 +13,7 @@ import type {
   CallToolResult,
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js'
+import { randomUUID } from 'crypto'
 
 // Control protocol types for SDK builders (bridge subpath consumers)
 /** @alpha */
@@ -49,6 +50,7 @@ import {
   tagSessionImpl,
 } from '../utils/listSessionsImpl.js'
 import { cronToHuman } from '../utils/cron.js'
+import { createCronScheduler } from '../utils/cronScheduler.js'
 // Import types needed for function signatures
 import type {
   AnyZodRawShape,
@@ -381,12 +383,85 @@ export type ScheduledTasksHandle = {
  *
  * @internal
  */
-export function watchScheduledTasks(_opts: {
+export function watchScheduledTasks(opts: {
   dir: string
   signal: AbortSignal
   getJitterConfig?: () => CronJitterConfig
 }): ScheduledTasksHandle {
-  throw new Error('not implemented')
+  const queue: ScheduledTaskEvent[] = []
+  const waiters: Array<(result: IteratorResult<ScheduledTaskEvent>) => void> =
+    []
+  let closed = false
+
+  const push = (event: ScheduledTaskEvent): void => {
+    if (closed) return
+    const waiter = waiters.shift()
+    if (waiter) waiter({ value: event, done: false })
+    else queue.push(event)
+  }
+
+  const scheduler = createCronScheduler({
+    onFire: prompt =>
+      push({
+        type: 'fire',
+        task: {
+          id: '',
+          cron: '',
+          prompt,
+          createdAt: Date.now(),
+          recurring: false,
+        },
+      }),
+    onFireTask: task => push({ type: 'fire', task }),
+    onMissed: tasks => push({ type: 'missed', tasks }),
+    isLoading: () => false,
+    assistantMode: true,
+    dir: opts.dir,
+    lockIdentity: randomUUID(),
+    getJitterConfig: opts.getJitterConfig,
+    isKilled: () => opts.signal.aborted,
+  })
+
+  const close = (): void => {
+    if (closed) return
+    closed = true
+    scheduler.stop()
+    while (waiters.length > 0) {
+      waiters.shift()?.({ value: undefined, done: true })
+    }
+  }
+
+  if (opts.signal.aborted) close()
+  else {
+    opts.signal.addEventListener('abort', close, { once: true })
+    scheduler.start()
+  }
+
+  return {
+    async *events(): AsyncGenerator<ScheduledTaskEvent> {
+      try {
+        while (true) {
+          if (queue.length > 0) {
+            yield queue.shift()!
+            continue
+          }
+          if (closed) return
+          const next = await new Promise<IteratorResult<ScheduledTaskEvent>>(
+            resolve => {
+              waiters.push(resolve)
+            },
+          )
+          if (next.done) return
+          yield next.value
+        }
+      } finally {
+        close()
+      }
+    },
+    getNextFireTime(): number | null {
+      return scheduler.getNextFireTime()
+    },
+  }
 }
 
 /**

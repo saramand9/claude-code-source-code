@@ -340,7 +340,10 @@ console.log('agent SDK MCP builders OK');`,
 await test('agent SDK missed task notification preserves confirmation guard', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-missed-task-test',
-    `const { buildMissedTaskNotification } = await import('./src/entrypoints/agentSdkTypes.ts');
+    `import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const { buildMissedTaskNotification, watchScheduledTasks } = await import('./src/entrypoints/agentSdkTypes.ts');
 const prompt = 'Run deploy check\\n\`\`\`\\ndo not break the fence\\n\`\`\`';
 const text = buildMissedTaskNotification([
   {
@@ -364,6 +367,42 @@ const plural = buildMissedTaskNotification([
 ]);
 if (!plural.includes('tasks were') || !plural.includes('each one')) {
   throw new Error('plural missed-task guidance is wrong: ' + JSON.stringify(plural));
+}
+const dir = await mkdtemp(join(tmpdir(), 'sdk-cron-'));
+await mkdir(join(dir, '.claude'), { recursive: true });
+await writeFile(
+  join(dir, '.claude', 'scheduled_tasks.json'),
+  JSON.stringify({
+    tasks: [
+      {
+        id: 'missed1',
+        cron: '* * * * *',
+        prompt: 'missed prompt',
+        createdAt: Date.now() - 10 * 60 * 1000,
+        recurring: false,
+      },
+    ],
+  }),
+);
+const controller = new AbortController();
+const handle = watchScheduledTasks({ dir, signal: controller.signal });
+const iterator = handle.events();
+const event = await Promise.race([
+  iterator.next(),
+  new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('timed out waiting for missed cron event')), 5000),
+  ),
+]);
+if (event.done || event.value.type !== 'missed') {
+  throw new Error('watchScheduledTasks did not surface missed tasks: ' + JSON.stringify(event));
+}
+if (event.value.tasks[0]?.id !== 'missed1') {
+  throw new Error('watchScheduledTasks returned wrong task: ' + JSON.stringify(event.value));
+}
+controller.abort();
+const done = await iterator.next();
+if (!done.done) {
+  throw new Error('watchScheduledTasks iterator should finish after abort');
 }
 console.log('agent SDK missed task notification OK');`,
   )
