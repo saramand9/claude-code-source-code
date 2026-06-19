@@ -2601,3 +2601,33 @@ Expected new output:
 ```text
 ok - worktree hooks create and remove paths
 ```
+
+## 2026-06-19 InstructionsLoaded hook build-safety coverage
+
+This round covers instruction-file load hooks. These hooks audit when
+CLAUDE.md/rule files are loaded into context, including conditional loads from
+path globs.
+
+- `scripts/test-build-safety.mjs`
+  - Registers a callback hook for `InstructionsLoaded`.
+  - Asserts `hasInstructionsLoadedHook()` detects registered hooks.
+  - Asserts `executeInstructionsLoadedHooks()` passes file path, memory type,
+    load reason, globs, trigger file path, and parent file path.
+  - Asserts matcher filtering skips unrelated load reasons.
+
+Risk boundary update: instruction-load hook metadata now has direct
+build-safety coverage. Remaining gaps are full memory-load integration E2E,
+interactive PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - InstructionsLoaded hooks receive load metadata
+```

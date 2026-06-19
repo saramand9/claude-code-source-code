@@ -2222,6 +2222,101 @@ console.log('worktree hooks OK');`,
   assert.equal(output, 'worktree hooks OK')
 })
 
+await test('InstructionsLoaded hooks receive load metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'instructions-loaded-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/instructions-loaded-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  {
+    executeInstructionsLoadedHooks,
+    hasInstructionsLoadedHook,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+if (hasInstructionsLoadedHook()) {
+  throw new Error('InstructionsLoaded hook should not be configured before registration');
+}
+
+const filePath = 'build-src/test-artifacts/project-rules-3812.md';
+const triggerFilePath = 'build-src/test-artifacts/src/app-3812.ts';
+const parentFilePath = 'build-src/test-artifacts/CLAUDE.md';
+let calls = 0;
+registerHookCallbacks({
+  InstructionsLoaded: [
+    {
+      matcher: 'path_glob_match',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'InstructionsLoaded') {
+              throw new Error('unexpected event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.file_path !== filePath) {
+              throw new Error('unexpected file path: ' + hookInput.file_path);
+            }
+            if (hookInput.memory_type !== 'Project') {
+              throw new Error('unexpected memory type: ' + hookInput.memory_type);
+            }
+            if (hookInput.load_reason !== 'path_glob_match') {
+              throw new Error('unexpected load reason: ' + hookInput.load_reason);
+            }
+            if (!Array.isArray(hookInput.globs) || hookInput.globs[0] !== 'src/**/*.ts') {
+              throw new Error('unexpected globs: ' + JSON.stringify(hookInput.globs));
+            }
+            if (hookInput.trigger_file_path !== triggerFilePath) {
+              throw new Error('unexpected trigger path: ' + hookInput.trigger_file_path);
+            }
+            if (hookInput.parent_file_path !== parentFilePath) {
+              throw new Error('unexpected parent path: ' + hookInput.parent_file_path);
+            }
+            return { systemMessage: 'instructions loaded marker 3812' };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+if (!hasInstructionsLoadedHook()) {
+  throw new Error('InstructionsLoaded hook should be detected after registration');
+}
+
+await executeInstructionsLoadedHooks(filePath, 'Project', 'path_glob_match', {
+  globs: ['src/**/*.ts'],
+  triggerFilePath,
+  parentFilePath,
+  timeoutMs: 10000,
+});
+if (calls !== 1) {
+  throw new Error('InstructionsLoaded hook should run once, got ' + calls);
+}
+
+await executeInstructionsLoadedHooks(filePath, 'Project', 'session_start', {
+  timeoutMs: 10000,
+});
+if (calls !== 1) {
+  throw new Error('InstructionsLoaded matcher should skip other load reasons, got ' + calls);
+}
+
+console.log('instructions loaded hook OK');`,
+  )
+  assert.equal(output, 'instructions loaded hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
