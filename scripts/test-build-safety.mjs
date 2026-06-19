@@ -5941,8 +5941,14 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'session-end-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'session-end-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const markerPath = join(commandDir, 'session-end-marker.json');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'session-end-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'session-end-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 await writeFile(
   commandPath,
   [
@@ -5953,6 +5959,19 @@ await writeFile(
     "if (data.hook_event_name !== 'SessionEnd') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
     "if (data.reason !== 'clear') { process.stderr.write('bad reason ' + data.reason); process.exit(4); }",
     "await writeFile('" + markerPathForScript + "', JSON.stringify({ reason: data.reason }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write('session end timeout output should not matter');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late session end timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -6025,6 +6044,41 @@ try {
 }
 if (skippedCreated) {
   throw new Error('SessionEnd command matcher should skip logout');
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  SessionEnd: [
+    {
+      matcher: 'clear',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+await executeSessionEndHooks('clear', {
+  getAppState: () => appState,
+  setAppState: updater => {
+    updater(appState);
+  },
+  timeoutMs: 10000,
+});
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('SessionEnd timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('SessionEnd timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('session end command hook OK');`,
