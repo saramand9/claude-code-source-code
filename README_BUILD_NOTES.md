@@ -3100,6 +3100,42 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 Compact command hook coverage
+
+This round extends compact hook coverage from SDK callback hooks to command
+hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a real Node command hook fixture shared by `PreCompact` and
+    `PostCompact`.
+  - Verifies `PreCompact` command hooks receive trigger and custom
+    instructions.
+  - Asserts command stdout becomes rewritten custom instructions and user
+    display output.
+  - Verifies `PostCompact` command hooks receive trigger and compact summary.
+  - Asserts trigger matchers skip unrelated compact events.
+
+Risk boundary update: settings-style compact command hooks now have direct
+build-safety coverage alongside callback hooks. Remaining gaps are prompt and
+agent hook execution outside the REPL path, plus full keyboard-driven TTY
+interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - compact command hooks rewrite instructions and report summaries
+93/93 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

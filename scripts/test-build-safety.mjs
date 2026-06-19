@@ -4134,6 +4134,135 @@ console.log('compact hooks OK');`,
   assert.equal(output, 'compact hooks OK')
 })
 
+await test('compact command hooks rewrite instructions and report summaries', async () => {
+  const output = await buildAndRunSnippet(
+    'compact-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/compact-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'compact-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'compact-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const customInstructions = 'existing compact command instructions marker 3487';
+const rewrittenInstructions = 'rewritten compact command instructions marker 3487';
+const compactSummary = 'compact command summary marker 3487';
+const postMessage = 'post compact command user message marker 3487';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name === 'PreCompact') {",
+    "  if (data.trigger !== 'manual') { process.stderr.write('bad pre trigger ' + data.trigger); process.exit(3); }",
+    "  if (data.custom_instructions !== '" + customInstructions + "') { process.stderr.write('bad custom instructions ' + data.custom_instructions); process.exit(4); }",
+    "  process.stdout.write('" + rewrittenInstructions + "');",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'PostCompact') {",
+    "  if (data.trigger !== 'manual') { process.stderr.write('bad post trigger ' + data.trigger); process.exit(5); }",
+    "  if (data.compact_summary !== '" + compactSummary + "') { process.stderr.write('bad compact summary ' + data.compact_summary); process.exit(6); }",
+    "  process.stdout.write('" + postMessage + "');",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad event ' + data.hook_event_name);",
+    "process.exit(7);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executePreCompactHooks, executePostCompactHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  PreCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  PostCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const preResult = await executePreCompactHooks({
+  trigger: 'manual',
+  customInstructions,
+});
+if (preResult.newCustomInstructions !== rewrittenInstructions) {
+  throw new Error('PreCompact command should return rewritten instructions: ' + JSON.stringify(preResult));
+}
+if (!String(preResult.userDisplayMessage).includes('PreCompact [node ')) {
+  throw new Error('PreCompact command should report command name: ' + JSON.stringify(preResult));
+}
+if (!String(preResult.userDisplayMessage).includes(rewrittenInstructions)) {
+  throw new Error('PreCompact command should report output: ' + JSON.stringify(preResult));
+}
+
+const skippedPre = await executePreCompactHooks({
+  trigger: 'auto',
+  customInstructions,
+});
+if (Object.keys(skippedPre).length !== 0) {
+  throw new Error('PreCompact command matcher should skip auto trigger: ' + JSON.stringify(skippedPre));
+}
+
+const postResult = await executePostCompactHooks({
+  trigger: 'manual',
+  compactSummary,
+});
+if (!String(postResult.userDisplayMessage).includes('PostCompact [node ')) {
+  throw new Error('PostCompact command should report command name: ' + JSON.stringify(postResult));
+}
+if (!String(postResult.userDisplayMessage).includes(postMessage)) {
+  throw new Error('PostCompact command should report output: ' + JSON.stringify(postResult));
+}
+
+const skippedPost = await executePostCompactHooks({
+  trigger: 'auto',
+  compactSummary,
+});
+if (Object.keys(skippedPost).length !== 0) {
+  throw new Error('PostCompact command matcher should skip auto trigger: ' + JSON.stringify(skippedPost));
+}
+
+console.log('compact command hooks OK');`,
+  )
+  assert.equal(output, 'compact command hooks OK')
+})
+
 await test('subagent lifecycle hooks attach context and block stop', async () => {
   const output = await buildAndRunSnippet(
     'subagent-lifecycle-hook-test',
