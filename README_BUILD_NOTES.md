@@ -3282,6 +3282,40 @@ ok - PostToolUseFailure command hooks attach additional context
 97/97 build-safety tests passed.
 ```
 
+## 2026-06-19 PermissionDenied command hook coverage
+
+This round extends permission-denial retry coverage from callback hooks to real
+command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture for `PermissionDenied`.
+  - Verifies command hooks receive tool name, tool use id, tool input, and the
+    denial reason.
+  - Asserts structured command stdout can request a model retry with
+    `retry: true`.
+  - Asserts matcher misses skip unrelated tools without yielding retry results.
+
+Risk boundary update: denied tool use now has direct command-hook regression
+coverage for metadata delivery, retry decisions, and matcher filtering.
+Remaining gaps include malformed retry JSON, command timeouts, and precedence
+when multiple denial hooks disagree.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionDenied command hooks can request retry
+98/98 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

@@ -3158,6 +3158,124 @@ console.log('permission denied hook OK');`,
   assert.equal(output, 'permission denied hook OK')
 })
 
+await test('PermissionDenied command hooks can request retry', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-denied-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/permission-denied-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'permission-denied-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'permission-denied-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const command = 'echo permission-denied-command-hook marker 5627';
+const deniedReason = 'permission denied command reason marker 5627';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PermissionDenied') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad tool ' + data.tool_name); process.exit(4); }",
+    "if (data.tool_use_id !== 'toolu_permission_denied_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
+    "if (data.tool_input.command !== '" + command + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
+    "if (!String(data.reason).includes('" + deniedReason + "')) { process.stderr.write('bad reason ' + data.reason); process.exit(7); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: true } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executePermissionDeniedHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  PermissionDenied: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return {
+      sessionHooks: new Map(),
+      toolPermissionContext: {
+        mode: 'auto',
+        additionalWorkingDirectories: new Map(),
+        alwaysAllowRules: {},
+        alwaysDenyRules: {},
+        alwaysAskRules: {},
+        isBypassPermissionsModeAvailable: false,
+      },
+    };
+  },
+  setAppState() {},
+  updateAttributionState() {},
+};
+const results = [];
+for await (const result of executePermissionDeniedHooks(
+  'Bash',
+  'toolu_permission_denied_command_hook',
+  { command },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  results.push(result);
+}
+if (!results.some(result => result.retry === true)) {
+  throw new Error('PermissionDenied command hook retry flag was not yielded: ' + JSON.stringify(results));
+}
+
+const skipped = [];
+for await (const result of executePermissionDeniedHooks(
+  'Read',
+  'toolu_permission_denied_command_hook_skip',
+  { file_path: 'ignored.txt' },
+  deniedReason,
+  context,
+  'auto',
+  context.abortController.signal,
+)) {
+  skipped.push(result);
+}
+if (skipped.length !== 0) {
+  throw new Error('PermissionDenied command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+console.log('permission denied command hook OK');`,
+  )
+  assert.equal(output, 'permission denied command hook OK')
+})
+
 await test('ConfigChange hooks cannot block policy settings', async () => {
   const output = await buildAndRunSnippet(
     'config-change-policy-hook-test',
