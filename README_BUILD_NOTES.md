@@ -2801,3 +2801,40 @@ Expected new output:
 ```text
 ok - teammate task lifecycle hooks block with metadata
 ```
+
+## 2026-06-19 elicitation hook build-safety coverage
+
+This round covers MCP elicitation hooks. `Elicitation` hooks can answer a server
+request before a UI dialog is shown, and `ElicitationResult` hooks can observe
+or override the final response before it is sent back to the server.
+
+- `scripts/test-build-safety.mjs`
+  - Registers callback hooks for `Elicitation` and `ElicitationResult` with a
+    server-name matcher.
+  - Verifies Elicitation receives server, message, mode, URL, elicitation id,
+    and requested schema metadata.
+  - Asserts Elicitation can return an `accept` response with structured
+    content.
+  - Asserts server-name matching skips unrelated MCP servers.
+  - Verifies ElicitationResult receives action, content, mode, and elicitation
+    id metadata.
+  - Asserts ElicitationResult can override the response to `decline` and return
+    a blocking reason.
+
+Risk boundary update: MCP elicitation request/response hook parsing and matcher
+behavior now have direct build-safety coverage. Remaining gaps are interactive
+PermissionRequest UI, status/file suggestion commands, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - elicitation hooks can answer and block results
+```

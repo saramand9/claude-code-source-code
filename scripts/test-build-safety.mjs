@@ -3159,6 +3159,184 @@ console.log('teammate task lifecycle hooks OK');`,
   assert.equal(output, 'teammate task lifecycle hooks OK')
 })
 
+await test('elicitation hooks can answer and block results', async () => {
+  const output = await buildAndRunSnippet(
+    'elicitation-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/elicitation-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeElicitationHooks, executeElicitationResultHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const serverName = 'fixture-elicit-server-6412';
+const elicitationId = 'elicit-6412';
+const requestedSchema = {
+  type: 'object',
+  properties: {
+    approved: { type: 'boolean' },
+    note: { type: 'string' },
+  },
+};
+const acceptedContent = { approved: true, note: 'accepted by hook 6412' };
+const resultOverrideContent = { approved: false, note: 'declined by hook 6412' };
+const declineReason = 'elicitation result decline marker 6412';
+let requestCalls = 0;
+let resultCalls = 0;
+registerHookCallbacks({
+  Elicitation: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            requestCalls += 1;
+            if (hookInput.hook_event_name !== 'Elicitation') {
+              throw new Error('unexpected elicitation event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.mcp_server_name !== serverName) {
+              throw new Error('unexpected elicitation server: ' + hookInput.mcp_server_name);
+            }
+            if (hookInput.message !== 'Approve fixture access?') {
+              throw new Error('unexpected elicitation message: ' + hookInput.message);
+            }
+            if (hookInput.mode !== 'form' || hookInput.url !== 'https://example.invalid/form') {
+              throw new Error('unexpected elicitation mode/url: ' + JSON.stringify(hookInput));
+            }
+            if (hookInput.elicitation_id !== elicitationId) {
+              throw new Error('unexpected elicitation id: ' + hookInput.elicitation_id);
+            }
+            if (hookInput.requested_schema?.properties?.approved?.type !== 'boolean') {
+              throw new Error('unexpected requested schema: ' + JSON.stringify(hookInput.requested_schema));
+            }
+            return {
+              systemMessage: JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: 'Elicitation',
+                  action: 'accept',
+                  content: acceptedContent,
+                },
+              }),
+            };
+          },
+        },
+      ],
+    },
+  ],
+  ElicitationResult: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            resultCalls += 1;
+            if (hookInput.hook_event_name !== 'ElicitationResult') {
+              throw new Error('unexpected elicitation result event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.mcp_server_name !== serverName) {
+              throw new Error('unexpected elicitation result server: ' + hookInput.mcp_server_name);
+            }
+            if (hookInput.elicitation_id !== elicitationId) {
+              throw new Error('unexpected elicitation result id: ' + hookInput.elicitation_id);
+            }
+            if (hookInput.mode !== 'form' || hookInput.action !== 'accept') {
+              throw new Error('unexpected elicitation result action: ' + JSON.stringify(hookInput));
+            }
+            if (hookInput.content?.approved !== true) {
+              throw new Error('unexpected elicitation result content: ' + JSON.stringify(hookInput.content));
+            }
+            return {
+              systemMessage: JSON.stringify({
+                reason: declineReason,
+                hookSpecificOutput: {
+                  hookEventName: 'ElicitationResult',
+                  action: 'decline',
+                  content: resultOverrideContent,
+                },
+              }),
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const requestResult = await executeElicitationHooks({
+  serverName,
+  message: 'Approve fixture access?',
+  requestedSchema,
+  permissionMode: 'default',
+  mode: 'form',
+  url: 'https://example.invalid/form',
+  elicitationId,
+  timeoutMs: 10000,
+});
+if (requestCalls !== 1) {
+  throw new Error('Elicitation hook should run once, got ' + requestCalls);
+}
+if (requestResult.blockingError) {
+  throw new Error('Elicitation accept hook should not block: ' + JSON.stringify(requestResult));
+}
+if (requestResult.elicitationResponse?.action !== 'accept') {
+  throw new Error('Elicitation hook should accept: ' + JSON.stringify(requestResult));
+}
+if (requestResult.elicitationResponse.content?.note !== acceptedContent.note) {
+  throw new Error('Elicitation hook should preserve accepted content: ' + JSON.stringify(requestResult));
+}
+
+const skippedRequest = await executeElicitationHooks({
+  serverName: 'other-elicit-server-6412',
+  message: 'ignored',
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (requestCalls !== 1) {
+  throw new Error('Elicitation matcher should skip other server, got ' + requestCalls);
+}
+if (skippedRequest.elicitationResponse || skippedRequest.blockingError) {
+  throw new Error('skipped Elicitation should be empty: ' + JSON.stringify(skippedRequest));
+}
+
+const resultResult = await executeElicitationResultHooks({
+  serverName,
+  elicitationId,
+  mode: 'form',
+  action: 'accept',
+  content: acceptedContent,
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (resultCalls !== 1) {
+  throw new Error('ElicitationResult hook should run once, got ' + resultCalls);
+}
+if (resultResult.elicitationResultResponse?.action !== 'decline') {
+  throw new Error('ElicitationResult hook should decline: ' + JSON.stringify(resultResult));
+}
+if (resultResult.elicitationResultResponse.content?.note !== resultOverrideContent.note) {
+  throw new Error('ElicitationResult hook should preserve override content: ' + JSON.stringify(resultResult));
+}
+if (resultResult.blockingError?.blockingError !== declineReason) {
+  throw new Error('ElicitationResult decline should block with reason: ' + JSON.stringify(resultResult));
+}
+
+console.log('elicitation hooks OK');`,
+  )
+  assert.equal(output, 'elicitation hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
