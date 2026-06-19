@@ -3100,6 +3100,49 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
+
+This round closes the live-timeout cleanup gap for short helper commands.
+
+- `src/utils/hooks.ts`
+  - Adds an abort race for command hooks so timeout-triggered aborts can return
+    a cancellation result immediately instead of waiting for the process close
+    path.
+  - On Windows, runs simple `StatusLine` and `FileSuggestion` helper commands
+    such as `node script.mjs` directly when they parse to plain argv tokens.
+    Complex commands still use the existing Git Bash path.
+  - Skips pending prompt-response flushing after an abort result, preserving
+    fast cancellation.
+- `src/utils/ShellCommand.ts`
+  - Makes kill idempotent.
+  - Adds a Windows fallback to `child.kill()` when `tree-kill`/`taskkill`
+    cannot terminate the spawned helper PID.
+- `scripts/test-build-safety.mjs`
+  - Adds a live-timeout regression for `StatusLine` and `FileSuggestion`.
+  - Verifies timed-out helpers return fallback output and do not write a late
+    marker after their timeout window.
+
+Risk boundary update: `StatusLine` and `FileSuggestion` now have direct
+coverage for pre-aborted and live-timeout command cancellation. Remaining gaps
+are broader complex-shell helper timeout cleanup and interactive
+PermissionRequest UI behavior.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - status line and file suggestion commands respect live timeouts
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.

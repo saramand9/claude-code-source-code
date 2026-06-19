@@ -11,6 +11,7 @@ import { TaskOutput } from './task/TaskOutput.js'
 import { getCwd } from './cwd.js'
 import { randomUUID } from 'crypto'
 import { formatShellPrefixCommand } from './bash/shellPrefix.js'
+import { tryParseShellCommand } from './bash/shellQuote.js'
 import {
   getHookEnvFilePath,
   invalidateSessionEnvCache,
@@ -164,6 +165,54 @@ import { isEnvTruthy } from './envUtils.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 
 const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
+
+const DIRECT_WINDOWS_HELPER_COMMANDS = new Set([
+  'node',
+  'node.exe',
+  'python',
+  'python.exe',
+  'python3',
+  'python3.exe',
+  'py',
+  'py.exe',
+  'bun',
+  'bun.exe',
+  'deno',
+  'deno.exe',
+  'uv',
+  'uv.exe',
+])
+
+function getDirectWindowsHelperSpawnArgs(
+  command: string,
+): { command: string; args: string[] } | null {
+  if (/[\n\r|&;<>(){}$`*?\[\]!~]/.test(command)) {
+    return null
+  }
+
+  const parsed = tryParseShellCommand(command)
+  if (!parsed.success || parsed.tokens.length === 0) {
+    return null
+  }
+  if (!parsed.tokens.every((token): token is string => typeof token === 'string')) {
+    return null
+  }
+
+  const [executable, ...args] = parsed.tokens
+  if (!executable || /^[A-Za-z_][A-Za-z0-9_]*=/.test(executable)) {
+    return null
+  }
+
+  const executableName = basename(executable).toLowerCase()
+  if (
+    !DIRECT_WINDOWS_HELPER_COMMANDS.has(executableName) &&
+    !/\.(?:exe|cmd|bat|com)$/i.test(executableName)
+  ) {
+    return null
+  }
+
+  return { command: executable, args }
+}
 
 /**
  * SessionEnd hooks run during shutdown/clear and need a much tighter bound
@@ -983,20 +1032,63 @@ async function execCommandHook(
   } else {
     // On Windows, use Git Bash explicitly (cmd.exe can't run bash syntax).
     // On other platforms, shell: true uses /bin/sh.
+    const directWindowsHelper =
+      isWindows &&
+      (hookEvent === 'StatusLine' || hookEvent === 'FileSuggestion')
+        ? getDirectWindowsHelperSpawnArgs(finalCommand)
+        : null
     const shell = isWindows ? findGitBashPath() : true
-    child = spawn(finalCommand, [], {
-      env: envVars,
-      cwd: safeCwd,
-      shell,
-      // Prevent visible console window on Windows (no-op on other platforms)
-      windowsHide: true,
-    }) as ChildProcessWithoutNullStreams
+    child = (
+      directWindowsHelper
+        ? spawn(directWindowsHelper.command, directWindowsHelper.args, {
+            env: envVars,
+            cwd: safeCwd,
+            // Prevent visible console window on Windows (no-op on other platforms)
+            windowsHide: true,
+          })
+        : spawn(finalCommand, [], {
+            env: envVars,
+            cwd: safeCwd,
+            shell,
+            // Prevent visible console window on Windows (no-op on other platforms)
+            windowsHide: true,
+          })
+    ) as ChildProcessWithoutNullStreams
   }
 
   // Hooks use pipe mode — stdout must be streamed into JS so we can parse
   // the first response line to detect async hooks ({"async": true}).
   const hookTaskOutput = new TaskOutput(`hook_${child.pid}`, null)
   const shellCommand = wrapSpawn(child, signal, hookTimeoutMs, hookTaskOutput)
+  let removeAbortResultListener: (() => void) | undefined
+  const abortResultPromise = new Promise<{
+    stdout: string
+    stderr: string
+    output: string
+    status: number
+    aborted: true
+  }>(resolve => {
+    const resolveAborted = () => {
+      shellCommand.kill()
+      resolve({
+        stdout: '',
+        stderr: 'Hook cancelled',
+        output: 'Hook cancelled',
+        status: 1,
+        aborted: true,
+      })
+    }
+
+    if (signal.aborted) {
+      resolveAborted()
+      return
+    }
+
+    signal.addEventListener('abort', resolveAborted, { once: true })
+    removeAbortResultListener = () => {
+      signal.removeEventListener('abort', resolveAborted)
+    }
+  })
   // Track whether shellCommand ownership was transferred (e.g., to async hook registry)
   let shellCommandTransferred = false
   // Track whether stdin has already been written (to avoid "write after end" errors)
@@ -1284,9 +1376,12 @@ async function execCommandHook(
       childIsAsyncPromise,
       childClosePromise,
       childErrorPromise,
+      abortResultPromise,
     ])
     // Ensure all queued prompt responses have been sent
-    await promptChain
+    if (!result.aborted) {
+      await promptChain
+    }
     diagExitCode = result.status
     diagAborted = result.aborted ?? false
     return result
@@ -1337,6 +1432,7 @@ async function execCommandHook(
       })
     }
     stopProgressInterval()
+    removeAbortResultListener?.()
     // Clean up stream resources unless ownership was transferred (e.g., to async hook registry)
     if (!shellCommandTransferred) {
       shellCommand.cleanup()

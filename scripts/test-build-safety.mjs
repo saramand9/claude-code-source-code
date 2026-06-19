@@ -7341,6 +7341,135 @@ console.log('status line file suggestion aborted OK');`,
   assert.equal(output, 'status line file suggestion aborted OK')
 })
 
+await test('status line and file suggestion commands respect live timeouts', async () => {
+  const output = await buildAndRunSnippet(
+    'status-line-file-suggestion-timeout-test',
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
+
+const configDirRel = 'build-src/test-artifacts/status-line-file-suggestion-timeout-config';
+await rm(configDirRel, { recursive: true, force: true });
+await mkdir(configDirRel, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDirRel;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const statusCommandPath = configDirRel + '/status-line-timeout-command.mjs';
+const suggestionCommandPath = configDirRel + '/file-suggestion-timeout-command.mjs';
+const statusStartMarkerPath = configDirRel + '/status-timeout-started.txt';
+const suggestionStartMarkerPath = configDirRel + '/suggestion-timeout-started.txt';
+const statusLateMarkerPath = configDirRel + '/status-timeout-late.txt';
+const suggestionLateMarkerPath = configDirRel + '/suggestion-timeout-late.txt';
+
+function timeoutCommand(startMarkerPath, lateMarkerPath, output) {
+  return [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync(" + JSON.stringify(startMarkerPath) + ", 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync(" + JSON.stringify(lateMarkerPath) + ", 'late', 'utf8');",
+    "  process.stdout.write(" + JSON.stringify(output) + ");",
+    "}, 1600);",
+  ].join('\\n');
+}
+
+await writeFile(
+  statusCommandPath,
+  timeoutCommand(statusStartMarkerPath, statusLateMarkerPath, 'late status should not render'),
+  'utf8',
+);
+await writeFile(
+  suggestionCommandPath,
+  timeoutCommand(suggestionStartMarkerPath, suggestionLateMarkerPath, 'late-suggestion.ts'),
+  'utf8',
+);
+await writeFile(
+  configDirRel + '/settings.json',
+  JSON.stringify(
+    {
+      statusLine: {
+        type: 'command',
+        command: 'node ' + statusCommandPath,
+      },
+      fileSuggestion: {
+        type: 'command',
+        command: 'node ' + suggestionCommandPath,
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeStatusLineCommand, executeFileSuggestionCommand },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+
+async function exists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+const statusLine = await executeStatusLineCommand(
+  {
+    marker: 'status-marker-4926',
+    cwd: process.cwd(),
+    model: { id: 'model-4926', display_name: 'Model 4926' },
+    transcriptPath: 'build-src/test-artifacts/status-transcript-4926.jsonl',
+  },
+  undefined,
+  500,
+  true,
+);
+if (statusLine !== undefined) {
+  throw new Error('timed-out status line output should be ignored: ' + JSON.stringify(statusLine));
+}
+const suggestions = await executeFileSuggestionCommand(
+  {
+    command: '@to',
+    cwd: process.cwd(),
+    paths: ['src/timeout.ts'],
+  },
+  undefined,
+  500,
+);
+if (JSON.stringify(suggestions) !== JSON.stringify([])) {
+  throw new Error('timed-out file suggestions should be empty: ' + JSON.stringify(suggestions));
+}
+if (!(await exists(statusStartMarkerPath))) {
+  throw new Error('live timeout status command should have started');
+}
+if (!(await exists(suggestionStartMarkerPath))) {
+  throw new Error('live timeout suggestion command should have started');
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+if (await exists(statusLateMarkerPath)) {
+  throw new Error('timed-out status command should be killed before late marker');
+}
+if (await exists(suggestionLateMarkerPath)) {
+  throw new Error('timed-out suggestion command should be killed before late marker');
+}
+
+console.log('status line file suggestion live timeout OK');`,
+  )
+  assert.equal(output, 'status line file suggestion live timeout OK')
+})
+
 await test('StopFailure hooks receive error metadata', async () => {
   const output = await buildAndRunSnippet(
     'stop-failure-hook-test',

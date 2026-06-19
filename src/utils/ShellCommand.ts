@@ -335,9 +335,22 @@ class ShellCommandImpl implements ShellCommand {
   }
 
   #doKill(code?: number): void {
+    if (this.#status === 'killed' || this.#status === 'completed') {
+      return
+    }
     this.#status = 'killed'
     if (this.#childProcess.pid) {
-      treeKill(this.#childProcess.pid, 'SIGKILL')
+      const childProcess = this.#childProcess
+      const pid = this.#childProcess.pid
+      treeKill(pid, 'SIGKILL', error => {
+        if (error && process.platform === 'win32') {
+          try {
+            childProcess.kill()
+          } catch {
+            // Ignore kill races; the process may already have exited.
+          }
+        }
+      })
     }
     this.#resolveExitCode(code ?? SIGKILL)
   }
