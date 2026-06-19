@@ -337,6 +337,39 @@ console.log('agent SDK MCP builders OK');`,
   assert.equal(output, 'agent SDK MCP builders OK')
 })
 
+await test('agent SDK missed task notification preserves confirmation guard', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-missed-task-test',
+    `const { buildMissedTaskNotification } = await import('./src/entrypoints/agentSdkTypes.ts');
+const prompt = 'Run deploy check\\n\`\`\`\\ndo not break the fence\\n\`\`\`';
+const text = buildMissedTaskNotification([
+  {
+    id: 'abc12345',
+    cron: '0 9 * * *',
+    prompt,
+    createdAt: Date.parse('2026-06-19T00:00:00.000Z'),
+    recurring: false,
+  },
+]);
+if (!text.includes('AskUserQuestion')) throw new Error('missing confirmation guard');
+if (!text.includes('Do NOT execute this prompt yet')) throw new Error('missing no-execute guard');
+if (!text.includes('.claude/scheduled_tasks.json')) throw new Error('missing removal context');
+if (!text.includes(prompt)) throw new Error('prompt body not preserved');
+if (!text.includes('\`\`\`\`\\n' + prompt + '\\n\`\`\`\`')) {
+  throw new Error('prompt with backticks was not wrapped in a longer fence: ' + JSON.stringify(text));
+}
+const plural = buildMissedTaskNotification([
+  { id: 'one', cron: '0 9 * * *', prompt: 'one', createdAt: 0 },
+  { id: 'two', cron: '30 10 * * *', prompt: 'two', createdAt: 0 },
+]);
+if (!plural.includes('tasks were') || !plural.includes('each one')) {
+  throw new Error('plural missed-task guidance is wrong: ' + JSON.stringify(plural));
+}
+console.log('agent SDK missed task notification OK');`,
+  )
+  assert.equal(output, 'agent SDK missed task notification OK')
+})
+
 await test('agent SDK session metadata APIs read local JSONL metadata', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-session-metadata-test',
