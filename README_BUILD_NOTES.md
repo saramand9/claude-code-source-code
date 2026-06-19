@@ -3100,6 +3100,41 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 Agent-scoped one-shot hook removal
+
+This round fixes one-shot session hook cleanup for agent-scoped skill hooks.
+
+- `src/utils/hooks.ts`
+  - Reuses the same session id selected for hook matching when invoking
+    `onHookSuccess`.
+  - Prevents `once: true` hooks registered under an agent id from being looked
+    up and removed under the main session id.
+- `scripts/test-build-safety.mjs`
+  - Adds an agent-scoped skill hook test for `UserPromptSubmit`.
+  - Verifies first execution succeeds and removes the one-shot hook from the
+    agent session.
+  - Verifies a second prompt does not rerun the hook.
+
+Risk boundary update: `once: true` skill hooks now clean up in the same
+main/agent session scope used for matching. Remaining gaps include one-shot
+behavior for other hook event families and outside-REPL events.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - agent-scoped once skill hooks are removed after success
+105/105 build-safety tests passed.
+```
+
 ## 2026-06-19 HTTP hook build-safety coverage
 
 This round adds direct build-safety coverage for HTTP hooks using a local

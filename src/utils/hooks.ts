@@ -2932,7 +2932,6 @@ async function* executeHooks({
 
     // Invoke session hook callback if this is a command/prompt/function hook (not a callback hook)
     if (appState && result.hook.type !== 'callback') {
-      const sessionId = getSessionId()
       // Use empty string as matcher when matchQuery is undefined (e.g., for Stop hooks)
       const matcher = matchQuery ?? ''
       const hookEntry = getSessionHookCallback(

@@ -5222,6 +5222,148 @@ console.log('user prompt submit command hook OK');`,
   assert.equal(output, 'user prompt submit command hook OK')
 })
 
+await test('agent-scoped once skill hooks are removed after success', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-once-skill-hook-test',
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/agent-once-skill-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'agent-once-skill-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'agent-once-skill-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'agent-once-marker.txt');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const prompt = 'agent-scoped once prompt marker 8426';
+const additionalContext = 'agent-scoped once hook context marker 8426';
+await writeFile(
+  commandPath,
+  [
+    "import { readFile, writeFile } from 'node:fs/promises';",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'UserPromptSubmit') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.prompt !== '" + prompt + "') { process.stderr.write('bad prompt ' + data.prompt); process.exit(4); }",
+    "const markerPath = '" + markerPathForScript + "';",
+    "const current = Number(await readFile(markerPath, 'utf8').catch(() => '0'));",
+    "await writeFile(markerPath, String(current + 1), 'utf8');",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '" + additionalContext + "' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeUserPromptSubmitHooks },
+  { registerSkillHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/utils/hooks/registerSkillHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const agentId = 'agent-once-skill-8426';
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+function setAppState(updater) {
+  appState = updater(appState);
+}
+const context = {
+  agentId,
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState,
+  updateAttributionState() {},
+};
+
+registerSkillHooks(
+  setAppState,
+  agentId,
+  {
+    UserPromptSubmit: [
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'node ' + commandPathForHook,
+            timeout: 5,
+            once: true,
+          },
+        ],
+      },
+    ],
+  },
+  'agent-once-skill',
+  commandDir,
+);
+
+const firstResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  prompt,
+  'default',
+  context,
+)) {
+  firstResults.push(result);
+}
+if (!firstResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(additionalContext)
+)) {
+  throw new Error('agent-scoped once skill hook should run first time: ' + JSON.stringify(firstResults));
+}
+const countAfterFirst = await readFile(markerPath, 'utf8');
+if (countAfterFirst !== '1') {
+  throw new Error('agent-scoped once skill hook should run once after first prompt: ' + countAfterFirst);
+}
+const remainingAfterFirst = appState.sessionHooks.get(agentId)?.hooks.UserPromptSubmit ?? [];
+if (remainingAfterFirst.length !== 0) {
+  throw new Error('agent-scoped once skill hook should be removed after success: ' + JSON.stringify(remainingAfterFirst));
+}
+
+const secondResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  prompt,
+  'default',
+  context,
+)) {
+  secondResults.push(result);
+}
+if (secondResults.length !== 0) {
+  throw new Error('agent-scoped once skill hook should not run twice: ' + JSON.stringify(secondResults));
+}
+const countAfterSecond = await readFile(markerPath, 'utf8');
+if (countAfterSecond !== '1') {
+  throw new Error('agent-scoped once skill hook should not increment twice: ' + countAfterSecond);
+}
+
+console.log('agent once skill hooks OK');`,
+  )
+  assert.equal(output, 'agent once skill hooks OK')
+})
+
 await test('compact hooks rewrite instructions and report summaries', async () => {
   const output = await buildAndRunSnippet(
     'compact-hook-test',
