@@ -3810,6 +3810,148 @@ console.log('session start setup hooks OK');`,
   assert.equal(output, 'session start setup hooks OK')
 })
 
+await test('Stop hooks block and prevent continuation', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeStopHooks, getStopHookMessage },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const lastAssistantText = 'main stop assistant message marker 5831';
+const blockReason = 'main stop block marker 5831';
+const stopReason = 'main stop continuation marker 5831';
+let calls = 0;
+registerHookCallbacks({
+  Stop: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'Stop') {
+              throw new Error('unexpected stop event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.stop_hook_active !== false) {
+              throw new Error('unexpected stop active flag: ' + hookInput.stop_hook_active);
+            }
+            if (hookInput.last_assistant_message !== lastAssistantText) {
+              throw new Error('unexpected stop assistant text: ' + hookInput.last_assistant_message);
+            }
+            if (hookInput.permission_mode !== 'default') {
+              throw new Error('unexpected stop permission mode: ' + hookInput.permission_mode);
+            }
+            return {
+              continue: false,
+              stopReason,
+              decision: 'block',
+              reason: blockReason,
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const messages = [
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000005831',
+    timestamp: '2026-06-19T00:00:00.000Z',
+    message: {
+      id: 'msg_stop_5831',
+      role: 'assistant',
+      content: [{ type: 'text', text: lastAssistantText }],
+    },
+  },
+];
+
+const results = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  false,
+  undefined,
+  context,
+  messages,
+)) {
+  results.push(result);
+}
+if (calls !== 1) {
+  throw new Error('Stop hook should run once, got ' + calls);
+}
+const blocking = results.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  result.blockingError?.command === 'callback'
+);
+if (!blocking) {
+  throw new Error('Stop hook should return blocking feedback: ' + JSON.stringify(results));
+}
+const blockedAttachment = results.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_blocking_error' &&
+    attachment.hookEvent === 'Stop' &&
+    attachment.blockingError?.blockingError === blockReason
+  );
+});
+if (!blockedAttachment) {
+  throw new Error('Stop hook should return blocking attachment: ' + JSON.stringify(results));
+}
+const prevented = results.find(result =>
+  result.preventContinuation === true &&
+  result.stopReason === stopReason
+);
+if (!prevented) {
+  throw new Error('Stop hook should prevent continuation: ' + JSON.stringify(results));
+}
+if (!getStopHookMessage({ blockingError: blockReason, command: 'callback' }).includes(blockReason)) {
+  throw new Error('Stop hook message helper should include block reason');
+}
+
+console.log('stop hooks OK');`,
+  )
+  assert.equal(output, 'stop hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

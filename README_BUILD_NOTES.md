@@ -2963,3 +2963,34 @@ Expected new output:
 ```text
 ok - SessionStart and Setup hooks expose startup context
 ```
+
+## 2026-06-19 Stop hook build-safety coverage
+
+This round covers main-thread `Stop` hook blocking behavior. This is separate
+from `SubagentStop` and `StopFailure`: it runs before a normal assistant turn
+concludes.
+
+- `scripts/test-build-safety.mjs`
+  - Registers a main-thread `Stop` callback hook.
+  - Verifies hook input includes `stop_hook_active`, permission mode, and final
+    assistant text.
+  - Asserts a blocking decision returns blocking feedback and a hook attachment.
+  - Asserts `continue: false` propagates `preventContinuation` and `stopReason`.
+  - Asserts the user-facing Stop feedback helper preserves the block reason.
+
+Risk boundary update: main-thread Stop blocking and continuation prevention now
+have direct build-safety coverage. Remaining gaps are interactive
+PermissionRequest UI and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - Stop hooks block and prevent continuation
+```
