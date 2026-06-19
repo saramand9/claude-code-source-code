@@ -5104,6 +5104,169 @@ console.log('elicitation hooks OK');`,
   assert.equal(output, 'elicitation hooks OK')
 })
 
+await test('elicitation command hooks can answer and block results', async () => {
+  const output = await buildAndRunSnippet(
+    'elicitation-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/elicitation-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'elicitation-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'elicitation-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const serverName = 'fixture-elicit-command-server-7521';
+const elicitationId = 'elicit-command-7521';
+const acceptedNote = 'accepted by command hook 7521';
+const declinedNote = 'declined by command hook 7521';
+const declineReason = 'elicitation command decline marker 7521';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name === 'Elicitation') {",
+    "  if (data.mcp_server_name !== '" + serverName + "') { process.stderr.write('bad elicit server ' + data.mcp_server_name); process.exit(3); }",
+    "  if (data.message !== 'Approve command fixture access?') { process.stderr.write('bad elicit message ' + data.message); process.exit(4); }",
+    "  if (data.mode !== 'form' || data.url !== 'https://example.invalid/command-form') { process.stderr.write('bad elicit mode url ' + JSON.stringify(data)); process.exit(5); }",
+    "  if (data.elicitation_id !== '" + elicitationId + "') { process.stderr.write('bad elicit id ' + data.elicitation_id); process.exit(6); }",
+    "  if (data.requested_schema?.properties?.approved?.type !== 'boolean') { process.stderr.write('bad elicit schema ' + JSON.stringify(data.requested_schema)); process.exit(7); }",
+    "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { approved: true, note: '" + acceptedNote + "' } } }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'ElicitationResult') {",
+    "  if (data.mcp_server_name !== '" + serverName + "') { process.stderr.write('bad result server ' + data.mcp_server_name); process.exit(8); }",
+    "  if (data.elicitation_id !== '" + elicitationId + "') { process.stderr.write('bad result id ' + data.elicitation_id); process.exit(9); }",
+    "  if (data.mode !== 'form' || data.action !== 'accept') { process.stderr.write('bad result action ' + JSON.stringify(data)); process.exit(10); }",
+    "  if (data.content?.note !== '" + acceptedNote + "') { process.stderr.write('bad result content ' + JSON.stringify(data.content)); process.exit(11); }",
+    "  process.stdout.write(JSON.stringify({ reason: '" + declineReason + "', hookSpecificOutput: { hookEventName: 'ElicitationResult', action: 'decline', content: { approved: false, note: '" + declinedNote + "' } } }));",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad event ' + data.hook_event_name);",
+    "process.exit(12);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeElicitationHooks, executeElicitationResultHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  Elicitation: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  ElicitationResult: [
+    {
+      matcher: serverName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const requestedSchema = {
+  type: 'object',
+  properties: {
+    approved: { type: 'boolean' },
+    note: { type: 'string' },
+  },
+};
+const requestResult = await executeElicitationHooks({
+  serverName,
+  message: 'Approve command fixture access?',
+  requestedSchema,
+  permissionMode: 'default',
+  mode: 'form',
+  url: 'https://example.invalid/command-form',
+  elicitationId,
+  timeoutMs: 10000,
+});
+if (requestResult.blockingError) {
+  throw new Error('Elicitation command accept should not block: ' + JSON.stringify(requestResult));
+}
+if (requestResult.elicitationResponse?.action !== 'accept') {
+  throw new Error('Elicitation command should accept: ' + JSON.stringify(requestResult));
+}
+if (requestResult.elicitationResponse.content?.note !== acceptedNote) {
+  throw new Error('Elicitation command should preserve accepted content: ' + JSON.stringify(requestResult));
+}
+
+const skippedRequest = await executeElicitationHooks({
+  serverName: 'other-elicit-command-server-7521',
+  message: 'ignored',
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (skippedRequest.elicitationResponse || skippedRequest.blockingError) {
+  throw new Error('skipped Elicitation command should be empty: ' + JSON.stringify(skippedRequest));
+}
+
+const resultResult = await executeElicitationResultHooks({
+  serverName,
+  elicitationId,
+  mode: 'form',
+  action: 'accept',
+  content: requestResult.elicitationResponse.content,
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (resultResult.elicitationResultResponse?.action !== 'decline') {
+  throw new Error('ElicitationResult command should decline: ' + JSON.stringify(resultResult));
+}
+if (resultResult.elicitationResultResponse.content?.note !== declinedNote) {
+  throw new Error('ElicitationResult command should preserve override content: ' + JSON.stringify(resultResult));
+}
+if (resultResult.blockingError?.blockingError !== declineReason) {
+  throw new Error('ElicitationResult command decline should block with reason: ' + JSON.stringify(resultResult));
+}
+
+const skippedResult = await executeElicitationResultHooks({
+  serverName: 'other-elicit-command-server-7521',
+  elicitationId,
+  mode: 'form',
+  action: 'accept',
+  content: requestResult.elicitationResponse.content,
+  permissionMode: 'default',
+  timeoutMs: 10000,
+});
+if (skippedResult.elicitationResultResponse || skippedResult.blockingError) {
+  throw new Error('skipped ElicitationResult command should be empty: ' + JSON.stringify(skippedResult));
+}
+
+console.log('elicitation command hooks OK');`,
+  )
+  assert.equal(output, 'elicitation command hooks OK')
+})
+
 await test('status line and file suggestion commands consume JSON input', async () => {
   const output = await buildAndRunSnippet(
     'status-line-file-suggestion-command-test',

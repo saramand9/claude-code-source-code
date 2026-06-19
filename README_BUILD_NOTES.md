@@ -3136,6 +3136,43 @@ ok - compact command hooks rewrite instructions and report summaries
 93/93 build-safety tests passed.
 ```
 
+## 2026-06-19 Elicitation command hook coverage
+
+This round extends MCP elicitation safety coverage from callback hooks to real
+command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture shared by `Elicitation` and
+    `ElicitationResult`.
+  - Verifies `Elicitation` command hooks receive server, message, mode, URL,
+    elicitation id, and requested schema metadata.
+  - Asserts structured command stdout can accept an elicitation with content.
+  - Verifies `ElicitationResult` command hooks receive the accepted content and
+    can override it with a decline.
+  - Asserts matcher misses skip both command hook events without producing
+    responses or blocking errors.
+
+Risk boundary update: MCP elicitation command hooks now have direct regression
+coverage for both structured accept responses and result-blocking overrides.
+Remaining gaps include command-hook timeout races for elicitation and broader
+multi-hook precedence across callback plus command combinations.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - elicitation command hooks can answer and block results
+94/94 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the
