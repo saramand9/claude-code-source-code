@@ -4,6 +4,7 @@ import {
   getReservedShortcuts,
   normalizeKeyForComparison,
 } from './reservedShortcuts.js'
+import { KEYBINDING_ACTIONS, KEYBINDING_CONTEXTS } from './schema.js'
 import type {
   KeybindingBlock,
   KeybindingContextName,
@@ -57,26 +58,8 @@ function isKeybindingBlockArray(arr: unknown): arr is KeybindingBlock[] {
  * Valid context names for keybindings.
  * Must match KeybindingContextName in types.ts
  */
-const VALID_CONTEXTS: KeybindingContextName[] = [
-  'Global',
-  'Chat',
-  'Autocomplete',
-  'Confirmation',
-  'Help',
-  'Transcript',
-  'HistorySearch',
-  'Task',
-  'ThemePicker',
-  'Settings',
-  'Tabs',
-  'Attachments',
-  'Footer',
-  'MessageSelector',
-  'DiffDialog',
-  'ModelPicker',
-  'Select',
-  'Plugin',
-]
+const VALID_CONTEXTS: readonly KeybindingContextName[] = KEYBINDING_CONTEXTS
+const VALID_ACTIONS = new Set<string>(KEYBINDING_ACTIONS)
 
 /**
  * Type guard to check if a string is a valid context name.
@@ -217,6 +200,17 @@ function validateBlock(
           suggestion: 'Move this binding to a block with "context": "Chat"',
         })
       }
+    } else if (typeof action === 'string' && !VALID_ACTIONS.has(action)) {
+      warnings.push({
+        type: 'invalid_action',
+        severity: 'error',
+        message: `Unknown keybinding action "${action}" for "${key}"`,
+        key,
+        context: contextName,
+        action,
+        suggestion:
+          'Use a documented keybinding action, null to unbind, or "command:<name>" for slash commands.',
+      })
     } else if (action === 'voice:pushToTalk') {
       // Hold detection needs OS auto-repeat. Bare letters print into the
       // input during warmup and the activation strip is best-effort —

@@ -13190,6 +13190,51 @@ console.log('shortcut display defaults OK');`,
   assert.equal(output, 'shortcut display defaults OK')
 })
 
+await test('keybinding validation rejects unknown non-command actions', async () => {
+  const output = await buildAndRunSnippet(
+    'keybinding-action-validation-test',
+    `import { validateUserConfig } from './src/keybindings/validate.ts';
+const warnings = validateUserConfig([
+  {
+    context: 'Chat',
+    bindings: {
+      'ctrl+h': 'command:help',
+      'ctrl+j': 'command:bad name',
+      'ctrl+k': 'chat:notReal',
+      'ctrl+s': 'chat:stash',
+      'ctrl+u': null,
+    },
+  },
+]);
+const unknown = warnings.find(w => w.action === 'chat:notReal');
+if (!unknown || unknown.type !== 'invalid_action' || unknown.severity !== 'error') {
+  throw new Error(
+    'unknown action should be an invalid_action error: ' +
+      JSON.stringify(warnings),
+  );
+}
+if (warnings.some(w => w.action === 'command:help')) {
+  throw new Error(
+    'valid command binding should not warn: ' + JSON.stringify(warnings),
+  );
+}
+const malformedCommand = warnings.find(w => w.action === 'command:bad name');
+if (!malformedCommand || malformedCommand.severity !== 'warning') {
+  throw new Error(
+    'malformed command binding should remain a warning: ' +
+      JSON.stringify(warnings),
+  );
+}
+if (warnings.some(w => w.action === 'chat:stash')) {
+  throw new Error(
+    'known keybinding action should not warn: ' + JSON.stringify(warnings),
+  );
+}
+console.log('keybinding action validation OK');`,
+  )
+  assert.equal(output, 'keybinding action validation OK')
+})
+
 await test('modifiers native fallback returns false on missing native package', async () => {
   const output = await buildAndRunSnippet(
     'modifiers-fallback-test',

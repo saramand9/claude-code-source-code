@@ -3172,6 +3172,43 @@ npm run test:build-safety
 git diff --check
 ```
 
+## 2026-06-19 keybinding action validation
+
+This round aligns runtime keybinding validation with the documented
+keybindings schema.
+
+- `src/keybindings/validate.ts`
+  - Reuses `KEYBINDING_CONTEXTS` and `KEYBINDING_ACTIONS` from
+    `src/keybindings/schema.ts` instead of maintaining a separate context list.
+  - Reports unknown non-command action strings as `invalid_action` errors, so
+    typos such as `chat:notReal` no longer load silently as dead bindings.
+  - Preserves dynamic slash-command bindings with the existing
+    `command:<name>` validation rules.
+- `scripts/test-build-safety.mjs`
+  - Adds coverage for unknown action rejection.
+  - Verifies valid `command:help`, malformed command warnings, known built-in
+    actions, and `null` unbinds keep their expected behavior.
+
+Risk boundary update: keybinding customization now rejects typoed built-in
+actions consistently with the generated schema while still allowing slash
+command bindings.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - keybinding validation rejects unknown non-command actions
+115/115 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for
