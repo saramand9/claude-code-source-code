@@ -279,6 +279,64 @@ console.log('vertex SDK OK');`,
   assert.equal(output, 'vertex SDK OK')
 })
 
+await test('agent SDK MCP builders return stable config objects', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-mcp-builder-test',
+    `const { createSdkMcpServer, tool } = await import('./src/entrypoints/agentSdkTypes.ts');
+const { z } = await import('zod/v4');
+const inputSchema = { text: z.string() };
+const echoTool = tool(
+  'echo',
+  'Echo text',
+  inputSchema,
+  async args => ({ content: [{ type: 'text', text: args.text }] }),
+  {
+    annotations: { readOnlyHint: true },
+    searchHint: 'echo text',
+    alwaysLoad: true,
+  },
+);
+if (echoTool.name !== 'echo') throw new Error('bad tool name');
+if (echoTool.description !== 'Echo text') throw new Error('bad tool description');
+if (echoTool.inputSchema !== inputSchema) throw new Error('input schema should be preserved');
+if (echoTool.annotations?.readOnlyHint !== true) throw new Error('annotations not preserved');
+if (echoTool.searchHint !== 'echo text') throw new Error('searchHint not preserved');
+if (echoTool.alwaysLoad !== true) throw new Error('alwaysLoad not preserved');
+const result = await echoTool.handler({ text: 'hello' }, {});
+if (result.content?.[0]?.text !== 'hello') throw new Error('handler result mismatch');
+const server = createSdkMcpServer({
+  name: 'local-sdk',
+  version: '1.2.3',
+  tools: [echoTool],
+});
+if (server.type !== 'sdk') throw new Error('server type should be sdk');
+if (server.name !== 'local-sdk') throw new Error('server name not preserved');
+if (server.version !== '1.2.3') throw new Error('server version not preserved');
+if (server.tools?.[0] !== echoTool) throw new Error('server tools not preserved');
+if (server.instance?.tools?.[0] !== echoTool) throw new Error('server instance not populated');
+let emptyToolError = null;
+try {
+  tool('   ', 'bad', {}, async () => ({ content: [] }));
+} catch (error) {
+  emptyToolError = error;
+}
+if (!emptyToolError || !String(emptyToolError.message).includes('empty')) {
+  throw new Error('tool should reject empty names');
+}
+let emptyServerError = null;
+try {
+  createSdkMcpServer({ name: '   ' });
+} catch (error) {
+  emptyServerError = error;
+}
+if (!emptyServerError || !String(emptyServerError.message).includes('empty')) {
+  throw new Error('createSdkMcpServer should reject empty names');
+}
+console.log('agent SDK MCP builders OK');`,
+  )
+  assert.equal(output, 'agent SDK MCP builders OK')
+})
+
 await test('agent SDK session metadata APIs read local JSONL metadata', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-session-metadata-test',

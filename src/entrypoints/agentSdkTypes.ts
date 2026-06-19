@@ -79,20 +79,31 @@ export type {
 }
 
 export function tool<Schema extends AnyZodRawShape>(
-  _name: string,
-  _description: string,
-  _inputSchema: Schema,
-  _handler: (
+  name: string,
+  description: string,
+  inputSchema: Schema,
+  handler: (
     args: InferShape<Schema>,
     extra: unknown,
   ) => Promise<CallToolResult>,
-  _extras?: {
+  extras?: {
     annotations?: ToolAnnotations
     searchHint?: string
     alwaysLoad?: boolean
   },
 ): SdkMcpToolDefinition<Schema> {
-  throw new Error('not implemented')
+  if (name.trim().length === 0) throw new Error('Tool name cannot be empty')
+  return {
+    name,
+    description,
+    inputSchema,
+    handler,
+    ...(extras?.annotations !== undefined && {
+      annotations: extras.annotations,
+    }),
+    ...(extras?.searchHint !== undefined && { searchHint: extras.searchHint }),
+    ...(extras?.alwaysLoad !== undefined && { alwaysLoad: extras.alwaysLoad }),
+  }
 }
 
 type CreateSdkMcpServerOptions = {
@@ -109,9 +120,23 @@ type CreateSdkMcpServerOptions = {
  * If your SDK MCP calls will run longer than 60s, override CLAUDE_CODE_STREAM_CLOSE_TIMEOUT
  */
 export function createSdkMcpServer(
-  _options: CreateSdkMcpServerOptions,
+  options: CreateSdkMcpServerOptions,
 ): McpSdkServerConfigWithInstance {
-  throw new Error('not implemented')
+  if (options.name.trim().length === 0) {
+    throw new Error('SDK MCP server name cannot be empty')
+  }
+  const instance = {
+    name: options.name,
+    version: options.version,
+    tools: options.tools ?? [],
+  }
+  return {
+    type: 'sdk',
+    name: options.name,
+    ...(options.version !== undefined && { version: options.version }),
+    tools: instance.tools,
+    instance,
+  }
 }
 
 export class AbortError extends Error {}
