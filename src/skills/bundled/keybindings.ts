@@ -58,7 +58,7 @@ function generateActionsTable(): string {
 /**
  * Infer context from action prefix when not in DEFAULT_BINDINGS.
  */
-function inferContextFromAction(action: string): string {
+export function inferContextFromAction(action: string): string {
   const prefix = action.split(':')[0]
   const prefixToContext: Record<string, string> = {
     app: 'Global',
@@ -78,7 +78,10 @@ function inferContextFromAction(action: string): string {
     diff: 'DiffDialog',
     modelPicker: 'ModelPicker',
     select: 'Select',
+    settings: 'Settings',
+    plugin: 'Plugin',
     permission: 'Confirmation',
+    voice: 'Chat',
   }
   return prefixToContext[prefix ?? ''] ?? 'Unknown'
 }

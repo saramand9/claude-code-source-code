@@ -13235,6 +13235,27 @@ console.log('keybinding action validation OK');`,
   assert.equal(output, 'keybinding action validation OK')
 })
 
+await test('keybinding bundled skill infers contexts for documented actions', async () => {
+  const output = await buildAndRunSnippet(
+    'keybinding-skill-context-inference-test',
+    `import { inferContextFromAction } from './src/skills/bundled/keybindings.ts';
+const expected = {
+  'settings:search': 'Settings',
+  'plugin:install': 'Plugin',
+  'voice:pushToTalk': 'Chat',
+  'unknown:action': 'Unknown',
+};
+for (const [action, context] of Object.entries(expected)) {
+  const actual = inferContextFromAction(action);
+  if (actual !== context) {
+    throw new Error(action + ' should infer ' + context + ', got ' + actual);
+  }
+}
+console.log('keybinding skill context inference OK');`,
+  )
+  assert.equal(output, 'keybinding skill context inference OK')
+})
+
 await test('modifiers native fallback returns false on missing native package', async () => {
   const output = await buildAndRunSnippet(
     'modifiers-fallback-test',

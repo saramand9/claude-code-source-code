@@ -3209,6 +3209,39 @@ ok - keybinding validation rejects unknown non-command actions
 115/115 build-safety tests passed.
 ```
 
+## 2026-06-19 keybinding skill context inference
+
+This round fixes a documentation-generation gap in the bundled keybindings
+skill.
+
+- `src/skills/bundled/keybindings.ts`
+  - Exports `inferContextFromAction()` for direct regression coverage.
+  - Adds missing prefix mappings for `settings:*`, `plugin:*`, and
+    `voice:*`.
+  - Keeps unknown prefixes returning `Unknown`.
+- `scripts/test-build-safety.mjs`
+  - Adds coverage for the new mappings and the unknown-prefix boundary.
+
+Risk boundary update: the keybindings help skill now documents gated or
+default-less actions such as `voice:pushToTalk` with the correct context
+instead of falling back to `Unknown`.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - keybinding bundled skill infers contexts for documented actions
+116/116 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for
