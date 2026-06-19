@@ -13157,6 +13157,7 @@ await test('shortcut display fallbacks are backed by default bindings', async ()
   const output = await buildAndRunSnippet(
     'shortcut-display-defaults-test',
     `import { resolveShortcutDisplay } from './src/keybindings/shortcutFormat.ts';
+import { getPlatform } from './src/utils/platform.ts';
 const displayCalls = ${JSON.stringify(displayCalls)};
 const featureGated = new Set([
   'app:toggleTerminal:Global',
@@ -13172,6 +13173,17 @@ for (const call of displayCalls) {
 }
 if (missing.length > 0) {
   throw new Error('shortcut display defaults missing:\\n' + missing.join('\\n'));
+}
+const platform = getPlatform();
+const expectedModelPicker = platform === 'macos' ? 'opt+p' : 'alt+p';
+const modelPicker = resolveShortcutDisplay('chat:modelPicker', 'Chat');
+if (modelPicker !== expectedModelPicker) {
+  throw new Error(
+    'model picker display should use platform modifier label, expected ' +
+      expectedModelPicker +
+      ', got ' +
+      modelPicker,
+  );
 }
 console.log('shortcut display defaults OK');`,
   )

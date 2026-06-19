@@ -3144,6 +3144,34 @@ ok - shortcut display fallbacks are backed by default bindings
 114/114 build-safety tests passed.
 ```
 
+## 2026-06-19 shortcut display platform labels
+
+This round tightens the keybinding display resolver so configured shortcuts use
+platform-appropriate modifier labels.
+
+- `src/keybindings/resolver.ts`
+  - Switches `getBindingDisplayText()` from canonical `chordToString()` output
+    to `chordToDisplayString(..., getPlatform())`.
+  - Keeps key matching and chord resolution unchanged; only user-facing display
+    text changes.
+- `scripts/test-build-safety.mjs`
+  - Extends the shortcut display regression to verify `chat:modelPicker`
+    renders `alt+p` on non-macOS platforms and `opt+p` on macOS instead of
+    leaking the internal `meta+p` default binding string.
+
+Risk boundary update: keybinding hints now use the same terminal modifier
+presentation rules that already existed in the parser but were not wired into
+the display resolver.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for
