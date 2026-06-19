@@ -3205,7 +3205,43 @@ git diff --check
 Expected new output:
 
 ```text
-ok - agent SDK listSessions reads local session metadata
+ok - agent SDK session metadata APIs read local JSONL metadata
+```
+
+## 2026-06-19 SDK getSessionInfo wiring
+
+This round extends the Agent SDK local-session metadata restoration to
+`getSessionInfo()`.
+
+- `src/utils/listSessionsImpl.ts`
+  - Adds `getSessionInfoImpl()` alongside `listSessionsImpl()`.
+  - Reuses portable session-id validation, session-file resolution, lite
+    head/tail reads, and `parseSessionInfoFromLite()`.
+- `src/entrypoints/agentSdkTypes.ts`
+  - Wires public `getSessionInfo(sessionId, options)` to the portable
+    implementation instead of throwing.
+- `scripts/test-build-safety.mjs`
+  - Extends the isolated SDK JSONL fixture to verify `getSessionInfo()` returns
+    the same metadata as `listSessions()`.
+  - Verifies a missing session id returns `undefined`.
+
+Risk boundary update: SDK consumers can now read metadata for a specific local
+session without scanning every session manually. Message reads, mutations, fork,
+and query/session APIs that still throw remain out of scope for this round.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - agent SDK session metadata APIs read local JSONL metadata
 ```
 
 ## 2026-06-19 ant callout build-safety isolation

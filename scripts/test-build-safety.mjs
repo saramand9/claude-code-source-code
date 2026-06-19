@@ -279,14 +279,14 @@ console.log('vertex SDK OK');`,
   assert.equal(output, 'vertex SDK OK')
 })
 
-await test('agent SDK listSessions reads local session metadata', async () => {
+await test('agent SDK session metadata APIs read local JSONL metadata', async () => {
   const output = await buildAndRunSnippet(
-    'agent-sdk-list-sessions-test',
+    'agent-sdk-session-metadata-test',
     `import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
 const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
-const { listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
+const { getSessionInfo, listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
 const { sanitizePath } = await import('./src/utils/sessionStoragePortable.ts');
 const sessionId = '12345678-1234-4234-9234-123456789abc';
 const projectStorageDir = join(
@@ -323,6 +323,22 @@ if (sessions.length !== 1) {
   throw new Error('expected one session, got ' + JSON.stringify(sessions));
 }
 const [session] = sessions;
+const direct = await getSessionInfo(sessionId, { dir: projectDir });
+if (!direct) {
+  throw new Error('expected direct session info');
+}
+if (JSON.stringify(direct) !== JSON.stringify(session)) {
+  throw new Error(
+    'listSessions/getSessionInfo mismatch: ' +
+      JSON.stringify({ session, direct }),
+  );
+}
+const missing = await getSessionInfo('00000000-0000-4000-8000-000000000000', {
+  dir: projectDir,
+});
+if (missing !== undefined) {
+  throw new Error('missing session should be undefined: ' + JSON.stringify(missing));
+}
 if (session.sessionId !== sessionId) {
   throw new Error('wrong session id: ' + JSON.stringify(session));
 }
@@ -341,9 +357,9 @@ if (session.cwd !== projectDir) {
 if (session.createdAt !== Date.parse('2026-06-19T00:00:00.000Z')) {
   throw new Error('wrong createdAt: ' + JSON.stringify(session));
 }
-console.log('agent SDK listSessions OK');`,
+console.log('agent SDK session metadata OK');`,
   )
-  assert.equal(output, 'agent SDK listSessions OK')
+  assert.equal(output, 'agent SDK session metadata OK')
 })
 
 let manifest

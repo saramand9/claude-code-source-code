@@ -21,6 +21,7 @@ import {
   getProjectsDir,
   MAX_SANITIZED_LENGTH,
   readSessionLite,
+  resolveSessionFilePath,
   sanitizePath,
   validateUuid,
 } from './sessionStoragePortable.js'
@@ -63,6 +64,10 @@ export type ListSessionsOptions = {
    * include sessions from all git worktree paths. Defaults to `true`.
    */
   includeWorktrees?: boolean
+}
+
+export type GetSessionInfoOptions = {
+  dir?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -451,4 +456,22 @@ export async function listSessionsImpl(
 
   if (!doStat) return readAllAndSort(candidates)
   return applySortAndLimit(candidates, limit, off)
+}
+
+export async function getSessionInfoImpl(
+  sessionId: string,
+  options?: GetSessionInfoOptions,
+): Promise<SessionInfo | undefined> {
+  const uuid = validateUuid(sessionId)
+  if (!uuid) return undefined
+
+  const resolved = await resolveSessionFilePath(uuid, options?.dir)
+  if (!resolved) return undefined
+
+  const lite = await readSessionLite(resolved.filePath)
+  if (!lite) return undefined
+
+  return (
+    parseSessionInfoFromLite(uuid, lite, resolved.projectPath) ?? undefined
+  )
 }

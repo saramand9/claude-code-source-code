@@ -40,7 +40,10 @@ import type {
   SDKSessionInfo,
   SDKUserMessage,
 } from './sdk/coreTypes.js'
-import { listSessionsImpl } from '../utils/listSessionsImpl.js'
+import {
+  getSessionInfoImpl,
+  listSessionsImpl,
+} from '../utils/listSessionsImpl.js'
 // Import types needed for function signatures
 import type {
   AnyZodRawShape,
@@ -218,10 +221,10 @@ export async function listSessions(
  * @param options - `{ dir?: string }` project path; omit to search all project directories
  */
 export async function getSessionInfo(
-  _sessionId: string,
-  _options?: GetSessionInfoOptions,
+  sessionId: string,
+  options?: GetSessionInfoOptions,
 ): Promise<SDKSessionInfo | undefined> {
-  throw new Error('getSessionInfo is not implemented in the SDK')
+  return getSessionInfoImpl(sessionId, options)
 }
 
 /**
