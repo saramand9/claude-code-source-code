@@ -3423,6 +3423,41 @@ ok - environment command hooks receive input and env files
 101/101 build-safety tests passed.
 ```
 
+## 2026-06-19 Post-sampling hook coverage
+
+This round adds direct build-safety coverage for the internal post-sampling hook
+registry.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a focused test for `registerPostSamplingHook()`,
+    `executePostSamplingHooks()`, and `clearPostSamplingHooks()`.
+  - Verifies post-sampling hooks receive messages, system prompt, user context,
+    system context, tool-use context, and query source.
+  - Asserts hooks run in registration order.
+  - Asserts a failing hook is logged and isolated so later hooks still run.
+  - Verifies clearing the registry removes all registered hooks.
+
+Risk boundary update: programmatic post-sampling hooks now have direct
+regression coverage for context delivery and failure isolation. Remaining gaps
+include integration coverage from the live query loop and behavior of specific
+post-sampling consumers such as Magic Docs or session memory.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - post-sampling hooks receive context and isolate failures
+102/102 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

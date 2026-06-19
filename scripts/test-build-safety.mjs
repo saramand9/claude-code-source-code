@@ -3882,6 +3882,114 @@ console.log('environment command input hooks OK');`,
   assert.equal(output, 'environment command input hooks OK')
 })
 
+await test('post-sampling hooks receive context and isolate failures', async () => {
+  const output = await buildAndRunSnippet(
+    'post-sampling-hook-test',
+    `const {
+  clearPostSamplingHooks,
+  executePostSamplingHooks,
+  registerPostSamplingHook,
+} = await import('./src/utils/hooks/postSamplingHooks.ts');
+
+clearPostSamplingHooks();
+
+const calls = [];
+const messages = [
+  {
+    type: 'user',
+    uuid: '00000000-0000-0000-0000-000000009184',
+    timestamp: '2026-06-19T00:00:00.000Z',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'post sampling user marker 9184' }],
+    },
+  },
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000009185',
+    timestamp: '2026-06-19T00:00:01.000Z',
+    message: {
+      id: 'msg_post_sampling_9184',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'post sampling assistant marker 9184' }],
+    },
+  },
+];
+const systemPrompt = [{ type: 'text', text: 'post sampling system marker 9184' }];
+const userContext = { cwd: 'post-sampling-user-cwd-9184' };
+const systemContext = { platform: 'post-sampling-platform-9184' };
+const toolUseContext = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return { marker: 'post-sampling-app-state-9184' };
+  },
+  setAppState() {},
+  updateAttributionState() {},
+};
+
+registerPostSamplingHook(context => {
+  calls.push('first');
+  if (context.messages !== messages) {
+    throw new Error('messages should be passed through by reference');
+  }
+  if (context.systemPrompt !== systemPrompt) {
+    throw new Error('system prompt should be passed through by reference');
+  }
+  if (context.userContext.cwd !== userContext.cwd) {
+    throw new Error('unexpected user context: ' + JSON.stringify(context.userContext));
+  }
+  if (context.systemContext.platform !== systemContext.platform) {
+    throw new Error('unexpected system context: ' + JSON.stringify(context.systemContext));
+  }
+  if (context.toolUseContext !== toolUseContext) {
+    throw new Error('toolUseContext should be passed through by reference');
+  }
+  if (context.querySource !== 'test-post-sampling-source') {
+    throw new Error('unexpected query source: ' + context.querySource);
+  }
+});
+registerPostSamplingHook(() => {
+  calls.push('failing');
+  throw new Error('post sampling failure should be isolated 9184');
+});
+registerPostSamplingHook(context => {
+  calls.push('after-failure');
+  if (context.messages[1].message.content[0].text !== 'post sampling assistant marker 9184') {
+    throw new Error('assistant response missing from post sampling context');
+  }
+});
+
+await executePostSamplingHooks(
+  messages,
+  systemPrompt,
+  userContext,
+  systemContext,
+  toolUseContext,
+  'test-post-sampling-source',
+);
+if (calls.join(',') !== 'first,failing,after-failure') {
+  throw new Error('post sampling hooks should run in order and continue after failures: ' + calls.join(','));
+}
+
+clearPostSamplingHooks();
+calls.length = 0;
+await executePostSamplingHooks(
+  messages,
+  systemPrompt,
+  userContext,
+  systemContext,
+  toolUseContext,
+);
+if (calls.length !== 0) {
+  throw new Error('clearPostSamplingHooks should remove registered hooks');
+}
+
+console.log('post sampling hooks OK');`,
+  )
+  assert.equal(output, 'post sampling hooks OK')
+})
+
 await test('worktree hooks create and remove paths', async () => {
   const output = await buildAndRunSnippet(
     'worktree-hook-test',
