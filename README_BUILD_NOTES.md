@@ -3353,6 +3353,42 @@ ok - PreToolUse command hooks can allow and update input
 99/99 build-safety tests passed.
 ```
 
+## 2026-06-19 Worktree command hook coverage
+
+This round extends worktree lifecycle coverage from callback hooks to real
+command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds separate Node command fixtures for `WorktreeCreate` and
+    `WorktreeRemove`.
+  - Verifies `WorktreeCreate` command hooks receive the requested worktree name
+    and return the created path via stdout.
+  - Verifies `WorktreeRemove` command hooks receive the worktree path and run to
+    completion.
+  - Asserts `hasWorktreeCreateHook()` reflects command-hook registration and
+    removal-hook execution reports false after hooks are cleared.
+
+Risk boundary update: VCS-agnostic worktree command hooks now have direct
+regression coverage for path creation and cleanup callbacks. Remaining gaps
+include command failure diagnostics, timeout behavior, and multiple worktree
+hook precedence.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - worktree command hooks create and remove paths
+100/100 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

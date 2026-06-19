@@ -3840,6 +3840,130 @@ console.log('worktree hooks OK');`,
   assert.equal(output, 'worktree hooks OK')
 })
 
+await test('worktree command hooks create and remove paths', async () => {
+  const output = await buildAndRunSnippet(
+    'worktree-command-hook-test',
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/worktree-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'worktree-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const createCommandPath = join(commandDir, 'worktree-create-command-hook.mjs');
+const removeCommandPath = join(commandDir, 'worktree-remove-command-hook.mjs');
+const createCommandPathForHook = createCommandPath.replace(/\\\\/g, '/');
+const removeCommandPathForHook = removeCommandPath.replace(/\\\\/g, '/');
+const expectedName = 'worktree-command-branch-7724';
+const expectedPath = join(process.cwd(), 'build-src', 'test-artifacts', 'worktree-command-created-7724').replace(/\\\\/g, '/');
+const removeMarkerPath = join(commandDir, 'remove-marker.json');
+const removeMarkerPathForScript = removeMarkerPath.replace(/\\\\/g, '/');
+await writeFile(
+  createCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'WorktreeCreate') { process.stderr.write('bad create event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.name !== '" + expectedName + "') { process.stderr.write('bad worktree name ' + data.name); process.exit(4); }",
+    "process.stdout.write('" + expectedPath + "');",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  removeCommandPath,
+  [
+    "import { writeFile } from 'node:fs/promises';",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'WorktreeRemove') { process.stderr.write('bad remove event ' + data.hook_event_name); process.exit(5); }",
+    "if (data.worktree_path !== '" + expectedPath + "') { process.stderr.write('bad worktree path ' + data.worktree_path); process.exit(6); }",
+    "await writeFile('" + removeMarkerPathForScript + "', JSON.stringify({ removed: data.worktree_path }), 'utf8');",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  {
+    executeWorktreeCreateHook,
+    executeWorktreeRemoveHook,
+    hasWorktreeCreateHook,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+if (hasWorktreeCreateHook()) {
+  throw new Error('WorktreeCreate command hook should not be configured before registration');
+}
+
+registerHookCallbacks({
+  WorktreeCreate: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + createCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  WorktreeRemove: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + removeCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+if (!hasWorktreeCreateHook()) {
+  throw new Error('WorktreeCreate command hook should be detected after registration');
+}
+
+const created = await executeWorktreeCreateHook(expectedName);
+if (created.worktreePath !== expectedPath) {
+  throw new Error('WorktreeCreate command should return stdout path: ' + JSON.stringify(created));
+}
+
+const removed = await executeWorktreeRemoveHook(expectedPath);
+if (removed !== true) {
+  throw new Error('WorktreeRemove command hook should report that it ran');
+}
+const marker = JSON.parse(await readFile(removeMarkerPath, 'utf8'));
+if (marker.removed !== expectedPath) {
+  throw new Error('WorktreeRemove command marker mismatch: ' + JSON.stringify(marker));
+}
+
+clearRegisteredHooks();
+const removedWithoutHooks = await executeWorktreeRemoveHook(expectedPath);
+if (removedWithoutHooks !== false) {
+  throw new Error('WorktreeRemove command should return false without hooks');
+}
+
+console.log('worktree command hooks OK');`,
+  )
+  assert.equal(output, 'worktree command hooks OK')
+})
+
 await test('InstructionsLoaded hooks receive load metadata', async () => {
   const output = await buildAndRunSnippet(
     'instructions-loaded-hook-test',
