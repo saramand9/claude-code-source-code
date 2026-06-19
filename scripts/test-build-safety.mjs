@@ -619,6 +619,82 @@ console.log('devtools tungsten fallback OK');`,
   assert.equal(output, 'devtools tungsten fallback OK')
 })
 
+await test('agent frontmatter preserves valid permission metadata only', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-frontmatter-permission-test',
+    `process.env.USER_TYPE = '';
+
+const { parseAgentFromMarkdown } = await import('./src/tools/AgentTool/loadAgentsDir.ts');
+
+const validAgent = parseAgentFromMarkdown(
+  'build-src/test-artifacts/agents/strict-agent.md',
+  'build-src/test-artifacts/agents',
+  {
+    name: 'strict-agent',
+    description: 'Strict permission agent marker 4837',
+    permissionMode: 'dontAsk',
+    maxTurns: '7',
+    isolation: 'worktree',
+    tools: 'Read,Bash',
+    disallowedTools: ['Write'],
+    effort: 'low',
+  },
+  'Strict agent system prompt marker 4837',
+  'userSettings',
+);
+if (!validAgent) {
+  throw new Error('valid agent should parse');
+}
+if (validAgent.permissionMode !== 'dontAsk') {
+  throw new Error('valid permissionMode should be preserved: ' + JSON.stringify(validAgent));
+}
+if (validAgent.maxTurns !== 7) {
+  throw new Error('valid maxTurns should be parsed: ' + JSON.stringify(validAgent));
+}
+if (validAgent.isolation !== 'worktree') {
+  throw new Error('valid worktree isolation should be preserved: ' + JSON.stringify(validAgent));
+}
+if (JSON.stringify(validAgent.tools) !== JSON.stringify(['Read', 'Bash'])) {
+  throw new Error('tools should be parsed from comma-separated frontmatter: ' + JSON.stringify(validAgent.tools));
+}
+if (JSON.stringify(validAgent.disallowedTools) !== JSON.stringify(['Write'])) {
+  throw new Error('disallowedTools should be preserved: ' + JSON.stringify(validAgent.disallowedTools));
+}
+
+const invalidAgent = parseAgentFromMarkdown(
+  'build-src/test-artifacts/agents/invalid-agent.md',
+  'build-src/test-artifacts/agents',
+  {
+    name: 'invalid-agent',
+    description: 'Invalid permission agent marker 4837',
+    permissionMode: 'root',
+    maxTurns: '0',
+    isolation: 'remote',
+  },
+  'Invalid agent system prompt marker 4837',
+  'projectSettings',
+);
+if (!invalidAgent) {
+  throw new Error('invalid optional fields should not drop the whole agent');
+}
+if ('permissionMode' in invalidAgent) {
+  throw new Error('invalid permissionMode should be ignored: ' + JSON.stringify(invalidAgent));
+}
+if ('maxTurns' in invalidAgent) {
+  throw new Error('invalid maxTurns should be ignored: ' + JSON.stringify(invalidAgent));
+}
+if ('isolation' in invalidAgent) {
+  throw new Error('external build should ignore remote isolation: ' + JSON.stringify(invalidAgent));
+}
+if (invalidAgent.getSystemPrompt() !== 'Invalid agent system prompt marker 4837') {
+  throw new Error('agent prompt should still be available');
+}
+
+console.log('agent frontmatter permission metadata OK');`,
+  )
+  assert.equal(output, 'agent frontmatter permission metadata OK')
+})
+
 await test('resume and user text feature modules use static bundled requires', async () => {
   const resumeSource = await readFile(
     join(BUILD, 'src/screens/ResumeConversation.tsx'),

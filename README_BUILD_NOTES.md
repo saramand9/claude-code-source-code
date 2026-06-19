@@ -3135,3 +3135,34 @@ Expected new output:
 ```text
 ok - outside REPL command hooks ignore failed JSON decisions
 ```
+
+## 2026-06-19 agent frontmatter permission metadata coverage
+
+This round covers custom agent frontmatter parsing for permission-sensitive
+metadata.
+
+- `scripts/test-build-safety.mjs`
+  - Parses a valid custom agent with `permissionMode: dontAsk`,
+    `maxTurns: "7"`, `isolation: worktree`, `tools`, and `disallowedTools`.
+  - Asserts valid permission mode and max-turn metadata are preserved.
+  - Parses a second agent with invalid `permissionMode`, invalid `maxTurns`,
+    and external-build-disallowed `isolation: remote`.
+  - Asserts invalid optional fields are ignored without dropping the agent or
+    expanding its permissions.
+
+Risk boundary update: custom agent frontmatter permission metadata now has
+direct build-safety coverage. Remaining gaps are interactive PermissionRequest
+UI, live timeout race coverage, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - agent frontmatter preserves valid permission metadata only
+```
