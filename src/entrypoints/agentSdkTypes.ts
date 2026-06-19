@@ -44,6 +44,8 @@ import {
   getSessionMessagesImpl,
   getSessionInfoImpl,
   listSessionsImpl,
+  renameSessionImpl,
+  tagSessionImpl,
 } from '../utils/listSessionsImpl.js'
 // Import types needed for function signatures
 import type {
@@ -235,11 +237,11 @@ export async function getSessionInfo(
  * @param options - `{ dir?: string }` project path; omit to search all projects
  */
 export async function renameSession(
-  _sessionId: string,
-  _title: string,
-  _options?: SessionMutationOptions,
+  sessionId: string,
+  title: string,
+  options?: SessionMutationOptions,
 ): Promise<void> {
-  throw new Error('renameSession is not implemented in the SDK')
+  return renameSessionImpl(sessionId, title, options)
 }
 
 /**
@@ -249,11 +251,11 @@ export async function renameSession(
  * @param options - `{ dir?: string }` project path; omit to search all projects
  */
 export async function tagSession(
-  _sessionId: string,
-  _tag: string | null,
-  _options?: SessionMutationOptions,
+  sessionId: string,
+  tag: string | null,
+  options?: SessionMutationOptions,
 ): Promise<void> {
-  throw new Error('tagSession is not implemented in the SDK')
+  return tagSessionImpl(sessionId, tag, options)
 }
 
 /**

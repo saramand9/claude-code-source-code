@@ -286,7 +286,13 @@ await test('agent SDK session metadata APIs read local JSONL metadata', async ()
 import { join } from 'node:path';
 process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
 const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
-const { getSessionInfo, getSessionMessages, listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
+const {
+  getSessionInfo,
+  getSessionMessages,
+  listSessions,
+  renameSession,
+  tagSession,
+} = await import('./src/entrypoints/agentSdkTypes.ts');
 const { sanitizePath } = await import('./src/utils/sessionStoragePortable.ts');
 const sessionId = '12345678-1234-4234-9234-123456789abc';
 const user1 = '12345678-1234-4234-9234-123456789001';
@@ -444,6 +450,32 @@ if (statusMessage.status !== 'compacting') {
 const invalidMessages = await getSessionMessages('not-a-session-id', { dir: projectDir });
 if (invalidMessages.length !== 0) {
   throw new Error('invalid session id should return empty messages: ' + JSON.stringify(invalidMessages));
+}
+await renameSession(sessionId, 'Renamed SDK session', { dir: projectDir });
+await tagSession(sessionId, 'needs-review', { dir: projectDir });
+const renamed = await getSessionInfo(sessionId, { dir: projectDir });
+if (renamed?.customTitle !== 'Renamed SDK session') {
+  throw new Error('renameSession did not append a custom title: ' + JSON.stringify(renamed));
+}
+if (renamed.summary !== 'Renamed SDK session') {
+  throw new Error('renamed session title should become summary: ' + JSON.stringify(renamed));
+}
+if (renamed.tag !== 'needs-review') {
+  throw new Error('tagSession did not append a tag: ' + JSON.stringify(renamed));
+}
+await tagSession(sessionId, null, { dir: projectDir });
+const clearedTag = await getSessionInfo(sessionId, { dir: projectDir });
+if (clearedTag?.tag !== undefined) {
+  throw new Error('tagSession(null) should clear the tag: ' + JSON.stringify(clearedTag));
+}
+let emptyTitleError = null;
+try {
+  await renameSession(sessionId, '   ', { dir: projectDir });
+} catch (error) {
+  emptyTitleError = error;
+}
+if (!emptyTitleError || !String(emptyTitleError.message).includes('empty')) {
+  throw new Error('renameSession should reject empty titles');
 }
 console.log('agent SDK session metadata OK');`,
   )

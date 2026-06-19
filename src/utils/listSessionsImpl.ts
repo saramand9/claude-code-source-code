@@ -9,7 +9,7 @@
 
 import type { Dirent } from 'fs'
 import type { UUID } from 'crypto'
-import { readdir, stat } from 'fs/promises'
+import { appendFile, readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import type { SDKMessage } from '../entrypoints/sdk/coreTypes.js'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
@@ -78,6 +78,10 @@ export type GetSessionMessagesOptions = {
   limit?: number
   offset?: number
   includeSystemMessages?: boolean
+}
+
+export type SessionMutationOptions = {
+  dir?: string
 }
 
 type TranscriptEntry = Record<string, unknown> & {
@@ -540,6 +544,23 @@ function applyMessagePagination(
   return messages.slice(start, end)
 }
 
+async function appendSessionMetadataEntry(
+  sessionId: string,
+  options: SessionMutationOptions | undefined,
+  entryFor: (uuid: UUID) => Record<string, unknown>,
+): Promise<void> {
+  const uuid = validateUuid(sessionId)
+  if (!uuid) throw new Error(`Invalid session id: ${sessionId}`)
+
+  const resolved = await resolveSessionFilePath(uuid, options?.dir)
+  if (!resolved) throw new Error(`Session not found: ${sessionId}`)
+
+  await appendFile(resolved.filePath, JSON.stringify(entryFor(uuid)) + '\n', {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+}
+
 type Candidate = {
   sessionId: string
   filePath: string
@@ -899,4 +920,31 @@ export async function getSessionMessagesImpl(
     )
     .map(toSdkMessage)
   return applyMessagePagination(chain, options?.limit, options?.offset)
+}
+
+export async function renameSessionImpl(
+  sessionId: string,
+  title: string,
+  options?: SessionMutationOptions,
+): Promise<void> {
+  if (title.trim().length === 0) {
+    throw new Error('Session title cannot be empty')
+  }
+  await appendSessionMetadataEntry(sessionId, options, uuid => ({
+    type: 'custom-title',
+    customTitle: title,
+    sessionId: uuid,
+  }))
+}
+
+export async function tagSessionImpl(
+  sessionId: string,
+  tag: string | null,
+  options?: SessionMutationOptions,
+): Promise<void> {
+  await appendSessionMetadataEntry(sessionId, options, uuid => ({
+    type: 'tag',
+    tag: tag ?? '',
+    sessionId: uuid,
+  }))
 }
