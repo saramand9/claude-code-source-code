@@ -3100,6 +3100,43 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 PermissionRequest command timeout cleanup
+
+This round closes the simple-helper process cleanup gap for
+`PermissionRequest` command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `PermissionRequest` through the same direct Windows helper path used
+    by other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the existing timed-out headless Bash PermissionRequest command hook
+    to schedule a late marker after its flushed allow JSON.
+  - Preserves the prior assertion that the flushed allow JSON does not grant
+    permission after timeout.
+  - Verifies the timed-out helper is killed before writing the late marker.
+
+Risk boundary update: PermissionRequest command hooks now have direct coverage
+for timeout races where allow JSON is already flushed and for simple-helper
+process cleanup. Remaining gaps are interactive PermissionRequest UI behavior,
+complex-shell timeout cleanup, and broader multi-hook ordering/concurrency
+cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PermissionRequest command hooks decide Bash headless prompts
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 PostToolUseFailure command timeout cleanup
 
 This round closes the failed-tool command-hook malformed-output and timeout

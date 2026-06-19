@@ -2708,7 +2708,7 @@ console.log('interactive hook failure OK');`,
 await test('PermissionRequest command hooks decide Bash headless prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-command-hook-test',
-    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
 
 const configDirRel = 'build-src/test-artifacts/permission-request-command-config';
 await rm(configDirRel, { recursive: true, force: true });
@@ -2720,6 +2720,7 @@ const failingCommandPath = configDirRel + '/permission-request-fail-command.mjs'
 const allowCommandPath = configDirRel + '/permission-request-allow-command.mjs';
 const timeoutCommandPath = configDirRel + '/permission-request-timeout-command.mjs';
 const timeoutMarkerPath = configDirRel + '/permission-request-timeout-flushed.txt';
+const timeoutLateMarkerPath = configDirRel + '/permission-request-timeout-late.txt';
 await writeFile(
   failingCommandPath,
   [
@@ -2750,15 +2751,17 @@ await writeFile(
 await writeFile(
   timeoutCommandPath,
   [
-    "const { writeFile } = await import('node:fs/promises');",
+    "const { writeFileSync } = await import('node:fs');",
     "let input = '';",
     "for await (const chunk of process.stdin) input += chunk;",
     "const data = JSON.parse(input);",
     "if (data.hook_event_name !== 'PermissionRequest') process.exit(3);",
     "if (data.tool_name !== 'Bash') process.exit(4);",
     "await new Promise(resolve => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: { ...data.tool_input, command: 'echo timed out allow should be ignored 6284' } } } }), resolve));",
-    "await writeFile(" + JSON.stringify(timeoutMarkerPath) + ", 'flushed', 'utf8');",
-    "await new Promise(resolve => setTimeout(resolve, 2000));",
+    "writeFileSync(" + JSON.stringify(timeoutMarkerPath) + ", 'flushed', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync(" + JSON.stringify(timeoutLateMarkerPath) + ", 'late', 'utf8');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -2880,6 +2883,13 @@ if (timedOut.behavior !== 'deny' || timedOut.decisionReason?.type !== 'asyncAgen
 const timeoutMarker = await readFile(timeoutMarkerPath, 'utf8').catch(() => '');
 if (timeoutMarker !== 'flushed') {
   throw new Error('timeout command should flush allow JSON before timeout; marker=' + JSON.stringify(timeoutMarker));
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('timed-out PermissionRequest command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 await writeSettings(allowCommandPath);
