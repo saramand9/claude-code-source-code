@@ -3630,6 +3630,169 @@ console.log('config change command metadata OK');`,
   assert.equal(output, 'config change command metadata OK')
 })
 
+await test('HTTP hooks post JSON input and enforce allowlists', async () => {
+  const output = await buildAndRunSnippet(
+    'http-hook-config-change-test',
+    `const { createServer } = await import('node:http');
+const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'http-hook-config-change-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const received = [];
+const server = createServer((req, res) => {
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', chunk => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    received.push({
+      method: req.method,
+      url: req.url,
+      headers: req.headers,
+      body,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ decision: 'block', reason: 'http config block marker 7314' }));
+  });
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const { port } = server.address();
+const hookUrl = 'http://127.0.0.1:' + port + '/hook';
+const blockedUrl = 'http://127.0.0.1:' + port + '/blocked';
+const localSettingsPath = join(configDir, 'local-settings.json');
+const localSettingsPathForHook = localSettingsPath.replace(/\\\\/g, '/');
+process.env.HTTP_HOOK_TOKEN_7314 = 'token-value-7314';
+process.env.HTTP_HOOK_DENIED_7314 = 'denied-value-7314';
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      allowedHttpHookUrls: [hookUrl],
+      httpHookAllowedEnvVars: ['HTTP_HOOK_TOKEN_7314'],
+      hooks: {
+        ConfigChange: [
+          {
+            matcher: 'local_settings',
+            hooks: [
+              {
+                type: 'http',
+                url: hookUrl,
+                headers: {
+                  Authorization: 'Bearer $HTTP_HOOK_TOKEN_7314',
+                  'X-Blocked-Secret': '$HTTP_HOOK_DENIED_7314',
+                },
+                allowedEnvVars: [
+                  'HTTP_HOOK_TOKEN_7314',
+                  'HTTP_HOOK_DENIED_7314',
+                ],
+                timeout: 5,
+              },
+            ],
+          },
+          {
+            matcher: 'project_settings',
+            hooks: [
+              {
+                type: 'http',
+                url: blockedUrl,
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeConfigChangeHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+try {
+  setIsInteractive(false);
+  resetHooksConfigSnapshot();
+  resetSettingsCache();
+
+  const results = await executeConfigChangeHooks(
+    'local_settings',
+    localSettingsPath,
+    10000,
+  );
+  if (results.length !== 1 || results[0].succeeded !== true) {
+    throw new Error('HTTP ConfigChange hook should succeed: ' + JSON.stringify(results));
+  }
+  if (results[0].blocked !== true) {
+    throw new Error('HTTP ConfigChange hook should block from JSON decision: ' + JSON.stringify(results));
+  }
+  if (!String(results[0].output).includes('http config block marker 7314')) {
+    throw new Error('HTTP ConfigChange hook should preserve response body: ' + JSON.stringify(results));
+  }
+  if (received.length !== 1) {
+    throw new Error('HTTP hook server should receive one request: ' + JSON.stringify(received));
+  }
+  const request = received[0];
+  if (request.method !== 'POST' || request.url !== '/hook') {
+    throw new Error('HTTP hook should POST to /hook: ' + JSON.stringify(request));
+  }
+  if (request.headers.authorization !== 'Bearer token-value-7314') {
+    throw new Error('HTTP hook should interpolate allowed env header: ' + JSON.stringify(request.headers));
+  }
+  if (request.headers['x-blocked-secret'] !== '') {
+    throw new Error('HTTP hook should blank disallowed env header: ' + JSON.stringify(request.headers));
+  }
+  const body = JSON.parse(request.body);
+  if (body.hook_event_name !== 'ConfigChange') {
+    throw new Error('HTTP hook body should include hook event: ' + request.body);
+  }
+  if (body.source !== 'local_settings') {
+    throw new Error('HTTP hook body should include config source: ' + request.body);
+  }
+  if (String(body.file_path).replace(/\\\\/g, '/') !== localSettingsPathForHook) {
+    throw new Error('HTTP hook body should include file path: ' + request.body);
+  }
+
+  const blockedResults = await executeConfigChangeHooks(
+    'project_settings',
+    join(configDir, 'project-settings.json'),
+    10000,
+  );
+  if (blockedResults.length !== 1 || blockedResults[0].succeeded !== false) {
+    throw new Error('disallowed HTTP hook URL should fail before request: ' + JSON.stringify(blockedResults));
+  }
+  if (!String(blockedResults[0].output).includes('allowedHttpHookUrls')) {
+    throw new Error('disallowed HTTP hook URL should report policy failure: ' + JSON.stringify(blockedResults));
+  }
+  if (received.length !== 1) {
+    throw new Error('disallowed HTTP hook URL should not reach server: ' + JSON.stringify(received));
+  }
+} finally {
+  server.close();
+}
+
+console.log('http hooks OK');`,
+  )
+  assert.equal(output, 'http hooks OK')
+})
+
 await test('outside REPL command hooks ignore failed JSON decisions', async () => {
   const output = await buildAndRunSnippet(
     'outside-repl-failed-json-hook-test',

@@ -3100,6 +3100,43 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 HTTP hook build-safety coverage
+
+This round adds direct build-safety coverage for HTTP hooks using a local
+loopback server.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a local HTTP server fixture for a `ConfigChange` HTTP hook.
+  - Verifies HTTP hooks POST the hook input JSON with event name, config source,
+    and file path metadata.
+  - Verifies allowed header environment variables are interpolated and
+    disallowed variables are blanked.
+  - Asserts JSON `{ "decision": "block" }` responses become blocking hook
+    results.
+  - Asserts `allowedHttpHookUrls` blocks non-matching HTTP hooks before any
+    request reaches the server.
+
+Risk boundary update: HTTP hooks now have direct regression coverage for local
+request delivery, response parsing, URL allowlist enforcement, and header env
+interpolation. Remaining gaps include sandbox-proxy routing, non-loopback SSRF
+guard behavior, redirects, and timeout cancellation.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - HTTP hooks post JSON input and enforce allowlists
+104/104 build-safety tests passed.
+```
+
 ## 2026-06-19 ConfigChange command metadata coverage
 
 This round extends `ConfigChange` command-hook coverage beyond blocking and
