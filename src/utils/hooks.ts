@@ -1040,7 +1040,9 @@ async function execCommandHook(
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||
         hookEvent === 'Elicitation' ||
-        hookEvent === 'ElicitationResult')
+        hookEvent === 'ElicitationResult' ||
+        hookEvent === 'WorktreeCreate' ||
+        hookEvent === 'WorktreeRemove')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null
     const shell = isWindows ? findGitBashPath() : true

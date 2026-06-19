@@ -4963,7 +4963,7 @@ console.log('worktree hooks OK');`,
 await test('worktree command hooks create and remove paths', async () => {
   const output = await buildAndRunSnippet(
     'worktree-command-hook-test',
-    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/worktree-command-hook-config';
@@ -4974,12 +4974,20 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const createCommandPath = join(commandDir, 'worktree-create-command-hook.mjs');
 const removeCommandPath = join(commandDir, 'worktree-remove-command-hook.mjs');
+const failingCreateCommandPath = join(commandDir, 'worktree-create-failing-command-hook.mjs');
+const timeoutCreateCommandPath = join(commandDir, 'worktree-create-timeout-command-hook.mjs');
 const createCommandPathForHook = createCommandPath.replace(/\\\\/g, '/');
 const removeCommandPathForHook = removeCommandPath.replace(/\\\\/g, '/');
+const failingCreateCommandPathForHook = failingCreateCommandPath.replace(/\\\\/g, '/');
+const timeoutCreateCommandPathForHook = timeoutCreateCommandPath.replace(/\\\\/g, '/');
 const expectedName = 'worktree-command-branch-7724';
 const expectedPath = join(process.cwd(), 'build-src', 'test-artifacts', 'worktree-command-created-7724').replace(/\\\\/g, '/');
 const removeMarkerPath = join(commandDir, 'remove-marker.json');
 const removeMarkerPathForScript = removeMarkerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'worktree-create-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'worktree-create-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 await writeFile(
   createCommandPath,
   [
@@ -4990,6 +4998,31 @@ await writeFile(
     "if (data.name !== '" + expectedName + "') { process.stderr.write('bad worktree name ' + data.name); process.exit(4); }",
     "process.stdout.write('" + expectedPath + "');",
     "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  failingCreateCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'WorktreeCreate') { process.stderr.write('bad create event ' + data.hook_event_name); process.exit(3); }",
+    "process.stderr.write('worktree create failure marker 7724');",
+    "process.exit(13);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCreateCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write('" + expectedPath + "');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late worktree timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -5077,6 +5110,65 @@ clearRegisteredHooks();
 const removedWithoutHooks = await executeWorktreeRemoveHook(expectedPath);
 if (removedWithoutHooks !== false) {
   throw new Error('WorktreeRemove command should return false without hooks');
+}
+
+registerHookCallbacks({
+  WorktreeCreate: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + failingCreateCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+try {
+  await executeWorktreeCreateHook(expectedName);
+  throw new Error('WorktreeCreate failing command should throw');
+} catch (error) {
+  if (!String(error?.message || error).includes('worktree create failure marker 7724')) {
+    throw new Error('WorktreeCreate failing command should include stderr diagnostics: ' + error);
+  }
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  WorktreeCreate: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCreateCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+try {
+  await executeWorktreeCreateHook(expectedName);
+  throw new Error('WorktreeCreate timed-out command should not return flushed path');
+} catch (error) {
+  if (!String(error?.message || error).includes('Hook cancelled')) {
+    throw new Error('WorktreeCreate timed-out command should report cancellation: ' + error);
+  }
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('WorktreeCreate timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('WorktreeCreate timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('worktree command hooks OK');`,

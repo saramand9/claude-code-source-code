@@ -3183,6 +3183,47 @@ ok - elicitation command hooks can answer and block results
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 Worktree command timeout cleanup
+
+This round tightens Worktree command-hook safety around create failures and
+timeout races.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `WorktreeCreate` and
+    `WorktreeRemove` command hooks, so short helper commands get the same
+    timeout cleanup behavior as the other non-REPL helper hooks.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the Worktree command-hook regression with a failing
+    `WorktreeCreate` command and verifies the thrown error includes the hook's
+    stderr diagnostics.
+  - Adds a timeout fixture that writes a start marker, flushes a worktree path
+    to stdout, then hangs long enough to try writing a late marker.
+  - Verifies a timed-out create hook does not return the flushed path, reports
+    cancellation, and is killed before the late marker can be written.
+
+Risk boundary update: Worktree command hooks now have direct build-safety
+coverage for create/remove success, remove side effects, create failure
+diagnostics, and simple-helper create timeout cleanup. Remaining gaps include
+full git worktree E2E, complex-shell timeout cleanup, and WorktreeRemove
+timeout side-effect cleanup beyond the shared direct-spawn path.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - worktree command hooks create and remove paths
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.
