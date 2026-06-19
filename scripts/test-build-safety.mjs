@@ -9832,8 +9832,14 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'notification-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'notification-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const markerPath = join(commandDir, 'notification-marker.json');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'notification-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'notification-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const notificationType = 'permission_prompt';
 const message = 'notification command message marker 8127';
 const title = 'notification command title marker 8127';
@@ -9849,6 +9855,19 @@ await writeFile(
     "if (data.message !== '" + message + "') { process.stderr.write('bad message ' + data.message); process.exit(5); }",
     "if (data.title !== '" + title + "') { process.stderr.write('bad title ' + data.title); process.exit(6); }",
     "await writeFile('" + markerPathForScript + "', JSON.stringify({ type: data.notification_type, title: data.title }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write('notification timeout output should not matter');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late notification timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -9912,6 +9931,42 @@ try {
 }
 if (skippedCreated) {
   throw new Error('Notification command matcher should skip idle_prompt');
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  Notification: [
+    {
+      matcher: notificationType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+await executeNotificationHooks(
+  {
+    notificationType,
+    message,
+    title,
+  },
+  10000,
+);
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('Notification timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('Notification timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('notification command hooks OK');`,

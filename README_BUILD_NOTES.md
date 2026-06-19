@@ -3449,6 +3449,44 @@ ok - environment command hooks receive input and env files
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 Notification command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for Notification command
+hooks.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `Notification` command
+    hooks, so simple helpers such as `node hook.mjs` get the same timeout
+    cleanup behavior as the other short helper lifecycles.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the Notification command-hook regression with a timeout helper that
+    writes a start marker, emits stdout, then hangs long enough to try writing a
+    late marker.
+  - Verifies the timeout helper starts and is killed before the late marker can
+    be written.
+
+Risk boundary update: Notification command hooks now have direct build-safety
+coverage for title/type metadata, matcher filtering, and simple-helper timeout
+cleanup. Remaining gaps include prompt/agent Notification hooks, complex-shell
+timeout cleanup, and full interactive notification UI behavior.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - Notification command hooks receive title and type metadata
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 PreToolUse command stop coverage
 
 This round closes the direct command-hook coverage gap for `PreToolUse`
