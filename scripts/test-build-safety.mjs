@@ -1735,7 +1735,7 @@ console.log('permission request headless hook OK');`,
 await test('PermissionRequest command hooks decide Bash headless prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
 
 const configDirRel = 'build-src/test-artifacts/permission-request-command-config';
 await rm(configDirRel, { recursive: true, force: true });
@@ -1745,6 +1745,8 @@ delete process.env.CLAUDE_CODE_SIMPLE;
 
 const failingCommandPath = configDirRel + '/permission-request-fail-command.mjs';
 const allowCommandPath = configDirRel + '/permission-request-allow-command.mjs';
+const timeoutCommandPath = configDirRel + '/permission-request-timeout-command.mjs';
+const timeoutMarkerPath = configDirRel + '/permission-request-timeout-flushed.txt';
 await writeFile(
   failingCommandPath,
   [
@@ -1772,6 +1774,21 @@ await writeFile(
   ].join('\\n'),
   'utf8',
 );
+await writeFile(
+  timeoutCommandPath,
+  [
+    "const { writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PermissionRequest') process.exit(3);",
+    "if (data.tool_name !== 'Bash') process.exit(4);",
+    "await new Promise(resolve => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: { ...data.tool_input, command: 'echo timed out allow should be ignored 6284' } } } }), resolve));",
+    "await writeFile(" + JSON.stringify(timeoutMarkerPath) + ", 'flushed', 'utf8');",
+    "await new Promise(resolve => setTimeout(resolve, 2000));",
+  ].join('\\n'),
+  'utf8',
+);
 
 const [
   { hasPermissionsToUseTool },
@@ -1785,7 +1802,7 @@ const [
   import('./src/utils/settings/settingsCache.ts'),
 ]);
 
-async function writeSettings(commandPath) {
+async function writeSettings(commandPath, timeout = 5) {
   await writeFile(
     configDirRel + '/settings.json',
     JSON.stringify(
@@ -1798,7 +1815,7 @@ async function writeSettings(commandPath) {
                 {
                   type: 'command',
                   command: 'node ' + commandPath,
-                  timeout: 5,
+                  timeout,
                 },
               ],
             },
@@ -1879,6 +1896,17 @@ await writeSettings(failingCommandPath);
 const failed = await runPermissionCheck();
 if (failed.behavior !== 'deny' || failed.decisionReason?.type !== 'asyncAgent') {
   throw new Error('non-zero PermissionRequest command should not decide permission: ' + JSON.stringify(failed));
+}
+
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+await writeSettings(timeoutCommandPathForHook, 0.5);
+const timedOut = await runPermissionCheck();
+if (timedOut.behavior !== 'deny' || timedOut.decisionReason?.type !== 'asyncAgent') {
+  throw new Error('timed-out PermissionRequest command should not decide permission: ' + JSON.stringify(timedOut));
+}
+const timeoutMarker = await readFile(timeoutMarkerPath, 'utf8').catch(() => '');
+if (timeoutMarker !== 'flushed') {
+  throw new Error('timeout command should flush allow JSON before timeout; marker=' + JSON.stringify(timeoutMarker));
 }
 
 await writeSettings(allowCommandPath);

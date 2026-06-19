@@ -3206,3 +3206,35 @@ Expected new output:
 ```text
 ok - agent tool filtering scopes plan-mode permissions
 ```
+
+## 2026-06-19 PermissionRequest command timeout coverage
+
+This round tightens PermissionRequest command-hook safety around timeout races.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the headless Bash PermissionRequest command-hook test with a hook
+    that flushes an `allow` JSON decision to stdout, then hangs until the hook
+    timeout kills it.
+  - Verifies the timed-out hook does not grant permission and the headless
+    fallback remains an auto-deny decision.
+  - Verifies the hook stdout was flushed before timeout, so the regression
+    covers the risky partial-output case rather than only a silent timeout.
+
+Risk boundary update: PermissionRequest command hooks now have direct coverage
+that only completed successful command hooks may authorize headless tool use.
+Remaining gaps are interactive PermissionRequest UI behavior and broader
+multi-hook ordering/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionRequest command hooks decide Bash headless prompts
+```
