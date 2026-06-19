@@ -3598,6 +3598,46 @@ ok - PreToolUse command hooks can allow and update input
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PreToolUse command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for `PreToolUse`
+command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `PreToolUse` through the same direct Windows helper path used by
+    other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the `PreToolUse` command-hook fixture with a timed-out helper that
+    would otherwise emit `continue: false`, an allow decision, updated input,
+    a decision reason, and additional context.
+  - Verifies timed-out command output does not create permission results,
+    prevent continuation, stop reasons, or additional context.
+  - Verifies the cancelled helper surfaces a `hook_cancelled` attachment.
+  - Asserts the helper process starts but is killed before writing its late
+    marker.
+
+Risk boundary update: `PreToolUse` command hooks now have build-safety coverage
+for allow/deny/ask decisions, input rewriting, additional context,
+prevent-continuation output, and simple-helper timeout cleanup. Remaining gaps
+include complex-shell timeout cleanup and larger callback/command precedence
+combinations.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PreToolUse command hooks can allow and update input
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

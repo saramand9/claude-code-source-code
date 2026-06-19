@@ -1767,7 +1767,7 @@ console.log('pretool hook deny metadata OK');`,
 await test('PreToolUse command hooks can allow and update input', async () => {
   const output = await buildAndRunSnippet(
     'pretool-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/pretool-command-hook-config';
@@ -1784,14 +1784,24 @@ const askCommandPath = join(commandDir, 'pretool-ask-command-hook.mjs');
 const askCommandPathForHook = askCommandPath.replace(/\\\\/g, '/');
 const stopCommandPath = join(commandDir, 'pretool-stop-command-hook.mjs');
 const stopCommandPathForHook = stopCommandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'pretool-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'pretool-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'pretool-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const originalCommand = 'echo pretool command hook original 3946';
 const updatedCommand = 'echo pretool command hook updated 3946';
 const askUpdatedCommand = 'echo pretool command hook ask updated 3946';
+const timeoutUpdatedCommand = 'echo pretool timeout updated should not run 3946';
 const additionalContext = 'pretool command hook context marker 3946';
+const timeoutAdditionalContext = 'late pretool command context should not attach marker 3946';
 const allowReason = 'pretool command allow marker 3946';
 const denyReason = 'pretool command deny marker 3946';
 const askReason = 'pretool command ask marker 3946';
 const stopReason = 'pretool command stop marker 3946';
+const timeoutReason = 'late pretool command decision should not apply marker 3946';
+const timeoutStopReason = 'late pretool command stop should not apply marker 3946';
 await writeFile(
   commandPath,
   [
@@ -1804,6 +1814,18 @@ await writeFile(
     "if (data.tool_input.command !== '" + originalCommand + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '" + allowReason + "', updatedInput: { command: '" + updatedCommand + "' }, additionalContext: '" + additionalContext + "' } }));",
     "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + timeoutStopReason + "', hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '" + timeoutReason + "', updatedInput: { command: '" + timeoutUpdatedCommand + "' }, additionalContext: '" + timeoutAdditionalContext + "' } }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -2074,6 +2096,61 @@ if (!stopped.some(result => result.type === 'preventContinuation' && result.shou
 }
 if (!stopped.some(result => result.type === 'stopReason' && result.stopReason === stopReason)) {
   throw new Error('PreToolUse command stop should preserve stopReason: ' + JSON.stringify(stopped));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+const timedOut = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  tool,
+  { command: originalCommand },
+  'toolu_pretool_command_hook_timeout',
+  'msg_pretool_command_hook_timeout',
+  'req_pretool_command_hook_timeout',
+  undefined,
+  undefined,
+)) {
+  timedOut.push(result);
+}
+if (timedOut.some(result =>
+  result.type === 'hookPermissionResult' ||
+  result.type === 'preventContinuation' ||
+  result.type === 'stopReason' ||
+  result.type === 'additionalContext'
+)) {
+  throw new Error('PreToolUse timed-out command should not apply late decisions or context: ' + JSON.stringify(timedOut));
+}
+if (!timedOut.some(result => {
+  const attachment = result.message?.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'PreToolUse';
+})) {
+  throw new Error('PreToolUse timed-out command should report cancellation: ' + JSON.stringify(timedOut));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('PreToolUse timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('PreToolUse timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('pretool command hook OK');`,
