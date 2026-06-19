@@ -3100,6 +3100,40 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 ConfigChange command metadata coverage
+
+This round extends `ConfigChange` command-hook coverage beyond blocking and
+failed-output handling to metadata delivery and source matching.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture for `ConfigChange`.
+  - Verifies command hooks receive `hook_event_name`, `source`, and `file_path`
+    through JSON stdin.
+  - Asserts successful command stdout is preserved in the hook result.
+  - Verifies source matchers skip unrelated config-change sources without
+    executing the command.
+
+Risk boundary update: `ConfigChange` command hooks now have direct regression
+coverage for stdin metadata, stdout propagation, and source matcher filtering.
+Remaining gaps include multi-hook precedence for config changes and timeout
+behavior specific to configuration-change commands.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - ConfigChange command hooks receive source metadata
+103/103 build-safety tests passed.
+```
+
 ## 2026-06-19 Compact command hook coverage
 
 This round extends compact hook coverage from SDK callback hooks to command

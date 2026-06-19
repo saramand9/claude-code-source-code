@@ -3514,6 +3514,122 @@ console.log('config change policy hook OK');`,
   assert.equal(output, 'config change policy hook OK')
 })
 
+await test('ConfigChange command hooks receive source metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'config-change-command-metadata-hook-test',
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'config-change-command-metadata-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandPath = join(configDir, 'config-change-command-metadata-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(configDir, 'config-change-command-marker.json');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const localSettingsPath = join(configDir, 'local-settings.json');
+const localSettingsPathForHook = localSettingsPath.replace(/\\\\/g, '/');
+await writeFile(
+  commandPath,
+  [
+    "import { writeFile } from 'node:fs/promises';",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'ConfigChange') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.source !== 'local_settings') { process.stderr.write('bad source ' + data.source); process.exit(4); }",
+    "if (String(data.file_path).replace(/\\\\\\\\/g, '/') !== '" + localSettingsPathForHook + "') { process.stderr.write('bad file path ' + data.file_path); process.exit(5); }",
+    "await writeFile('" + markerPathForScript + "', JSON.stringify({ source: data.source, filePath: data.file_path }), 'utf8');",
+    "process.stdout.write('config change command metadata marker 6931');",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        ConfigChange: [
+          {
+            matcher: 'local_settings',
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + commandPathForHook,
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeConfigChangeHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+
+const results = await executeConfigChangeHooks(
+  'local_settings',
+  localSettingsPath,
+  10000,
+);
+if (results.length !== 1 || results[0].succeeded !== true) {
+  throw new Error('ConfigChange command hook should succeed: ' + JSON.stringify(results));
+}
+if (results[0].blocked !== false) {
+  throw new Error('ConfigChange command metadata hook should not block: ' + JSON.stringify(results));
+}
+if (!String(results[0].output).includes('config change command metadata marker 6931')) {
+  throw new Error('ConfigChange command should preserve stdout: ' + JSON.stringify(results));
+}
+const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+if (marker.source !== 'local_settings') {
+  throw new Error('ConfigChange command marker should record source: ' + JSON.stringify(marker));
+}
+if (String(marker.filePath).replace(/\\\\/g, '/') !== localSettingsPathForHook) {
+  throw new Error('ConfigChange command marker should record file path: ' + JSON.stringify(marker));
+}
+
+await rm(markerPath, { force: true });
+const skippedResults = await executeConfigChangeHooks(
+  'skills',
+  join(configDir, 'skill-settings.json'),
+  10000,
+);
+if (skippedResults.length !== 0) {
+  throw new Error('ConfigChange command matcher should skip other sources: ' + JSON.stringify(skippedResults));
+}
+const skippedMarker = await readFile(markerPath, 'utf8').catch(() => '');
+if (skippedMarker !== '') {
+  throw new Error('ConfigChange skipped matcher should not run command: ' + JSON.stringify(skippedMarker));
+}
+
+console.log('config change command metadata OK');`,
+  )
+  assert.equal(output, 'config change command metadata OK')
+})
+
 await test('outside REPL command hooks ignore failed JSON decisions', async () => {
   const output = await buildAndRunSnippet(
     'outside-repl-failed-json-hook-test',
