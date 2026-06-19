@@ -2438,3 +2438,37 @@ Expected new output:
 ```text
 ok - PostToolUseFailure hooks attach additional context
 ```
+
+## 2026-06-19 PostToolUse MCP output hook build-safety coverage
+
+This round covers the successful post-tool hook path. The new build-safety test
+validates that `PostToolUse` hooks receive the original tool response, can add
+context for the next model turn, and can rewrite MCP tool output when the tool
+is MCP-backed.
+
+- `scripts/test-build-safety.mjs`
+  - Imports real `runPostToolUseHooks`.
+  - Registers a callback hook for `PostToolUse` matching an MCP-style tool.
+  - Asserts the hook input includes event name, tool name, tool use id,
+    original tool input, and original tool response.
+  - Asserts hook `additionalContext` is emitted as a `PostToolUse` attachment.
+  - Asserts hook `updatedMCPToolOutput` is yielded for the MCP tool and
+    preserves both text content and structured content.
+
+Risk boundary update: both successful and failed post-tool hook context paths
+now have direct build-safety coverage. Remaining hook gaps are mainly full CLI
+E2E for post-tool hook side effects, interactive PermissionRequest UI, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PostToolUse hooks can update MCP output
+```

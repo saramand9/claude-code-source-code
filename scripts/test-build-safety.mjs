@@ -1664,6 +1664,144 @@ console.log('post tool use failure hook OK');`,
   assert.equal(output, 'post tool use failure hook OK')
 })
 
+await test('PostToolUse hooks can update MCP output', async () => {
+  const output = await buildAndRunSnippet(
+    'post-tool-use-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { runPostToolUseHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/services/tools/toolHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const toolName = 'mcp__fixture__lookup';
+const input = { query: 'post tool hook input marker 6284' };
+const originalOutput = {
+  content: [{ type: 'text', text: 'original output marker 6284' }],
+};
+const replacementOutput = {
+  content: [{ type: 'text', text: 'rewritten output marker 6284' }],
+  structuredContent: { rewritten: true },
+};
+const additionalContext = 'post tool hook context marker 6284';
+let calls = 0;
+registerHookCallbacks({
+  PostToolUse: [
+    {
+      matcher: toolName,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'PostToolUse') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.tool_name !== toolName) {
+              throw new Error('unexpected hook tool: ' + hookInput.tool_name);
+            }
+            if (hookInput.tool_use_id !== 'toolu_post_tool_hook') {
+              throw new Error('unexpected tool use id: ' + hookInput.tool_use_id);
+            }
+            if (hookInput.tool_input.query !== input.query) {
+              throw new Error('unexpected tool input: ' + JSON.stringify(hookInput.tool_input));
+            }
+            if (hookInput.tool_response.content?.[0]?.text !== originalOutput.content[0].text) {
+              throw new Error('unexpected tool response: ' + JSON.stringify(hookInput.tool_response));
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PostToolUse',
+                additionalContext,
+                updatedMCPToolOutput: replacementOutput,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const tool = { name: toolName, isMcp: true };
+const updates = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  tool,
+  'toolu_post_tool_hook',
+  'msg_post_tool_hook',
+  input,
+  originalOutput,
+  'req_post_tool_hook',
+  'stdio',
+  undefined,
+)) {
+  updates.push(update);
+}
+if (calls !== 1) {
+  throw new Error('PostToolUse hook should run once, got ' + calls);
+}
+const contextAttachment = updates.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_additional_context' &&
+    attachment.hookEvent === 'PostToolUse' &&
+    attachment.hookName === 'PostToolUse:' + toolName &&
+    Array.isArray(attachment.content) &&
+    attachment.content.includes(additionalContext)
+  );
+});
+if (!contextAttachment) {
+  throw new Error('missing PostToolUse additional context attachment: ' + JSON.stringify(updates));
+}
+const replacement = updates.find(update => update.updatedMCPToolOutput);
+if (!replacement) {
+  throw new Error('missing updated MCP output: ' + JSON.stringify(updates));
+}
+if (replacement.updatedMCPToolOutput.content?.[0]?.text !== replacementOutput.content[0].text) {
+  throw new Error('updated MCP output did not preserve replacement: ' + JSON.stringify(replacement));
+}
+if (replacement.updatedMCPToolOutput.structuredContent?.rewritten !== true) {
+  throw new Error('updated MCP output lost structured content: ' + JSON.stringify(replacement));
+}
+
+console.log('post tool use hook OK');`,
+  )
+  assert.equal(output, 'post tool use hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
