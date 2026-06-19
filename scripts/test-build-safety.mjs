@@ -6750,7 +6750,7 @@ console.log('compact hooks OK');`,
 await test('compact command hooks rewrite instructions and report summaries', async () => {
   const output = await buildAndRunSnippet(
     'compact-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/compact-command-hook-config';
@@ -6761,10 +6761,24 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'compact-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutPreCommandPath = join(commandDir, 'pre-compact-timeout-command-hook.mjs');
+const timeoutPreCommandPathForHook = timeoutPreCommandPath.replace(/\\\\/g, '/');
+const timeoutPreStartMarkerPath = join(commandDir, 'pre-compact-timeout-started.txt');
+const timeoutPreStartMarkerPathForScript = timeoutPreStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutPreLateMarkerPath = join(commandDir, 'pre-compact-timeout-late.txt');
+const timeoutPreLateMarkerPathForScript = timeoutPreLateMarkerPath.replace(/\\\\/g, '/');
+const timeoutPostCommandPath = join(commandDir, 'post-compact-timeout-command-hook.mjs');
+const timeoutPostCommandPathForHook = timeoutPostCommandPath.replace(/\\\\/g, '/');
+const timeoutPostStartMarkerPath = join(commandDir, 'post-compact-timeout-started.txt');
+const timeoutPostStartMarkerPathForScript = timeoutPostStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutPostLateMarkerPath = join(commandDir, 'post-compact-timeout-late.txt');
+const timeoutPostLateMarkerPathForScript = timeoutPostLateMarkerPath.replace(/\\\\/g, '/');
 const customInstructions = 'existing compact command instructions marker 3487';
 const rewrittenInstructions = 'rewritten compact command instructions marker 3487';
 const compactSummary = 'compact command summary marker 3487';
 const postMessage = 'post compact command user message marker 3487';
+const timeoutPreLateOutput = 'late precompact timeout instructions should not apply marker 3487';
+const timeoutPostLateOutput = 'late postcompact timeout output should not report marker 3487';
 await writeFile(
   commandPath,
   [
@@ -6785,6 +6799,30 @@ await writeFile(
     "}",
     "process.stderr.write('bad event ' + data.hook_event_name);",
     "process.exit(7);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutPreCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutPreStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutPreLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('" + timeoutPreLateOutput + "');",
+    "}, 1600);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutPostCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutPostStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutPostLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('" + timeoutPostLateOutput + "');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -6869,6 +6907,87 @@ const skippedPost = await executePostCompactHooks({
 });
 if (Object.keys(skippedPost).length !== 0) {
   throw new Error('PostCompact command matcher should skip auto trigger: ' + JSON.stringify(skippedPost));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PreCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutPreCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutPreResult = await executePreCompactHooks({
+  trigger: 'manual',
+  customInstructions,
+});
+if (timeoutPreResult.newCustomInstructions !== undefined) {
+  throw new Error('PreCompact timed-out command should not rewrite instructions: ' + JSON.stringify(timeoutPreResult));
+}
+if (!String(timeoutPreResult.userDisplayMessage).includes('Hook cancelled')) {
+  throw new Error('PreCompact timed-out command should report cancellation: ' + JSON.stringify(timeoutPreResult));
+}
+if (String(timeoutPreResult.userDisplayMessage).includes(timeoutPreLateOutput)) {
+  throw new Error('PreCompact timed-out command should not report late output: ' + JSON.stringify(timeoutPreResult));
+}
+try {
+  await stat(timeoutPreStartMarkerPath);
+} catch (error) {
+  throw new Error('PreCompact timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutPreLateMarkerPath);
+  throw new Error('PreCompact timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutPostCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutPostResult = await executePostCompactHooks({
+  trigger: 'manual',
+  compactSummary,
+});
+if (!String(timeoutPostResult.userDisplayMessage).includes('Hook cancelled')) {
+  throw new Error('PostCompact timed-out command should report cancellation: ' + JSON.stringify(timeoutPostResult));
+}
+if (String(timeoutPostResult.userDisplayMessage).includes(timeoutPostLateOutput)) {
+  throw new Error('PostCompact timed-out command should not report late output: ' + JSON.stringify(timeoutPostResult));
+}
+try {
+  await stat(timeoutPostStartMarkerPath);
+} catch (error) {
+  throw new Error('PostCompact timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutPostLateMarkerPath);
+  throw new Error('PostCompact timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('compact command hooks OK');`,

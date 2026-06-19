@@ -4183,6 +4183,45 @@ ok - compact command hooks rewrite instructions and report summaries
 93/93 build-safety tests passed.
 ```
 
+## 2026-06-19 Compact command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for compact command
+hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `PreCompact` and `PostCompact` through the same direct Windows
+    helper path used by other short lifecycle command hooks.
+  - Keeps the existing Git Bash fallback for complex command forms.
+- `scripts/test-build-safety.mjs`
+  - Extends the compact command-hook fixture with timed-out `PreCompact` and
+    `PostCompact` commands.
+  - Verifies timed-out `PreCompact` output does not rewrite compact
+    instructions.
+  - Verifies timed-out `PostCompact` output is not reported to the user.
+  - Asserts both helper processes start but are killed before writing late
+    markers.
+
+Risk boundary update: compact command hooks now have build-safety coverage for
+stdin metadata, matcher filtering, display output, instruction rewriting, and
+simple-helper timeout cleanup. Remaining gaps include prompt/agent compact
+hooks, complex-shell timeout cleanup, and full keyboard-driven TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - compact command hooks rewrite instructions and report summaries
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Elicitation command hook coverage
 
 This round extends MCP elicitation safety coverage from callback hooks to real
