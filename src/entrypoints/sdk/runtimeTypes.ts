@@ -52,6 +52,7 @@ export type ListSessionsOptions = {
   dir?: string
   limit?: number
   offset?: number
+  includeWorktrees?: boolean
 }
 
 export type GetSessionInfoOptions = {

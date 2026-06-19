@@ -279,6 +279,73 @@ console.log('vertex SDK OK');`,
   assert.equal(output, 'vertex SDK OK')
 })
 
+await test('agent SDK listSessions reads local session metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-list-sessions-test',
+    `import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
+const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
+const { listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
+const { sanitizePath } = await import('./src/utils/sessionStoragePortable.ts');
+const sessionId = '12345678-1234-4234-9234-123456789abc';
+const projectStorageDir = join(
+  process.env.CLAUDE_CONFIG_DIR,
+  'projects',
+  sanitizePath(projectDir),
+);
+await mkdir(projectStorageDir, { recursive: true });
+await writeFile(
+  join(projectStorageDir, sessionId + '.jsonl'),
+  [
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-06-19T00:00:00.000Z',
+      cwd: projectDir,
+      gitBranch: 'main',
+      message: { role: 'user', content: 'List the project sessions' },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-06-19T00:00:01.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }] },
+    }),
+    JSON.stringify({ type: 'summary', summary: 'Session summary' }),
+    '',
+  ].join('\\n'),
+  'utf8',
+);
+const sessions = await listSessions({
+  dir: projectDir,
+  includeWorktrees: false,
+});
+if (sessions.length !== 1) {
+  throw new Error('expected one session, got ' + JSON.stringify(sessions));
+}
+const [session] = sessions;
+if (session.sessionId !== sessionId) {
+  throw new Error('wrong session id: ' + JSON.stringify(session));
+}
+if (session.summary !== 'Session summary') {
+  throw new Error('wrong summary: ' + JSON.stringify(session));
+}
+if (session.firstPrompt !== 'List the project sessions') {
+  throw new Error('wrong first prompt: ' + JSON.stringify(session));
+}
+if (session.gitBranch !== 'main') {
+  throw new Error('wrong git branch: ' + JSON.stringify(session));
+}
+if (session.cwd !== projectDir) {
+  throw new Error('wrong cwd: ' + JSON.stringify(session));
+}
+if (session.createdAt !== Date.parse('2026-06-19T00:00:00.000Z')) {
+  throw new Error('wrong createdAt: ' + JSON.stringify(session));
+}
+console.log('agent SDK listSessions OK');`,
+  )
+  assert.equal(output, 'agent SDK listSessions OK')
+})
+
 let manifest
 await test('stub manifest exists and records current stub kinds', async () => {
   const manifestPath = join(BUILD, 'stub-manifest.json')

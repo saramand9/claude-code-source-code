@@ -3173,6 +3173,41 @@ Expected new output:
 ok - configurable shortcut hints stay aligned with keybinding constants
 ```
 
+## 2026-06-19 SDK listSessions wiring
+
+This round restores the public Agent SDK `listSessions()` export by wiring it
+to the existing portable local-session implementation.
+
+- `src/entrypoints/agentSdkTypes.ts`
+  - Imports and calls `listSessionsImpl()` instead of throwing
+    `listSessions is not implemented in the SDK`.
+- `src/entrypoints/sdk/runtimeTypes.ts`
+  - Adds the documented `includeWorktrees` option to `ListSessionsOptions`.
+- `scripts/test-build-safety.mjs`
+  - Creates an isolated `CLAUDE_CONFIG_DIR` with a real JSONL session file.
+  - Verifies SDK `listSessions({ dir, includeWorktrees: false })` returns the
+    expected session id, summary, first prompt, git branch, cwd, and creation
+    timestamp.
+
+Risk boundary update: SDK consumers can now list local sessions through the
+public export without importing internal utilities. Other Agent SDK runtime
+APIs that still throw remain out of scope for this round.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - agent SDK listSessions reads local session metadata
+```
+
 ## 2026-06-19 ant callout build-safety isolation
 
 This round also fixes the ant-only callout build-safety harness so it does not
