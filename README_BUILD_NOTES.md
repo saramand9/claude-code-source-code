@@ -3260,6 +3260,52 @@ ok - StopFailure agent hooks execute outside REPL with context
 108/108 build-safety tests passed.
 ```
 
+## 2026-06-19 StopFailure function hooks outside REPL
+
+This round restores session-scoped function hook execution for `StopFailure`
+on the outside-REPL path when the caller can provide conversation messages.
+
+- `src/utils/hooks.ts`
+  - Adds optional `messages` support to `executeHooksOutsideREPL()`.
+  - Routes outside-REPL `function` hooks through the existing
+    `executeFunctionHook()` implementation instead of returning the previous
+    internal-error placeholder.
+  - Keeps a conservative non-blocking error when a caller reaches a function
+    hook without messages.
+  - Passes the failing assistant message from `executeStopFailureHooks()` so
+    function callbacks can inspect the same final assistant content as native
+    Stop hooks.
+- `scripts/test-build-safety.mjs`
+  - Adds a `StopFailure` function hook regression test using an in-memory
+    session hook.
+  - Verifies the callback receives the assistant message, error metadata, and
+    abort signal.
+  - Verifies a `false` callback result becomes a blocking outside-REPL result
+    with the configured function-hook error message.
+  - Asserts matcher misses skip unrelated StopFailure errors.
+
+Risk boundary update: `StopFailure` now supports command, prompt, agent, and
+session function hook types outside the REPL when the caller supplies the
+required context/messages. Remaining gaps include function-hook coverage for
+other outside-REPL lifecycle events that do not currently provide messages and
+timeout/cancellation behavior specific to outside-REPL function hooks.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - StopFailure function hooks execute outside REPL with messages
+109/109 build-safety tests passed.
+```
+
 ## 2026-06-19 HTTP hook build-safety coverage
 
 This round adds direct build-safety coverage for HTTP hooks using a local

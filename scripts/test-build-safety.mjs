@@ -7426,6 +7426,130 @@ console.log('stop failure command hook OK');`,
   assert.equal(output, 'stop failure command hook OK')
 })
 
+await test('StopFailure function hooks execute outside REPL with messages', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-function-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-function-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeStopFailureHooks },
+  { getSessionId, setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { addFunctionHook },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/hooks/sessionHooks.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const error = 'stop failure function marker 5331';
+const errorDetails = 'stop failure function details marker 5331';
+const lastAssistantText = 'last assistant before stop failure function marker 5331';
+const blockMessage = 'stop failure function blocked marker 5331';
+let calls = 0;
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+function setAppState(updater) {
+  appState = updater(appState);
+}
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState,
+  updateAttributionState() {},
+};
+const sessionId = getSessionId();
+addFunctionHook(
+  setAppState,
+  sessionId,
+  'StopFailure',
+  error,
+  (messages, signal) => {
+    calls += 1;
+    if (!Array.isArray(messages) || messages.length !== 1) {
+      throw new Error('function hook should receive one message: ' + JSON.stringify(messages));
+    }
+    const message = messages[0];
+    if (message.type !== 'assistant') {
+      throw new Error('function hook should receive assistant message: ' + message.type);
+    }
+    if (message.error !== error) {
+      throw new Error('function hook should receive original error: ' + message.error);
+    }
+    if (message.errorDetails !== errorDetails) {
+      throw new Error('function hook should receive original details: ' + message.errorDetails);
+    }
+    if (message.message.content[0].text !== lastAssistantText) {
+      throw new Error('function hook should receive last assistant content: ' + JSON.stringify(message.message.content));
+    }
+    if (!signal || typeof signal.aborted !== 'boolean') {
+      throw new Error('function hook should receive abort signal');
+    }
+    return false;
+  },
+  blockMessage,
+  { id: 'stop-failure-function-hook-5331', timeout: 5000 },
+);
+
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000005331',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_stop_failure_function_5331',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+const results = await executeStopFailureHooks(lastMessage, context, 10000);
+if (calls !== 1) {
+  throw new Error('StopFailure function hook should run once, got ' + calls);
+}
+if (results.length !== 1) {
+  throw new Error('StopFailure function hook should return one result: ' + JSON.stringify(results));
+}
+if (results[0].command !== 'function') {
+  throw new Error('StopFailure function hook should identify function command: ' + JSON.stringify(results));
+}
+if (results[0].succeeded !== false || results[0].blocked !== true || results[0].output !== blockMessage) {
+  throw new Error('StopFailure function hook should block with error message: ' + JSON.stringify(results));
+}
+
+await executeStopFailureHooks(
+  { ...lastMessage, error: 'different function failure marker 5331' },
+  context,
+  10000,
+);
+if (calls !== 1) {
+  throw new Error('StopFailure function hook matcher should skip other errors, got ' + calls);
+}
+
+console.log('stop failure function hook OK');`,
+  )
+  assert.equal(output, 'stop failure function hook OK')
+})
+
 await test('outside REPL once skill hooks are removed after success', async () => {
   const output = await buildAndRunSnippet(
     'outside-repl-once-skill-hook-test',

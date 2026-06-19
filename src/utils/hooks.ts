@@ -3065,6 +3065,7 @@ function hookResultToOutsideReplResult(
  * @param matchQuery The query to match against hook matchers
  * @param signal Optional AbortSignal to cancel hook execution
  * @param toolUseContext Optional ToolUseContext for prompt-based hooks
+ * @param messages Optional conversation history for function hooks
  * @param timeoutMs Optional timeout in milliseconds for hook execution
  * @returns Array of HookOutsideReplResult objects containing command, succeeded, and output
  */
@@ -3072,6 +3073,7 @@ async function executeHooksOutsideREPL({
   getAppState,
   hookInput,
   matchQuery,
+  messages,
   signal,
   toolUseContext,
   timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
@@ -3079,6 +3081,7 @@ async function executeHooksOutsideREPL({
   getAppState?: () => AppState
   hookInput: HookInput
   matchQuery?: string
+  messages?: Message[]
   signal?: AbortSignal
   toolUseContext?: ToolUseContext
   timeoutMs: number
@@ -3289,20 +3292,34 @@ async function executeHooksOutsideREPL({
         }
       }
 
-      // Function hooks require messages array (only available in REPL context)
-      // For -p mode Stop hooks, use executeStopHooks which supports function hooks
       if (hook.type === 'function') {
-        logError(
-          new Error(
-            `Function hook reached executeHooksOutsideREPL for ${hookEvent}. Function hooks should only be used in REPL context (Stop hooks).`,
-          ),
-        )
-        return {
-          command: 'function',
-          succeeded: false,
-          output: 'Internal error: function hook executed outside REPL context',
-          blocked: false,
+        if (!messages) {
+          return hookResultToOutsideReplResult(
+            {
+              message: createAttachmentMessage({
+                type: 'hook_error_during_execution',
+                hookName,
+                toolUseID: randomUUID(),
+                hookEvent,
+                content: 'Messages not provided for function hook',
+              }),
+              outcome: 'non_blocking_error',
+              hook,
+            },
+            'function',
+          )
         }
+
+        const functionResult = await executeFunctionHook({
+          hook,
+          messages,
+          hookName,
+          toolUseID: randomUUID(),
+          hookEvent,
+          timeoutMs,
+          signal,
+        })
+        return hookResultToOutsideReplResult(functionResult, 'function')
       }
 
       // Handle HTTP hooks (no toolUseContext needed - just HTTP POST).
@@ -3781,6 +3798,7 @@ export async function executeStopFailureHooks(
     hookInput,
     timeoutMs,
     matchQuery: error,
+    messages: [lastMessage],
     toolUseContext,
   })
 }
