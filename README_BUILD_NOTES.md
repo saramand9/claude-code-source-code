@@ -3219,6 +3219,47 @@ ok - outside REPL once skill hooks are removed after success
 107/107 build-safety tests passed.
 ```
 
+## 2026-06-19 StopFailure agent hooks outside REPL
+
+This round restores agent-based `StopFailure` hook execution on the
+outside-REPL path when a `ToolUseContext` is available.
+
+- `src/utils/hooks.ts`
+  - Routes outside-REPL `agent` hooks through the existing `execAgentHook()`
+    implementation instead of returning the previous unsupported placeholder.
+  - Preserves the conservative failure path when an outside-REPL event has no
+    `ToolUseContext`.
+  - Reuses `hookResultToOutsideReplResult()` so structured agent results map
+    back to outside-REPL success, blocking, cancellation, or error results.
+- `scripts/test-build-safety.mjs`
+  - Adds a `StopFailure` agent hook regression test backed by a local
+    Anthropic-compatible streaming mock server.
+  - Verifies the model request includes the configured agent prompt, hook input,
+    and `StructuredOutput` tool.
+  - Verifies the streamed `StructuredOutput` tool use is executed and produces
+    a blocking outside-REPL result.
+
+Risk boundary update: `StopFailure` now supports command, prompt, and agent hook
+types outside the REPL when the caller supplies context. Remaining gaps include
+outside-REPL agent hooks for events without tool context and broader multi-turn
+agent-hook behavior beyond a single structured output turn.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - StopFailure agent hooks execute outside REPL with context
+108/108 build-safety tests passed.
+```
+
 ## 2026-06-19 HTTP hook build-safety coverage
 
 This round adds direct build-safety coverage for HTTP hooks using a local

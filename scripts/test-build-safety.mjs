@@ -7819,6 +7819,264 @@ console.log('stop failure prompt hook OK');`,
   assert.equal(output, 'stop failure prompt hook OK')
 })
 
+await test('StopFailure agent hooks execute outside REPL with context', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-agent-hook-test',
+    `const { createServer } = await import('node:http');
+const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-agent-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+delete process.env.CLAUDE_CODE_USE_BEDROCK;
+delete process.env.CLAUDE_CODE_USE_VERTEX;
+delete process.env.CLAUDE_CODE_USE_FOUNDRY;
+process.env.ANTHROPIC_API_KEY = 'test-stop-failure-agent-hook-key';
+process.env.API_TIMEOUT_MS = '10000';
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'stop-failure-agent-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+
+const error = 'stop failure agent marker 6185';
+const errorDetails = 'stop failure agent details marker 6185';
+const lastAssistantText = 'last assistant before agent stop failure marker 6185';
+const agentPrompt = 'Agent verify stop failure hook $ARGUMENTS';
+const hookReason = 'agent hook outside repl block marker 6185';
+const requests = [];
+
+function writeSseFrame(res, event, data) {
+  res.write('event: ' + event + '\\n');
+  res.write('data: ' + JSON.stringify(data) + '\\n\\n');
+}
+
+function writeStreamingStructuredOutputToolUse(res, text) {
+  const inputJson = JSON.stringify({ ok: false, reason: text });
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'request-id': 'req_stop_failure_agent_6185',
+  });
+  writeSseFrame(res, 'message_start', {
+    type: 'message_start',
+    message: {
+      id: 'msg_stop_failure_agent_6185',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test-agent-hook',
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: {
+        input_tokens: 10,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+      },
+    },
+  });
+  writeSseFrame(res, 'content_block_start', {
+    type: 'content_block_start',
+    index: 0,
+    content_block: {
+      type: 'tool_use',
+      id: 'toolu_stop_failure_agent_structured_6185',
+      name: 'StructuredOutput',
+      input: {},
+    },
+  });
+  writeSseFrame(res, 'content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: {
+      type: 'input_json_delta',
+      partial_json: inputJson,
+    },
+  });
+  writeSseFrame(res, 'content_block_stop', {
+    type: 'content_block_stop',
+    index: 0,
+  });
+  writeSseFrame(res, 'message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'tool_use', stop_sequence: null },
+    usage: { output_tokens: Math.max(1, Math.ceil(inputJson.length / 4)) },
+  });
+  writeSseFrame(res, 'message_stop', { type: 'message_stop' });
+  res.end();
+}
+
+const server = createServer((req, res) => {
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', chunk => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    const parsed = body ? JSON.parse(body) : {};
+    const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    requests.push({ path: pathname, body: parsed });
+    if (pathname.endsWith('/messages/count_tokens')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ input_tokens: 10 }));
+      return;
+    }
+    if (!pathname.endsWith('/messages')) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const bodyText = JSON.stringify(parsed);
+    if (!bodyText.includes(agentPrompt.replace(' $ARGUMENTS', ''))) {
+      res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('agent prompt missing from model request: ' + bodyText);
+      return;
+    }
+    if (!bodyText.includes(error) || !bodyText.includes(errorDetails) || !bodyText.includes(lastAssistantText)) {
+      res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('hook input missing from agent request: ' + bodyText);
+      return;
+    }
+    if (!bodyText.includes('StructuredOutput')) {
+      res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('StructuredOutput tool missing from agent request: ' + bodyText);
+      return;
+    }
+    writeStreamingStructuredOutputToolUse(res, hookReason);
+  });
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:' + server.address().port;
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        StopFailure: [
+          {
+            matcher: error,
+            hooks: [
+              {
+                type: 'agent',
+                prompt: agentPrompt,
+                model: 'claude-test-agent-hook',
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeStopFailureHooks },
+  { setIsInteractive },
+  { enableConfigs },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/config.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+  mcp: {
+    tools: [],
+    clients: [],
+  },
+  fastMode: false,
+};
+let responseLength = 0;
+const context = {
+  abortController: new AbortController(),
+  options: {
+    commands: [],
+    debug: false,
+    mainLoopModel: 'claude-test-agent-hook',
+    tools: [],
+    verbose: false,
+    thinkingConfig: { type: 'disabled' },
+    mcpClients: [],
+    mcpResources: {},
+    isNonInteractiveSession: true,
+    agentDefinitions: { activeAgents: [], allAgents: [] },
+  },
+  readFileState: {},
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  setResponseLength(updater) {
+    responseLength = updater(responseLength);
+  },
+  updateAttributionState() {},
+};
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000006185',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_stop_failure_agent_6185',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+let stopFailureResults;
+try {
+  setIsInteractive(false);
+  enableConfigs();
+  resetHooksConfigSnapshot();
+  resetSettingsCache();
+  stopFailureResults = await executeStopFailureHooks(lastMessage, context, 10000);
+} finally {
+  await new Promise(resolve => server.close(resolve));
+}
+
+if (!Array.isArray(stopFailureResults) || stopFailureResults.length !== 1) {
+  throw new Error('StopFailure agent hook should return one outside-REPL result: ' + JSON.stringify(stopFailureResults));
+}
+if (stopFailureResults[0].command !== agentPrompt) {
+  throw new Error('StopFailure agent hook should preserve prompt as command: ' + JSON.stringify(stopFailureResults));
+}
+if (stopFailureResults[0].blocked !== true || !String(stopFailureResults[0].output).includes(hookReason)) {
+  throw new Error('StopFailure agent hook should block from structured output: ' + JSON.stringify(stopFailureResults));
+}
+const messageRequests = requests.filter(request => request.path.endsWith('/messages'));
+if (messageRequests.length !== 1) {
+  throw new Error('StopFailure agent hook should issue one model request: ' + JSON.stringify(requests));
+}
+if (messageRequests[0].body.stream !== true) {
+  throw new Error('StopFailure agent hook should use streaming model request: ' + JSON.stringify(messageRequests[0].body));
+}
+console.log('stop failure agent hook OK');`,
+  )
+  assert.equal(output, 'stop failure agent hook OK')
+})
+
 await test('Notification hooks receive title and type metadata', async () => {
   const output = await buildAndRunSnippet(
     'notification-hook-test',

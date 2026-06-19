@@ -3253,13 +3253,39 @@ async function executeHooksOutsideREPL({
         }
       }
 
-      // TODO: Implement agent stop hooks outside REPL
       if (hook.type === 'agent') {
-        return {
-          command: hook.prompt,
-          succeeded: false,
-          output: 'Agent stop hooks are not yet supported outside REPL',
-          blocked: false,
+        if (!toolUseContext) {
+          return {
+            command: hook.prompt,
+            succeeded: false,
+            output:
+              'ToolUseContext is required for agent hooks outside REPL context',
+            blocked: false,
+          }
+        }
+
+        const agentTimeoutMs = hook.timeout ? hook.timeout * 1000 : timeoutMs
+        const { signal: abortSignal, cleanup } = createCombinedAbortSignal(
+          signal,
+          { timeoutMs: agentTimeoutMs },
+        )
+        try {
+          const agentResult = await execAgentHook(
+            hook,
+            hookName,
+            hookEvent,
+            jsonInput,
+            abortSignal,
+            toolUseContext,
+            randomUUID(),
+            [],
+            'agent_type' in hookInput
+              ? (hookInput.agent_type as string)
+              : undefined,
+          )
+          return hookResultToOutsideReplResult(agentResult, hook.prompt)
+        } finally {
+          cleanup?.()
         }
       }
 
