@@ -2838,3 +2838,36 @@ Expected new output:
 ```text
 ok - elicitation hooks can answer and block results
 ```
+
+## 2026-06-19 status line and file suggestion command build-safety coverage
+
+This round covers the command helpers behind custom status lines and file
+suggestions. These are settings-backed command integrations rather than normal
+hook events, but they share the same trust and command execution surface.
+
+- `scripts/test-build-safety.mjs`
+  - Creates an isolated `settings.json` with `statusLine` and `fileSuggestion`
+    command entries.
+  - Writes small Node command scripts that read JSON from stdin and validate the
+    expected input fields.
+  - Asserts `executeStatusLineCommand()` trims whitespace, drops blank lines,
+    and preserves multiline status output.
+  - Asserts `executeFileSuggestionCommand()` trims and filters command output
+    into suggestion paths.
+
+Risk boundary update: settings-backed status line and file suggestion command
+helpers now have direct build-safety coverage. Remaining gaps are interactive
+PermissionRequest UI and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - status line and file suggestion commands consume JSON input
+```

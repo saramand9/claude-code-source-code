@@ -3337,6 +3337,112 @@ console.log('elicitation hooks OK');`,
   assert.equal(output, 'elicitation hooks OK')
 })
 
+await test('status line and file suggestion commands consume JSON input', async () => {
+  const output = await buildAndRunSnippet(
+    'status-line-file-suggestion-command-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+
+const configDirRel = 'build-src/test-artifacts/status-line-file-suggestion-config';
+await rm(configDirRel, { recursive: true, force: true });
+await mkdir(configDirRel, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDirRel;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const statusCommandPath = configDirRel + '/status-line-command.mjs';
+const fileSuggestionCommandPath = configDirRel + '/file-suggestion-command.mjs';
+await writeFile(
+  statusCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.marker !== 'status-marker-5208') { process.stderr.write('bad status marker'); process.exit(2); }",
+    "if (data.model?.id !== 'model-5208') { process.stderr.write('bad status model'); process.exit(2); }",
+    "if (!String(data.transcriptPath).endsWith('status-transcript-5208.jsonl')) { process.stderr.write('bad status transcript'); process.exit(2); }",
+    "process.stdout.write('  status marker 5208  \\\\n\\\\n second status line 5208  \\\\n');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  fileSuggestionCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.command !== '@fi') { process.stderr.write('bad suggestion command'); process.exit(2); }",
+    "if (!Array.isArray(data.paths) || data.paths[0] !== 'src/app.ts') { process.stderr.write('bad suggestion paths'); process.exit(2); }",
+    "process.stdout.write(' src/app.ts \\\\n\\\\n README.md \\\\n docs/guide.md \\\\n');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  configDirRel + '/settings.json',
+  JSON.stringify(
+    {
+      statusLine: {
+        type: 'command',
+        command: 'node ' + statusCommandPath,
+      },
+      fileSuggestion: {
+        type: 'command',
+        command: 'node ' + fileSuggestionCommandPath,
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeStatusLineCommand, executeFileSuggestionCommand },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+
+const statusLine = await executeStatusLineCommand(
+  {
+    marker: 'status-marker-5208',
+    cwd: process.cwd(),
+    model: { id: 'model-5208', display_name: 'Model 5208' },
+    transcriptPath: 'build-src/test-artifacts/status-transcript-5208.jsonl',
+  },
+  undefined,
+  10000,
+  true,
+);
+if (statusLine !== 'status marker 5208\\nsecond status line 5208') {
+  throw new Error('unexpected status line output: ' + JSON.stringify(statusLine));
+}
+
+const suggestions = await executeFileSuggestionCommand(
+  {
+    command: '@fi',
+    cwd: process.cwd(),
+    paths: ['src/app.ts'],
+  },
+  undefined,
+  10000,
+);
+if (JSON.stringify(suggestions) !== JSON.stringify(['src/app.ts', 'README.md', 'docs/guide.md'])) {
+  throw new Error('unexpected file suggestions: ' + JSON.stringify(suggestions));
+}
+
+console.log('status line file suggestion commands OK');`,
+  )
+  assert.equal(output, 'status line file suggestion commands OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
