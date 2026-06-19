@@ -3942,6 +3942,12 @@ await writeFile(
                 command: "[Console]::Error.WriteLine('config change block marker 5086'); exit 2",
                 timeout: 5,
               },
+              {
+                type: 'command',
+                shell: 'powershell',
+                command: "[Console]::Out.WriteLine('config change audit marker 5086'); exit 0",
+                timeout: 5,
+              },
             ],
           },
         ],
@@ -3954,7 +3960,7 @@ await writeFile(
 );
 
 const [
-  { executeConfigChangeHooks },
+  { executeConfigChangeHooks, hasBlockingResult },
   { setIsInteractive },
   { resetHooksConfigSnapshot },
 ] = await Promise.all([
@@ -3971,14 +3977,20 @@ const userResults = await executeConfigChangeHooks(
   join(configDir, 'settings.json'),
   10000,
 );
-if (userResults.length !== 1) {
-  throw new Error('expected one user settings ConfigChange result: ' + JSON.stringify(userResults));
+if (userResults.length !== 2) {
+  throw new Error('expected two user settings ConfigChange results: ' + JSON.stringify(userResults));
 }
-if (userResults[0].blocked !== true) {
+if (!hasBlockingResult(userResults)) {
   throw new Error('user settings ConfigChange should be blocked: ' + JSON.stringify(userResults));
 }
-if (!String(userResults[0].output).includes('config change block marker 5086')) {
+if (userResults.filter(result => result.blocked === true).length !== 1) {
+  throw new Error('user settings ConfigChange should have one blocking hook: ' + JSON.stringify(userResults));
+}
+if (!userResults.some(result => String(result.output).includes('config change block marker 5086'))) {
   throw new Error('user settings ConfigChange should include hook stderr: ' + JSON.stringify(userResults));
+}
+if (!userResults.some(result => String(result.output).includes('config change audit marker 5086'))) {
+  throw new Error('user settings ConfigChange should include audit hook output: ' + JSON.stringify(userResults));
 }
 
 const policyResults = await executeConfigChangeHooks(
@@ -3986,14 +3998,20 @@ const policyResults = await executeConfigChangeHooks(
   join(configDir, 'policy-settings.json'),
   10000,
 );
-if (policyResults.length !== 1) {
-  throw new Error('expected one policy settings ConfigChange result: ' + JSON.stringify(policyResults));
+if (policyResults.length !== 2) {
+  throw new Error('expected two policy settings ConfigChange results: ' + JSON.stringify(policyResults));
 }
-if (policyResults[0].blocked !== false) {
+if (hasBlockingResult(policyResults)) {
   throw new Error('policy settings ConfigChange must not be blockable: ' + JSON.stringify(policyResults));
 }
-if (!String(policyResults[0].output).includes('config change block marker 5086')) {
+if (!policyResults.every(result => result.blocked === false)) {
+  throw new Error('policy settings ConfigChange should force all hook results non-blocking: ' + JSON.stringify(policyResults));
+}
+if (!policyResults.some(result => String(result.output).includes('config change block marker 5086'))) {
   throw new Error('policy settings ConfigChange should still execute audit hook: ' + JSON.stringify(policyResults));
+}
+if (!policyResults.some(result => String(result.output).includes('config change audit marker 5086'))) {
+  throw new Error('policy settings ConfigChange should preserve audit hook output: ' + JSON.stringify(policyResults));
 }
 
 console.log('config change policy hook OK');`,

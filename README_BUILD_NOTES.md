@@ -3338,6 +3338,42 @@ ok - ConfigChange command hooks receive source metadata
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 ConfigChange multi-hook precedence coverage
+
+This round closes the direct build-safety gap around ConfigChange multi-hook
+blocking and audit aggregation.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the policy-settings ConfigChange regression to run two command
+    hooks for the same matcher: one blocking hook and one successful audit hook.
+  - Verifies user settings keep one blocking result, preserve the audit hook
+    output, and make `hasBlockingResult()` return true.
+  - Verifies policy settings still execute both hooks for audit output, but
+    force every returned result to `blocked: false` so `hasBlockingResult()`
+    remains false.
+
+Risk boundary update: ConfigChange command hooks now have direct build-safety
+coverage for policy settings audit/non-blocking behavior, source metadata,
+matcher filtering, simple-helper timeout cleanup, and multi-hook block/audit
+aggregation. Remaining gaps include complex-shell timeout cleanup and larger
+hook concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - ConfigChange hooks cannot block policy settings
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.
