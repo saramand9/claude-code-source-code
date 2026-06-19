@@ -2696,3 +2696,37 @@ Expected new output:
 ```text
 ok - UserPromptSubmit hooks attach context and block prompts
 ```
+
+## 2026-06-19 compact hook build-safety coverage
+
+This round covers PreCompact and PostCompact hook plumbing. PreCompact hooks can
+replace custom compact instructions, while PostCompact hooks surface user-facing
+audit output after summary generation.
+
+- `scripts/test-build-safety.mjs`
+  - Asserts `executePreCompactHooks()` returns no output before hooks are
+    registered.
+  - Registers manual-trigger callback hooks for `PreCompact` and `PostCompact`.
+  - Verifies PreCompact receives trigger and custom instruction metadata.
+  - Asserts PreCompact callback output becomes `newCustomInstructions` and a
+    user display message.
+  - Verifies PostCompact receives trigger and compact summary metadata.
+  - Asserts manual matchers do not run for the `auto` trigger.
+
+Risk boundary update: compact lifecycle hook metadata, trigger matching, and
+callback output propagation now have direct build-safety coverage. Remaining
+gaps are subagent lifecycle hooks, teammate/task lifecycle hooks, interactive
+PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - compact hooks rewrite instructions and report summaries
+```

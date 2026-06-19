@@ -2595,6 +2595,141 @@ console.log('user prompt submit hook OK');`,
   assert.equal(output, 'user prompt submit hook OK')
 })
 
+await test('compact hooks rewrite instructions and report summaries', async () => {
+  const output = await buildAndRunSnippet(
+    'compact-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/compact-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executePreCompactHooks, executePostCompactHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const emptyPre = await executePreCompactHooks({
+  trigger: 'manual',
+  customInstructions: 'unused empty compact instructions',
+});
+if (Object.keys(emptyPre).length !== 0) {
+  throw new Error('PreCompact should be empty before registration: ' + JSON.stringify(emptyPre));
+}
+
+const customInstructions = 'existing compact instructions marker 3486';
+const rewrittenInstructions = 'rewritten compact instructions marker 3486';
+const compactSummary = 'compact summary marker 3486';
+const postMessage = 'post compact user message marker 3486';
+let preCalls = 0;
+let postCalls = 0;
+registerHookCallbacks({
+  PreCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            preCalls += 1;
+            if (hookInput.hook_event_name !== 'PreCompact') {
+              throw new Error('unexpected pre event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.trigger !== 'manual') {
+              throw new Error('unexpected pre trigger: ' + hookInput.trigger);
+            }
+            if (hookInput.custom_instructions !== customInstructions) {
+              throw new Error('unexpected custom instructions: ' + hookInput.custom_instructions);
+            }
+            return { systemMessage: rewrittenInstructions };
+          },
+        },
+      ],
+    },
+  ],
+  PostCompact: [
+    {
+      matcher: 'manual',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            postCalls += 1;
+            if (hookInput.hook_event_name !== 'PostCompact') {
+              throw new Error('unexpected post event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.trigger !== 'manual') {
+              throw new Error('unexpected post trigger: ' + hookInput.trigger);
+            }
+            if (hookInput.compact_summary !== compactSummary) {
+              throw new Error('unexpected compact summary: ' + hookInput.compact_summary);
+            }
+            return { systemMessage: postMessage };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const preResult = await executePreCompactHooks({
+  trigger: 'manual',
+  customInstructions,
+});
+if (preCalls !== 1) {
+  throw new Error('PreCompact hook should run once, got ' + preCalls);
+}
+if (preResult.newCustomInstructions !== rewrittenInstructions) {
+  throw new Error('PreCompact should return rewritten instructions: ' + JSON.stringify(preResult));
+}
+if (!String(preResult.userDisplayMessage).includes('PreCompact [callback] completed successfully: ' + rewrittenInstructions)) {
+  throw new Error('PreCompact should report callback output: ' + JSON.stringify(preResult));
+}
+
+const skippedPre = await executePreCompactHooks({
+  trigger: 'auto',
+  customInstructions,
+});
+if (preCalls !== 1) {
+  throw new Error('PreCompact manual matcher should skip auto trigger, got ' + preCalls);
+}
+if (Object.keys(skippedPre).length !== 0) {
+  throw new Error('skipped PreCompact should be empty: ' + JSON.stringify(skippedPre));
+}
+
+const postResult = await executePostCompactHooks({
+  trigger: 'manual',
+  compactSummary,
+});
+if (postCalls !== 1) {
+  throw new Error('PostCompact hook should run once, got ' + postCalls);
+}
+if (!String(postResult.userDisplayMessage).includes('PostCompact [callback] completed successfully: ' + postMessage)) {
+  throw new Error('PostCompact should report callback output: ' + JSON.stringify(postResult));
+}
+
+const skippedPost = await executePostCompactHooks({
+  trigger: 'auto',
+  compactSummary,
+});
+if (postCalls !== 1) {
+  throw new Error('PostCompact manual matcher should skip auto trigger, got ' + postCalls);
+}
+if (Object.keys(skippedPost).length !== 0) {
+  throw new Error('skipped PostCompact should be empty: ' + JSON.stringify(skippedPost));
+}
+
+console.log('compact hooks OK');`,
+  )
+  assert.equal(output, 'compact hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
