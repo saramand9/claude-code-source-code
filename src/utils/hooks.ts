@@ -1047,7 +1047,8 @@ async function execCommandHook(
         hookEvent === 'CwdChanged' ||
         hookEvent === 'FileChanged' ||
         hookEvent === 'Notification' ||
-        hookEvent === 'SessionEnd')
+        hookEvent === 'SessionEnd' ||
+        hookEvent === 'InstructionsLoaded')
         ? getDirectWindowsHelperSpawnArgs(finalCommand)
         : null
     const shell = isWindows ? findGitBashPath() : true

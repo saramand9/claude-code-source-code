@@ -5755,8 +5755,14 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'instructions-loaded-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'instructions-loaded-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const markerPath = join(commandDir, 'instructions-loaded-marker.json');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'instructions-loaded-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'instructions-loaded-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const filePath = 'build-src/test-artifacts/project-rules-command-3813.md';
 const triggerFilePath = 'build-src/test-artifacts/src/app-command-3813.ts';
 const parentFilePath = 'build-src/test-artifacts/CLAUDE-command.md';
@@ -5775,6 +5781,19 @@ await writeFile(
     "if (data.trigger_file_path !== '" + triggerFilePath + "') { process.stderr.write('bad trigger ' + data.trigger_file_path); process.exit(8); }",
     "if (data.parent_file_path !== '" + parentFilePath + "') { process.stderr.write('bad parent ' + data.parent_file_path); process.exit(9); }",
     "await writeFile('" + markerPathForScript + "', JSON.stringify({ loadReason: data.load_reason, memoryType: data.memory_type }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write('instructions loaded timeout output should not matter');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late instructions loaded timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -5838,6 +5857,37 @@ try {
 }
 if (skippedCreated) {
   throw new Error('InstructionsLoaded command matcher should skip session_start');
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  InstructionsLoaded: [
+    {
+      matcher: 'include',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+await executeInstructionsLoadedHooks(filePath, 'Project', 'include', {
+  timeoutMs: 10000,
+});
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('InstructionsLoaded timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('InstructionsLoaded timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('instructions loaded command hook OK');`,
