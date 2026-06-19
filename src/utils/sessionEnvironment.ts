@@ -114,7 +114,11 @@ export async function getSessionEnvironmentScript(
     for (const file of hookFiles) {
       const filePath = join(sessionEnvDir, file)
       try {
-        const content = (await readFile(filePath, 'utf8')).trim()
+        const content = sanitizeHookEnvFile(
+          format,
+          await readFile(filePath, 'utf8'),
+          filePath,
+        )
         if (content) {
           scripts.push(content)
         }
@@ -171,11 +175,42 @@ const HOOK_ENV_EXTENSION: Record<SessionEnvironmentFormat, 'sh' | 'ps1'> = {
 const HOOK_ENV_REGEX =
   /^(setup|sessionstart|cwdchanged|filechanged)-hook-(\d+)\.(sh|ps1)$/
 
+const BASH_ENV_ASSIGNMENT =
+  /^\s*export\s+[A-Za-z_][A-Za-z0-9_]*=(?:'[^'\r\n]*'|"[^"\r\n]*"|[^;&|<>()`\r\n]*)\s*$/
+const POWERSHELL_ENV_ASSIGNMENT =
+  /^\s*\$env:[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'[^'\r\n]*'|"[^"\r\n]*"|[^;&|<>()`\r\n]*)\s*$/
+
 function shouldLoadExplicitEnvFile(
   format: SessionEnvironmentFormat,
   envFile: string,
 ): boolean {
   return format === 'sh' || envFile.toLowerCase().endsWith('.ps1')
+}
+
+function sanitizeHookEnvFile(
+  format: SessionEnvironmentFormat,
+  content: string,
+  filePath: string,
+): string {
+  const assignmentPattern =
+    format === 'powershell'
+      ? POWERSHELL_ENV_ASSIGNMENT
+      : BASH_ENV_ASSIGNMENT
+  const lines: string[] = []
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
+      continue
+    }
+    if (assignmentPattern.test(rawLine)) {
+      lines.push(rawLine)
+      continue
+    }
+    logForDebugging(`Ignoring malformed session env line in ${filePath}`)
+  }
+
+  return lines.join('\n').trim()
 }
 
 function sortHookEnvFiles(a: string, b: string): number {

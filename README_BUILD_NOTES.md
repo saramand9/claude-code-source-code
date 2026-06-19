@@ -3183,6 +3183,48 @@ ok - PermissionDenied command hooks can request retry
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 session env malformed-line filtering
+
+This round hardens session environment files written by lifecycle hooks.
+
+- `src/utils/sessionEnvironment.ts`
+  - Sanitizes hook-generated session env files before prepending them to later
+    shell commands.
+  - Keeps supported Bash lines in the form `export NAME=...`.
+  - Keeps supported PowerShell lines in the form `$env:NAME = ...`.
+  - Ignores blank, comment, and malformed lines while logging a debug message.
+  - Leaves explicit parent `CLAUDE_ENV_FILE` loading unchanged so external
+    activation scripts keep their existing behavior.
+- `scripts/test-build-safety.mjs`
+  - Extends the Bash session-env injection regression with a malformed line and
+    a semicolon-bearing assignment, then verifies only the valid export reaches
+    the generated Bash command.
+  - Extends the PowerShell session-env injection regression with malformed
+    PowerShell statements and verifies only valid `$env:` assignments are
+    prepended.
+
+Risk boundary update: hook-written session env files can no longer break later
+Bash or PowerShell command startup through accidental malformed lines. Remaining
+gaps include broader env-file quoting variants and end-to-end execution of a
+full PowerShell lifecycle hook.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - session environment hook files are injected into bash commands
+ok - powershell session environment hook files are isolated and injected
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.

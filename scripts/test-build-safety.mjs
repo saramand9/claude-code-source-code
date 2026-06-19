@@ -4285,9 +4285,20 @@ setIsInteractive(false);
 const setupPath = await getHookEnvFilePath('Setup', 1);
 const sessionStartPath = await getHookEnvFilePath('SessionStart', 0);
 const cwdChangedPath = await getHookEnvFilePath('CwdChanged', 3);
+const fileChangedPath = await getHookEnvFilePath('FileChanged', 4);
 await writeFile(sessionStartPath, 'export CLAUDE_SESSION_START_HOOK=8463\\n', 'utf8');
 await writeFile(cwdChangedPath, 'export CLAUDE_CWD_CHANGED_HOOK=8463\\n', 'utf8');
 await writeFile(setupPath, 'export CLAUDE_SETUP_HOOK=8463\\n', 'utf8');
+await writeFile(
+  fileChangedPath,
+  [
+    'export CLAUDE_FILE_CHANGED_HOOK=8463',
+    'this is not a valid env assignment',
+    'export CLAUDE_MALFORMED_HOOK=bad; exit 7',
+    '',
+  ].join('\\n'),
+  'utf8',
+);
 
 invalidateSessionEnvCache();
 const sessionScript = await getSessionEnvironmentScript();
@@ -4297,10 +4308,14 @@ if (!sessionScript) {
 const setupIndex = sessionScript.indexOf('CLAUDE_SETUP_HOOK=8463');
 const sessionStartIndex = sessionScript.indexOf('CLAUDE_SESSION_START_HOOK=8463');
 const cwdChangedIndex = sessionScript.indexOf('CLAUDE_CWD_CHANGED_HOOK=8463');
-if (setupIndex === -1 || sessionStartIndex === -1 || cwdChangedIndex === -1) {
+const fileChangedIndex = sessionScript.indexOf('CLAUDE_FILE_CHANGED_HOOK=8463');
+if (setupIndex === -1 || sessionStartIndex === -1 || cwdChangedIndex === -1 || fileChangedIndex === -1) {
   throw new Error('session environment script missing hook content: ' + JSON.stringify(sessionScript));
 }
-if (!(setupIndex < sessionStartIndex && sessionStartIndex < cwdChangedIndex)) {
+if (sessionScript.includes('not a valid env assignment') || sessionScript.includes('CLAUDE_MALFORMED_HOOK')) {
+  throw new Error('session environment script should filter malformed hook content: ' + JSON.stringify(sessionScript));
+}
+if (!(setupIndex < sessionStartIndex && sessionStartIndex < cwdChangedIndex && cwdChangedIndex < fileChangedIndex)) {
   throw new Error('session environment hook script order is unstable: ' + JSON.stringify(sessionScript));
 }
 
@@ -4317,6 +4332,12 @@ if (!commandString.includes('export CLAUDE_SESSION_START_HOOK=8463')) {
 }
 if (!commandString.includes('export CLAUDE_CWD_CHANGED_HOOK=8463')) {
   throw new Error('bash command should include cwd changed env script: ' + commandString);
+}
+if (!commandString.includes('export CLAUDE_FILE_CHANGED_HOOK=8463')) {
+  throw new Error('bash command should include file changed env script: ' + commandString);
+}
+if (commandString.includes('not a valid env assignment') || commandString.includes('CLAUDE_MALFORMED_HOOK')) {
+  throw new Error('bash command should not include malformed env script lines: ' + commandString);
 }
 
 console.log('session environment bash injection OK');`,
@@ -4359,7 +4380,16 @@ if (!psSetupPath.endsWith('.ps1') || !psFileChangedPath.endsWith('.ps1')) {
   throw new Error('PowerShell hook env files should use .ps1: ' + JSON.stringify({ psSetupPath, psFileChangedPath }));
 }
 await writeFile(shSetupPath, 'export CLAUDE_SH_ONLY_HOOK=8464\\n', 'utf8');
-await writeFile(psFileChangedPath, "$env:CLAUDE_PS_FILE_HOOK = '8464'\\n", 'utf8');
+await writeFile(
+  psFileChangedPath,
+  [
+    "$env:CLAUDE_PS_FILE_HOOK = '8464'",
+    "Write-Error 'malformed env content'",
+    "$env:CLAUDE_PS_MALFORMED_HOOK = 'bad'; throw 'bad'",
+    '',
+  ].join('\\n'),
+  'utf8',
+);
 await writeFile(psSetupPath, "$env:CLAUDE_PS_SETUP_HOOK = '8464'\\n", 'utf8');
 
 invalidateSessionEnvCache();
@@ -4375,6 +4405,9 @@ if (!psScript.includes("$env:CLAUDE_PS_FILE_HOOK = '8464'")) {
 }
 if (psScript.includes('CLAUDE_SH_ONLY_HOOK')) {
   throw new Error('PowerShell session script should not include .sh content: ' + JSON.stringify(psScript));
+}
+if (psScript.includes('Write-Error') || psScript.includes('CLAUDE_PS_MALFORMED_HOOK')) {
+  throw new Error('PowerShell session script should filter malformed hook content: ' + JSON.stringify(psScript));
 }
 if (!(psScript.indexOf('CLAUDE_PS_SETUP_HOOK') < psScript.indexOf('CLAUDE_PS_FILE_HOOK'))) {
   throw new Error('PowerShell session script order is unstable: ' + JSON.stringify(psScript));
@@ -4401,6 +4434,9 @@ if (!commandString.includes("$env:CLAUDE_PS_FILE_HOOK = '8464'")) {
 }
 if (commandString.includes('CLAUDE_SH_ONLY_HOOK')) {
   throw new Error('PowerShell command should not include bash env script: ' + commandString);
+}
+if (commandString.includes('Write-Error') || commandString.includes('CLAUDE_PS_MALFORMED_HOOK')) {
+  throw new Error('PowerShell command should not include malformed env script lines: ' + commandString);
 }
 if (!(commandString.indexOf("$env:CLAUDE_PS_SETUP_HOOK = '8464'") < commandString.indexOf('Write-Output $env:CLAUDE_PS_SETUP_HOOK'))) {
   throw new Error('PowerShell env script should be prepended before command: ' + commandString);
