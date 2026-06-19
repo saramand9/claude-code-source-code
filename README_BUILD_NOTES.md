@@ -3389,6 +3389,40 @@ ok - worktree command hooks create and remove paths
 100/100 build-safety tests passed.
 ```
 
+## 2026-06-19 Environment command hook input coverage
+
+This round tightens environment hook coverage for real command hooks that read
+stdin and receive `CLAUDE_ENV_FILE`.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture shared by `CwdChanged` and `FileChanged`.
+  - Verifies commands receive `old_cwd`/`new_cwd` and `file_path`/`event`
+    metadata through JSON stdin.
+  - Verifies non-PowerShell environment hooks receive `CLAUDE_ENV_FILE`.
+  - Asserts command stdout still contributes system messages and watch paths.
+  - Asserts `FileChanged` matcher misses skip unrelated filenames.
+
+Risk boundary update: environment command hooks now have direct coverage for
+JSON input delivery, environment-file injection, watch path output, and matcher
+filtering. Remaining gaps include reading the session environment back into
+Bash execution on non-Windows platforms and malformed env-file content.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - environment command hooks receive input and env files
+101/101 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the

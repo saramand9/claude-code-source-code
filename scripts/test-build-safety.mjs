@@ -3731,6 +3731,157 @@ console.log('environment watch hooks OK');`,
   assert.equal(output, 'environment watch hooks OK')
 })
 
+await test('environment command hooks receive input and env files', async () => {
+  const output = await buildAndRunSnippet(
+    'environment-command-input-hook-test',
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+const { basename, join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'environment-command-input-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandPath = join(configDir, 'environment-command-input-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(configDir, 'environment-command-marker.jsonl');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const oldCwd = join(process.cwd(), 'build-src', 'test-artifacts', 'old-env-cwd-8462').replace(/\\\\/g, '/');
+const newCwd = process.cwd().replace(/\\\\/g, '/');
+const changedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'tracked-command-env-file-8462.env');
+const changedFileForHook = changedFile.replace(/\\\\/g, '/');
+const cwdWatchPath = join(process.cwd(), 'build-src', 'test-artifacts', 'cwd-command-watch-8462.txt').replace(/\\\\/g, '/');
+const fileWatchPath = join(process.cwd(), 'build-src', 'test-artifacts', 'file-command-watch-8462.txt').replace(/\\\\/g, '/');
+const cwdSystemMessage = 'cwd command system marker 8462';
+const fileSystemMessage = 'file command system marker 8462';
+await writeFile(
+  commandPath,
+  [
+    "import { appendFile, writeFile } from 'node:fs/promises';",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "const envFile = process.env.CLAUDE_ENV_FILE;",
+    "if (!envFile) { process.stderr.write('missing CLAUDE_ENV_FILE'); process.exit(3); }",
+    "if (data.hook_event_name === 'CwdChanged') {",
+    "  if (String(data.old_cwd).replace(/\\\\\\\\/g, '/') !== '" + oldCwd + "') { process.stderr.write('bad old cwd ' + data.old_cwd); process.exit(4); }",
+    "  if (String(data.new_cwd).replace(/\\\\\\\\/g, '/') !== '" + newCwd + "') { process.stderr.write('bad new cwd ' + data.new_cwd); process.exit(5); }",
+    "  await writeFile(envFile, 'export CLAUDE_TEST_CWD_HOOK=8462\\\\n', 'utf8');",
+    "  await appendFile('" + markerPathForScript + "', JSON.stringify({ event: data.hook_event_name, envFile }) + '\\\\n', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ systemMessage: '" + cwdSystemMessage + "', hookSpecificOutput: { hookEventName: 'CwdChanged', watchPaths: ['" + cwdWatchPath + "'] } }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'FileChanged') {",
+    "  if (String(data.file_path).replace(/\\\\\\\\/g, '/') !== '" + changedFileForHook + "') { process.stderr.write('bad file path ' + data.file_path); process.exit(6); }",
+    "  if (data.event !== 'add') { process.stderr.write('bad file event ' + data.event); process.exit(7); }",
+    "  await writeFile(envFile, 'export CLAUDE_TEST_FILE_HOOK=8462\\\\n', 'utf8');",
+    "  await appendFile('" + markerPathForScript + "', JSON.stringify({ event: data.hook_event_name, envFile }) + '\\\\n', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ systemMessage: '" + fileSystemMessage + "', hookSpecificOutput: { hookEventName: 'FileChanged', watchPaths: ['" + fileWatchPath + "'] } }));",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad event ' + data.hook_event_name);",
+    "process.exit(8);",
+  ].join('\\n'),
+  'utf8',
+);
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        CwdChanged: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + commandPathForHook,
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+        FileChanged: [
+          {
+            matcher: basename(changedFile),
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + commandPathForHook,
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeCwdChangedHooks, executeFileChangedHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const cwdResult = await executeCwdChangedHooks(oldCwd, newCwd, 10000);
+if (cwdResult.results.length !== 1 || cwdResult.results[0].succeeded !== true) {
+  throw new Error('CwdChanged command hook should succeed: ' + JSON.stringify(cwdResult));
+}
+if (!cwdResult.watchPaths.includes(cwdWatchPath)) {
+  throw new Error('CwdChanged command should return watch path: ' + JSON.stringify(cwdResult.watchPaths));
+}
+if (!cwdResult.systemMessages.includes(cwdSystemMessage)) {
+  throw new Error('CwdChanged command should return system message: ' + JSON.stringify(cwdResult.systemMessages));
+}
+
+const fileResult = await executeFileChangedHooks(changedFile, 'add', 10000);
+if (fileResult.results.length !== 1 || fileResult.results[0].succeeded !== true) {
+  throw new Error('FileChanged command hook should succeed: ' + JSON.stringify(fileResult));
+}
+if (!fileResult.watchPaths.includes(fileWatchPath)) {
+  throw new Error('FileChanged command should return watch path: ' + JSON.stringify(fileResult.watchPaths));
+}
+if (!fileResult.systemMessages.includes(fileSystemMessage)) {
+  throw new Error('FileChanged command should return system message: ' + JSON.stringify(fileResult.systemMessages));
+}
+
+const markers = (await readFile(markerPath, 'utf8'))
+  .trim()
+  .split('\\n')
+  .map(line => JSON.parse(line));
+if (markers.length !== 2) {
+  throw new Error('expected two environment command markers: ' + JSON.stringify(markers));
+}
+if (!markers.some(marker => marker.event === 'CwdChanged' && String(marker.envFile).includes('cwdchanged-hook-0.sh'))) {
+  throw new Error('missing CwdChanged CLAUDE_ENV_FILE marker: ' + JSON.stringify(markers));
+}
+if (!markers.some(marker => marker.event === 'FileChanged' && String(marker.envFile).includes('filechanged-hook-0.sh'))) {
+  throw new Error('missing FileChanged CLAUDE_ENV_FILE marker: ' + JSON.stringify(markers));
+}
+
+const skippedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'ignored-command-env-file-8462.env');
+const skippedResult = await executeFileChangedHooks(skippedFile, 'add', 10000);
+if (skippedResult.results.length !== 0) {
+  throw new Error('FileChanged command matcher should skip other basenames: ' + JSON.stringify(skippedResult));
+}
+
+console.log('environment command input hooks OK');`,
+  )
+  assert.equal(output, 'environment command input hooks OK')
+})
+
 await test('worktree hooks create and remove paths', async () => {
   const output = await buildAndRunSnippet(
     'worktree-hook-test',
