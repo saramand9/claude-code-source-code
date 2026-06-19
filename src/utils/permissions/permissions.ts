@@ -11,6 +11,7 @@ import { shouldUseSandbox } from '../../tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
 import { REPL_TOOL_NAME } from '../../tools/REPLTool/constants.js'
+import type { PermissionRequestResult } from '../../types/hooks.js'
 import type { AssistantMessage } from '../../types/message.js'
 import { extractOutputRedirections } from '../bash/commands.js'
 import { logForDebugging } from '../debug.js'
@@ -406,6 +407,9 @@ async function runPermissionRequestHooksForHeadlessAgent(
   suggestions: PermissionUpdate[] | undefined,
 ): Promise<PermissionDecision | null> {
   try {
+    let allowDecision:
+      | Extract<PermissionRequestResult, { behavior: 'allow' }>
+      | null = null
     for await (const hookResult of executePermissionRequestHooks(
       tool.name,
       toolUseID,
@@ -420,26 +424,8 @@ async function runPermissionRequestHooksForHeadlessAgent(
       }
       const decision = hookResult.permissionRequestResult
       if (decision.behavior === 'allow') {
-        const finalInput = decision.updatedInput ?? input
-        // Persist permission updates if provided
-        if (decision.updatedPermissions?.length) {
-          persistPermissionUpdates(decision.updatedPermissions as PermissionUpdate[])
-          context.setAppState(prev => ({
-            ...prev,
-            toolPermissionContext: applyPermissionUpdates(
-              prev.toolPermissionContext,
-              decision.updatedPermissions! as PermissionUpdate[],
-            ),
-          }))
-        }
-        return {
-          behavior: 'allow',
-          updatedInput: finalInput,
-          decisionReason: {
-            type: 'hook',
-            hookName: 'PermissionRequest',
-          },
-        }
+        allowDecision = decision
+        continue
       }
       if (decision.behavior === 'deny') {
         if (decision.interrupt) {
@@ -457,6 +443,30 @@ async function runPermissionRequestHooksForHeadlessAgent(
             reason: decision.message,
           },
         }
+      }
+    }
+    if (allowDecision) {
+      const finalInput = allowDecision.updatedInput ?? input
+      const updatedPermissions = allowDecision.updatedPermissions
+      // Persist permission updates only after all hooks finish so a later deny
+      // cannot race with and partially apply an earlier allow.
+      if (updatedPermissions?.length) {
+        persistPermissionUpdates(updatedPermissions as PermissionUpdate[])
+        context.setAppState(prev => ({
+          ...prev,
+          toolPermissionContext: applyPermissionUpdates(
+            prev.toolPermissionContext,
+            updatedPermissions as PermissionUpdate[],
+          ),
+        }))
+      }
+      return {
+        behavior: 'allow',
+        updatedInput: finalInput,
+        decisionReason: {
+          type: 'hook',
+          hookName: 'PermissionRequest',
+        },
       }
     }
   } catch (error) {

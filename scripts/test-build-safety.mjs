@@ -1818,6 +1818,60 @@ if (allowed.updatedInput?.content !== 'updated by hook') {
   throw new Error('PermissionRequest hook allow should preserve updated input: ' + JSON.stringify(allowed));
 }
 
+clearRegisteredHooks();
+let fastAllowCalls = 0;
+let slowDenyCalls = 0;
+registerHookCallbacks({
+  PermissionRequest: [
+    {
+      matcher: 'Write',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async () => {
+            fastAllowCalls += 1;
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'allow',
+                  updatedInput: { ...input, content: 'fast allow should lose' },
+                },
+              },
+            };
+          },
+        },
+        {
+          type: 'callback',
+          callback: async () => {
+            slowDenyCalls += 1;
+            await new Promise(resolve => setTimeout(resolve, 25));
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'deny',
+                  message: 'slow deny should win',
+                },
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+const concurrentDenied = await runPermissionCheck();
+if (fastAllowCalls !== 1 || slowDenyCalls !== 1) {
+  throw new Error('concurrent PermissionRequest hooks should both run: ' + fastAllowCalls + '/' + slowDenyCalls);
+}
+if (concurrentDenied.behavior !== 'deny' || concurrentDenied.decisionReason?.hookName !== 'PermissionRequest') {
+  throw new Error('PermissionRequest deny should win over faster allow: ' + JSON.stringify(concurrentDenied));
+}
+if (concurrentDenied.message !== 'slow deny should win') {
+  throw new Error('PermissionRequest deny should preserve slow deny message: ' + JSON.stringify(concurrentDenied));
+}
+
 console.log('permission request headless hook OK');`,
   )
   assert.equal(output, 'permission request headless hook OK')

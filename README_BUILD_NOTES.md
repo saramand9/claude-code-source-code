@@ -3136,6 +3136,43 @@ Expected new output:
 ok - PermissionRequest maps tools to interactive components
 ```
 
+## 2026-06-19 PermissionRequest multi-hook deny precedence
+
+This round fixes and covers a headless PermissionRequest concurrency risk.
+
+- `src/utils/permissions/permissions.ts`
+  - Stops returning immediately on the first `allow` decision from a
+    PermissionRequest hook.
+  - Stores an allow decision, continues consuming the hook generator, and lets
+    any later `deny` decision win.
+  - Delays `updatedPermissions` persistence until all PermissionRequest hooks
+    finish, so a later deny cannot race with and partially apply an earlier
+    allow.
+- `scripts/test-build-safety.mjs`
+  - Extends the headless PermissionRequest callback test with a fast `allow`
+    hook and a slower `deny` hook.
+  - Verifies both hooks run, the final decision is deny, and the deny message is
+    preserved.
+
+Risk boundary update: headless PermissionRequest decisions are now fail-closed
+across concurrent hooks instead of depending on completion order. Remaining
+gaps are full keyboard-driven TTY interaction and broader hook concurrency
+cases outside PermissionRequest.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PermissionRequest hooks decide headless permission prompts
+```
+
 ## 2026-06-19 outside-REPL command hook failure coverage
 
 This round applies the same failed-command JSON decision guard to hooks executed
