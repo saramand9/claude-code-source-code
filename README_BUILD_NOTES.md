@@ -2765,3 +2765,39 @@ Expected new output:
 ```text
 ok - subagent lifecycle hooks attach context and block stop
 ```
+
+## 2026-06-19 teammate task lifecycle hook build-safety coverage
+
+This round covers teammate idle and task lifecycle hook plumbing. These hooks
+allow team workflows to keep a teammate active, prevent task creation, or
+prevent task completion with feedback.
+
+- `scripts/test-build-safety.mjs`
+  - Registers callback hooks for `TeammateIdle`, `TaskCreated`, and
+    `TaskCompleted`.
+  - Verifies TeammateIdle receives teammate/team metadata and permission mode.
+  - Verifies TaskCreated receives task id, subject, description, teammate, and
+    team metadata.
+  - Verifies TaskCompleted receives the same task ownership metadata.
+  - Asserts all three lifecycle hooks return blocking feedback and hook
+    attachments.
+  - Asserts the user-facing feedback helper for each hook preserves the block
+    reason.
+
+Risk boundary update: teammate idle, task creation, and task completion blocking
+paths now have direct build-safety coverage. Remaining gaps are interactive
+PermissionRequest UI, elicitation hooks, status/file suggestion commands, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - teammate task lifecycle hooks block with metadata
+```

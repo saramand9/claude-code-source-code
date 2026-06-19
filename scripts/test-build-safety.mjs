@@ -2935,6 +2935,230 @@ console.log('subagent lifecycle hooks OK');`,
   assert.equal(output, 'subagent lifecycle hooks OK')
 })
 
+await test('teammate task lifecycle hooks block with metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'teammate-task-lifecycle-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/teammate-task-lifecycle-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  {
+    executeTeammateIdleHooks,
+    executeTaskCreatedHooks,
+    executeTaskCompletedHooks,
+    getTeammateIdleHookMessage,
+    getTaskCreatedHookMessage,
+    getTaskCompletedHookMessage,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const teammateName = 'researcher-8294';
+const teamName = 'analysis-team-8294';
+const taskId = 'task-8294';
+const taskSubject = 'Review lifecycle hooks 8294';
+const taskDescription = 'Task lifecycle hook metadata marker 8294';
+const idleReason = 'teammate idle block marker 8294';
+const createReason = 'task created block marker 8294';
+const completeReason = 'task completed block marker 8294';
+let idleCalls = 0;
+let createCalls = 0;
+let completeCalls = 0;
+registerHookCallbacks({
+  TeammateIdle: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            idleCalls += 1;
+            if (hookInput.hook_event_name !== 'TeammateIdle') {
+              throw new Error('unexpected idle event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.teammate_name !== teammateName || hookInput.team_name !== teamName) {
+              throw new Error('unexpected idle teammate metadata: ' + JSON.stringify(hookInput));
+            }
+            if (hookInput.permission_mode !== 'default') {
+              throw new Error('unexpected idle permission mode: ' + hookInput.permission_mode);
+            }
+            return { decision: 'block', reason: idleReason };
+          },
+        },
+      ],
+    },
+  ],
+  TaskCreated: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            createCalls += 1;
+            if (hookInput.hook_event_name !== 'TaskCreated') {
+              throw new Error('unexpected create event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.task_id !== taskId || hookInput.task_subject !== taskSubject) {
+              throw new Error('unexpected created task metadata: ' + JSON.stringify(hookInput));
+            }
+            if (hookInput.task_description !== taskDescription) {
+              throw new Error('unexpected created task description: ' + hookInput.task_description);
+            }
+            if (hookInput.teammate_name !== teammateName || hookInput.team_name !== teamName) {
+              throw new Error('unexpected created teammate metadata: ' + JSON.stringify(hookInput));
+            }
+            return { decision: 'block', reason: createReason };
+          },
+        },
+      ],
+    },
+  ],
+  TaskCompleted: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            completeCalls += 1;
+            if (hookInput.hook_event_name !== 'TaskCompleted') {
+              throw new Error('unexpected complete event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.task_id !== taskId || hookInput.task_subject !== taskSubject) {
+              throw new Error('unexpected completed task metadata: ' + JSON.stringify(hookInput));
+            }
+            if (hookInput.task_description !== taskDescription) {
+              throw new Error('unexpected completed task description: ' + hookInput.task_description);
+            }
+            if (hookInput.teammate_name !== teammateName || hookInput.team_name !== teamName) {
+              throw new Error('unexpected completed teammate metadata: ' + JSON.stringify(hookInput));
+            }
+            return { decision: 'block', reason: completeReason };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+
+async function collect(generator) {
+  const results = [];
+  for await (const result of generator) {
+    results.push(result);
+  }
+  return results;
+}
+function assertBlocked(results, eventName, reason) {
+  const blocking = results.find(result =>
+    result.blockingError?.blockingError === reason &&
+    result.blockingError?.command === 'callback'
+  );
+  if (!blocking) {
+    throw new Error(eventName + ' should return blocking feedback: ' + JSON.stringify(results));
+  }
+  const attachment = results.find(result => {
+    const candidate = result.message?.attachment;
+    return (
+      candidate?.type === 'hook_blocking_error' &&
+      candidate.hookEvent === eventName &&
+      candidate.blockingError?.blockingError === reason
+    );
+  });
+  if (!attachment) {
+    throw new Error(eventName + ' should return blocking attachment: ' + JSON.stringify(results));
+  }
+}
+
+const idleResults = await collect(executeTeammateIdleHooks(
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+));
+if (idleCalls !== 1) {
+  throw new Error('TeammateIdle hook should run once, got ' + idleCalls);
+}
+assertBlocked(idleResults, 'TeammateIdle', idleReason);
+
+const createdResults = await collect(executeTaskCreatedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+if (createCalls !== 1) {
+  throw new Error('TaskCreated hook should run once, got ' + createCalls);
+}
+assertBlocked(createdResults, 'TaskCreated', createReason);
+
+const completedResults = await collect(executeTaskCompletedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+if (completeCalls !== 1) {
+  throw new Error('TaskCompleted hook should run once, got ' + completeCalls);
+}
+assertBlocked(completedResults, 'TaskCompleted', completeReason);
+
+if (!getTeammateIdleHookMessage({ blockingError: idleReason, command: 'callback' }).includes(idleReason)) {
+  throw new Error('TeammateIdle helper should include block reason');
+}
+if (!getTaskCreatedHookMessage({ blockingError: createReason, command: 'callback' }).includes(createReason)) {
+  throw new Error('TaskCreated helper should include block reason');
+}
+if (!getTaskCompletedHookMessage({ blockingError: completeReason, command: 'callback' }).includes(completeReason)) {
+  throw new Error('TaskCompleted helper should include block reason');
+}
+
+console.log('teammate task lifecycle hooks OK');`,
+  )
+  assert.equal(output, 'teammate task lifecycle hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
