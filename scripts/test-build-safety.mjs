@@ -3556,6 +3556,126 @@ console.log('status line file suggestion fallback OK');`,
   assert.equal(output, 'status line file suggestion fallback OK')
 })
 
+await test('status line and file suggestion commands respect pre-aborted signals', async () => {
+  const output = await buildAndRunSnippet(
+    'status-line-file-suggestion-aborted-test',
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
+
+const configDirRel = 'build-src/test-artifacts/status-line-file-suggestion-aborted-config';
+await rm(configDirRel, { recursive: true, force: true });
+await mkdir(configDirRel, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDirRel;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const statusCommandPath = configDirRel + '/status-line-aborted-command.mjs';
+const suggestionCommandPath = configDirRel + '/file-suggestion-aborted-command.mjs';
+const statusMarkerPath = configDirRel + '/status-command-ran.txt';
+const suggestionMarkerPath = configDirRel + '/suggestion-command-ran.txt';
+
+await writeFile(
+  statusCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync(" + JSON.stringify(statusMarkerPath) + ", 'ran');",
+    "process.stdout.write('aborted status should not render');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  suggestionCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync(" + JSON.stringify(suggestionMarkerPath) + ", 'ran');",
+    "process.stdout.write('aborted-suggestion.ts');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  configDirRel + '/settings.json',
+  JSON.stringify(
+    {
+      statusLine: {
+        type: 'command',
+        command: 'node ' + statusCommandPath,
+      },
+      fileSuggestion: {
+        type: 'command',
+        command: 'node ' + suggestionCommandPath,
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeStatusLineCommand, executeFileSuggestionCommand },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+
+async function exists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+const controller = new AbortController();
+controller.abort('pre-aborted status helper marker 4871');
+
+const statusLine = await executeStatusLineCommand(
+  {
+    marker: 'status-marker-4871',
+    cwd: process.cwd(),
+    model: { id: 'model-4871', display_name: 'Model 4871' },
+    transcriptPath: 'build-src/test-artifacts/status-transcript-4871.jsonl',
+  },
+  controller.signal,
+  10000,
+  true,
+);
+if (statusLine !== undefined) {
+  throw new Error('aborted status line output should be ignored: ' + JSON.stringify(statusLine));
+}
+const suggestions = await executeFileSuggestionCommand(
+  {
+    command: '@ab',
+    cwd: process.cwd(),
+    paths: ['src/aborted.ts'],
+  },
+  controller.signal,
+  10000,
+);
+if (JSON.stringify(suggestions) !== JSON.stringify([])) {
+  throw new Error('aborted file suggestions should be empty: ' + JSON.stringify(suggestions));
+}
+if (await exists(statusMarkerPath)) {
+  throw new Error('pre-aborted status command should not be spawned');
+}
+if (await exists(suggestionMarkerPath)) {
+  throw new Error('pre-aborted file suggestion command should not be spawned');
+}
+
+console.log('status line file suggestion aborted OK');`,
+  )
+  assert.equal(output, 'status line file suggestion aborted OK')
+})
+
 await test('StopFailure hooks receive error metadata', async () => {
   const output = await buildAndRunSnippet(
     'stop-failure-hook-test',

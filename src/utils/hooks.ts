@@ -776,6 +776,16 @@ async function execCommandHook(
   let diagExitCode: number | undefined
   let diagAborted = false
 
+  if (signal.aborted) {
+    return {
+      stdout: '',
+      stderr: 'Hook cancelled',
+      output: 'Hook cancelled',
+      status: 1,
+      aborted: true,
+    }
+  }
+
   const isWindows = getPlatform() === 'windows'
 
   // --
@@ -4614,8 +4624,9 @@ export async function executeStatusLineCommand(
     return undefined
   }
 
-  // Use provided signal or create a default one
-  const abortSignal = signal || AbortSignal.timeout(timeoutMs)
+  const { signal: abortSignal, cleanup } = createCombinedAbortSignal(signal, {
+    timeoutMs,
+  })
 
   try {
     // Convert status input to JSON
@@ -4662,6 +4673,8 @@ export async function executeStatusLineCommand(
   } catch (error) {
     logForDebugging(`Status hook failed: ${error}`, { level: 'error' })
     return undefined
+  } finally {
+    cleanup()
   }
 }
 
@@ -4704,8 +4717,9 @@ export async function executeFileSuggestionCommand(
     return []
   }
 
-  // Use provided signal or create a default one
-  const abortSignal = signal || AbortSignal.timeout(timeoutMs)
+  const { signal: abortSignal, cleanup } = createCombinedAbortSignal(signal, {
+    timeoutMs,
+  })
 
   try {
     const jsonInput = jsonStringify(fileSuggestionInput)
@@ -4734,6 +4748,8 @@ export async function executeFileSuggestionCommand(
       level: 'error',
     })
     return []
+  } finally {
+    cleanup()
   }
 }
 

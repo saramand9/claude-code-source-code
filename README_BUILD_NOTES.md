@@ -3024,3 +3024,41 @@ Expected new output:
 ```text
 ok - status line and file suggestion commands ignore failed or empty output
 ```
+
+## 2026-06-19 StatusLine/FileSuggestion abort coverage
+
+This round fixes and covers pre-aborted helper command execution. Before this
+change, an already-aborted signal could reach `execCommandHook()` after spawn
+setup, so status/file suggestion commands could still run and produce output or
+side effects.
+
+- `src/utils/hooks.ts`
+  - Short-circuits `execCommandHook()` when the supplied signal is already
+    aborted.
+  - Uses `createCombinedAbortSignal()` for `StatusLine` and `FileSuggestion`
+    commands so their short helper timeout is still applied when an external
+    signal is provided.
+  - Cleans up combined abort listeners/timers after command execution.
+- `scripts/test-build-safety.mjs`
+  - Adds command fixtures that would write marker files if spawned.
+  - Passes an already-aborted signal to both helper commands.
+  - Asserts both helpers return their silent fallback values.
+  - Asserts neither command marker file is created.
+
+Risk boundary update: status/file suggestion command abort behavior now has
+direct build-safety coverage, including the no-spawn pre-abort case. Remaining
+gaps are interactive PermissionRequest UI, live timeout race coverage, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - status line and file suggestion commands respect pre-aborted signals
+```
