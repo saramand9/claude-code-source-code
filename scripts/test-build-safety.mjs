@@ -3861,6 +3861,144 @@ console.log('user prompt submit hook OK');`,
   assert.equal(output, 'user prompt submit hook OK')
 })
 
+await test('UserPromptSubmit command hooks attach context and block prompts', async () => {
+  const output = await buildAndRunSnippet(
+    'user-prompt-submit-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/user-prompt-submit-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'user-prompt-submit-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'user-prompt-submit-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const contextPrompt = 'user prompt submit command context marker 9138';
+const blockPrompt = 'user prompt submit command block marker 9138';
+const additionalContext = 'user prompt submit command extra context marker 9138';
+const blockReason = 'blocked prompt submit command marker 9138';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'UserPromptSubmit') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.permission_mode !== 'default') { process.stderr.write('bad permission mode ' + data.permission_mode); process.exit(4); }",
+    "if (data.prompt === '" + contextPrompt + "') {",
+    "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '" + additionalContext + "' } }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.prompt === '" + blockPrompt + "') {",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + blockReason + "', hookSpecificOutput: { hookEventName: 'UserPromptSubmit' } }));",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad prompt ' + data.prompt);",
+    "process.exit(5);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeUserPromptSubmitHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+
+registerHookCallbacks({
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const contextResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  contextPrompt,
+  'default',
+  context,
+)) {
+  contextResults.push(result);
+}
+if (!contextResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(additionalContext)
+)) {
+  throw new Error('UserPromptSubmit command should return additional context: ' + JSON.stringify(contextResults));
+}
+
+const blockedResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  blockPrompt,
+  'default',
+  context,
+)) {
+  blockedResults.push(result);
+}
+const blocking = blockedResults.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  String(result.blockingError?.command).includes('user-prompt-submit-command-hook.mjs')
+);
+if (!blocking) {
+  throw new Error('UserPromptSubmit command should return blocking feedback: ' + JSON.stringify(blockedResults));
+}
+const blockingAttachment = blockedResults.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_blocking_error' &&
+    attachment.hookEvent === 'UserPromptSubmit' &&
+    attachment.blockingError?.blockingError === blockReason
+  );
+});
+if (!blockingAttachment) {
+  throw new Error('UserPromptSubmit command should return blocking attachment: ' + JSON.stringify(blockedResults));
+}
+
+console.log('user prompt submit command hook OK');`,
+  )
+  assert.equal(output, 'user prompt submit command hook OK')
+})
+
 await test('compact hooks rewrite instructions and report summaries', async () => {
   const output = await buildAndRunSnippet(
     'compact-hook-test',
