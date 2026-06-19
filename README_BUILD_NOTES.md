@@ -2930,3 +2930,36 @@ Expected new output:
 ```text
 ok - Notification hooks receive title and type metadata
 ```
+
+## 2026-06-19 SessionStart and Setup hook build-safety coverage
+
+This round covers startup/setup hook output propagation. `SessionStart` hooks
+can inject context, seed an initial user message, and register watch paths;
+`Setup` hooks can inject setup context.
+
+- `scripts/test-build-safety.mjs`
+  - Registers `SessionStart` and `Setup` callback hooks with source/trigger
+    matchers.
+  - Verifies SessionStart receives source, session id, agent type, and model
+    metadata.
+  - Asserts SessionStart propagates `additionalContext`,
+    `initialUserMessage`, and `watchPaths`.
+  - Verifies Setup receives its trigger and propagates `additionalContext`.
+  - Asserts unrelated source/trigger matchers are skipped.
+
+Risk boundary update: SessionStart/Setup metadata and output aggregation now
+have direct build-safety coverage. Remaining gaps are interactive
+PermissionRequest UI and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - SessionStart and Setup hooks expose startup context
+```

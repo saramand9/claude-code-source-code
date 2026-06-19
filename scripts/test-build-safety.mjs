@@ -3641,6 +3641,175 @@ console.log('notification hooks OK');`,
   assert.equal(output, 'notification hooks OK')
 })
 
+await test('SessionStart and Setup hooks expose startup context', async () => {
+  const output = await buildAndRunSnippet(
+    'session-start-setup-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/session-start-setup-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeSessionStartHooks, executeSetupHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const sessionId = '00000000-0000-4000-8000-000000008451';
+const sessionContext = 'session start context marker 8451';
+const initialUserMessage = 'session start initial user marker 8451';
+const watchPath = (process.cwd() + '/build-src/test-artifacts/session-start-watch-8451.txt').replace(/\\\\/g, '/');
+const setupContext = 'setup context marker 8451';
+let sessionCalls = 0;
+let setupCalls = 0;
+registerHookCallbacks({
+  SessionStart: [
+    {
+      matcher: 'startup',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            sessionCalls += 1;
+            if (hookInput.hook_event_name !== 'SessionStart') {
+              throw new Error('unexpected session event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.source !== 'startup') {
+              throw new Error('unexpected session source: ' + hookInput.source);
+            }
+            if (hookInput.session_id !== sessionId) {
+              throw new Error('unexpected session id: ' + hookInput.session_id);
+            }
+            if (hookInput.agent_type !== 'review-agent-8451') {
+              throw new Error('unexpected session agent type: ' + hookInput.agent_type);
+            }
+            if (hookInput.model !== 'model-8451') {
+              throw new Error('unexpected session model: ' + hookInput.model);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'SessionStart',
+                additionalContext: sessionContext,
+                initialUserMessage,
+                watchPaths: [watchPath],
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+  Setup: [
+    {
+      matcher: 'init',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            setupCalls += 1;
+            if (hookInput.hook_event_name !== 'Setup') {
+              throw new Error('unexpected setup event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.trigger !== 'init') {
+              throw new Error('unexpected setup trigger: ' + hookInput.trigger);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'Setup',
+                additionalContext: setupContext,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const sessionResults = [];
+for await (const result of executeSessionStartHooks(
+  'startup',
+  sessionId,
+  'review-agent-8451',
+  'model-8451',
+  undefined,
+  10000,
+)) {
+  sessionResults.push(result);
+}
+if (sessionCalls !== 1) {
+  throw new Error('SessionStart hook should run once, got ' + sessionCalls);
+}
+if (!sessionResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(sessionContext)
+)) {
+  throw new Error('SessionStart should return additional context: ' + JSON.stringify(sessionResults));
+}
+if (!sessionResults.some(result => result.initialUserMessage === initialUserMessage)) {
+  throw new Error('SessionStart should return initial user message: ' + JSON.stringify(sessionResults));
+}
+if (!sessionResults.some(result =>
+  Array.isArray(result.watchPaths) &&
+  result.watchPaths.includes(watchPath)
+)) {
+  throw new Error('SessionStart should return watch paths: ' + JSON.stringify(sessionResults));
+}
+
+const skippedSession = [];
+for await (const result of executeSessionStartHooks(
+  'resume',
+  sessionId,
+  'review-agent-8451',
+  'model-8451',
+  undefined,
+  10000,
+)) {
+  skippedSession.push(result);
+}
+if (sessionCalls !== 1) {
+  throw new Error('SessionStart matcher should skip resume, got ' + sessionCalls);
+}
+if (skippedSession.length !== 0) {
+  throw new Error('skipped SessionStart should produce no results: ' + JSON.stringify(skippedSession));
+}
+
+const setupResults = [];
+for await (const result of executeSetupHooks('init', undefined, 10000)) {
+  setupResults.push(result);
+}
+if (setupCalls !== 1) {
+  throw new Error('Setup hook should run once, got ' + setupCalls);
+}
+if (!setupResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(setupContext)
+)) {
+  throw new Error('Setup should return additional context: ' + JSON.stringify(setupResults));
+}
+
+const skippedSetup = [];
+for await (const result of executeSetupHooks('maintenance', undefined, 10000)) {
+  skippedSetup.push(result);
+}
+if (setupCalls !== 1) {
+  throw new Error('Setup matcher should skip maintenance, got ' + setupCalls);
+}
+if (skippedSetup.length !== 0) {
+  throw new Error('skipped Setup should produce no results: ' + JSON.stringify(skippedSetup));
+}
+
+console.log('session start setup hooks OK');`,
+  )
+  assert.equal(output, 'session start setup hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
