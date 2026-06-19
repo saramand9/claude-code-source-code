@@ -2730,6 +2730,211 @@ console.log('compact hooks OK');`,
   assert.equal(output, 'compact hooks OK')
 })
 
+await test('subagent lifecycle hooks attach context and block stop', async () => {
+  const output = await buildAndRunSnippet(
+    'subagent-lifecycle-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/subagent-lifecycle-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeSubagentStartHooks, executeStopHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const agentId = 'agent-lifecycle-7135';
+const agentType = 'reviewer-lifecycle-7135';
+const startContext = 'subagent start context marker 7135';
+const lastAssistantText = 'subagent final assistant marker 7135';
+const blockReason = 'subagent stop block marker 7135';
+let startCalls = 0;
+let stopCalls = 0;
+registerHookCallbacks({
+  SubagentStart: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            startCalls += 1;
+            if (hookInput.hook_event_name !== 'SubagentStart') {
+              throw new Error('unexpected start event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.agent_id !== agentId) {
+              throw new Error('unexpected start agent id: ' + hookInput.agent_id);
+            }
+            if (hookInput.agent_type !== agentType) {
+              throw new Error('unexpected start agent type: ' + hookInput.agent_type);
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'SubagentStart',
+                additionalContext: startContext,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+  SubagentStop: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            stopCalls += 1;
+            if (hookInput.hook_event_name !== 'SubagentStop') {
+              throw new Error('unexpected stop event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.agent_id !== agentId) {
+              throw new Error('unexpected stop agent id: ' + hookInput.agent_id);
+            }
+            if (hookInput.agent_type !== agentType) {
+              throw new Error('unexpected stop agent type: ' + hookInput.agent_type);
+            }
+            if (!String(hookInput.agent_transcript_path).endsWith('agent-' + agentId + '.jsonl')) {
+              throw new Error('unexpected transcript path: ' + hookInput.agent_transcript_path);
+            }
+            if (hookInput.stop_hook_active !== true) {
+              throw new Error('unexpected stop hook active flag: ' + hookInput.stop_hook_active);
+            }
+            if (hookInput.last_assistant_message !== lastAssistantText) {
+              throw new Error('unexpected last assistant text: ' + hookInput.last_assistant_message);
+            }
+            return {
+              decision: 'block',
+              reason: blockReason,
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const startResults = [];
+for await (const result of executeSubagentStartHooks(
+  agentId,
+  agentType,
+  undefined,
+  10000,
+)) {
+  startResults.push(result);
+}
+if (startCalls !== 1) {
+  throw new Error('SubagentStart hook should run once, got ' + startCalls);
+}
+if (!startResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(startContext)
+)) {
+  throw new Error('SubagentStart should return additional context: ' + JSON.stringify(startResults));
+}
+
+const skippedStart = [];
+for await (const result of executeSubagentStartHooks(
+  agentId,
+  'other-agent-type-7135',
+  undefined,
+  10000,
+)) {
+  skippedStart.push(result);
+}
+if (startCalls !== 1) {
+  throw new Error('SubagentStart matcher should skip other agent type, got ' + startCalls);
+}
+if (skippedStart.length !== 0) {
+  throw new Error('skipped SubagentStart should produce no results: ' + JSON.stringify(skippedStart));
+}
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  agentId,
+  agentType,
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const messages = [
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000007135',
+    timestamp: '2026-06-19T00:00:00.000Z',
+    message: {
+      id: 'msg_subagent_lifecycle_7135',
+      role: 'assistant',
+      content: [{ type: 'text', text: lastAssistantText }],
+    },
+  },
+];
+const stopResults = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  true,
+  agentId,
+  context,
+  messages,
+  agentType,
+)) {
+  stopResults.push(result);
+}
+if (stopCalls !== 1) {
+  throw new Error('SubagentStop hook should run once, got ' + stopCalls);
+}
+const blocking = stopResults.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  result.blockingError?.command === 'callback'
+);
+if (!blocking) {
+  throw new Error('SubagentStop should return blocking feedback: ' + JSON.stringify(stopResults));
+}
+const blockingAttachment = stopResults.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_blocking_error' &&
+    attachment.hookEvent === 'SubagentStop' &&
+    attachment.blockingError?.blockingError === blockReason
+  );
+});
+if (!blockingAttachment) {
+  throw new Error('SubagentStop should return blocking attachment: ' + JSON.stringify(stopResults));
+}
+
+console.log('subagent lifecycle hooks OK');`,
+  )
+  assert.equal(output, 'subagent lifecycle hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

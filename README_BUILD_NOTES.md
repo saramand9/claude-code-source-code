@@ -2730,3 +2730,38 @@ Expected new output:
 ```text
 ok - compact hooks rewrite instructions and report summaries
 ```
+
+## 2026-06-19 subagent lifecycle hook build-safety coverage
+
+This round covers `SubagentStart` and `SubagentStop` hook plumbing. These hooks
+are part of the Agent tool lifecycle and are important for preserving native
+multi-agent policy and context behavior.
+
+- `scripts/test-build-safety.mjs`
+  - Registers `SubagentStart` and `SubagentStop` callback hooks with an
+    agent-type matcher.
+  - Verifies SubagentStart receives agent id/type metadata and returns
+    additional context.
+  - Asserts the SubagentStart matcher skips unrelated agent types.
+  - Verifies SubagentStop receives agent id/type, transcript path,
+    `stop_hook_active`, and the last assistant message text.
+  - Asserts SubagentStop blocking feedback is returned both as a blocking result
+    and a hook attachment.
+
+Risk boundary update: subagent start context injection and subagent stop
+blocking feedback now have direct build-safety coverage. Remaining gaps are
+teammate/task lifecycle hooks, interactive PermissionRequest UI, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - subagent lifecycle hooks attach context and block stop
+```
