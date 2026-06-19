@@ -41,6 +41,7 @@ import type {
   SDKUserMessage,
 } from './sdk/coreTypes.js'
 import {
+  getSessionMessagesImpl,
   getSessionInfoImpl,
   listSessionsImpl,
 } from '../utils/listSessionsImpl.js'
@@ -180,10 +181,10 @@ export async function unstable_v2_prompt(
  * @returns Array of messages, or empty array if session not found
  */
 export async function getSessionMessages(
-  _sessionId: string,
-  _options?: GetSessionMessagesOptions,
+  sessionId: string,
+  options?: GetSessionMessagesOptions,
 ): Promise<SessionMessage[]> {
-  throw new Error('getSessionMessages is not implemented in the SDK')
+  return getSessionMessagesImpl(sessionId, options)
 }
 
 /**

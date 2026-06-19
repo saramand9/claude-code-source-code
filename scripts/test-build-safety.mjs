@@ -286,9 +286,15 @@ await test('agent SDK session metadata APIs read local JSONL metadata', async ()
 import { join } from 'node:path';
 process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
 const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
-const { getSessionInfo, listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
+const { getSessionInfo, getSessionMessages, listSessions } = await import('./src/entrypoints/agentSdkTypes.ts');
 const { sanitizePath } = await import('./src/utils/sessionStoragePortable.ts');
 const sessionId = '12345678-1234-4234-9234-123456789abc';
+const user1 = '12345678-1234-4234-9234-123456789001';
+const assistant1 = '12345678-1234-4234-9234-123456789002';
+const status = '12345678-1234-4234-9234-123456789003';
+const user2 = '12345678-1234-4234-9234-123456789004';
+const assistant2 = '12345678-1234-4234-9234-123456789005';
+const sideUser = '12345678-1234-4234-9234-123456789006';
 const projectStorageDir = join(
   process.env.CLAUDE_CONFIG_DIR,
   'projects',
@@ -300,6 +306,8 @@ await writeFile(
   [
     JSON.stringify({
       type: 'user',
+      uuid: user1,
+      parentUuid: null,
       timestamp: '2026-06-19T00:00:00.000Z',
       cwd: projectDir,
       gitBranch: 'main',
@@ -307,8 +315,50 @@ await writeFile(
     }),
     JSON.stringify({
       type: 'assistant',
+      uuid: assistant1,
+      parentUuid: user1,
       timestamp: '2026-06-19T00:00:01.000Z',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }] },
+      message: {
+        id: 'msg_01',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Started' }],
+      },
+    }),
+    JSON.stringify({
+      type: 'system',
+      subtype: 'status',
+      status: 'compacting',
+      uuid: status,
+      parentUuid: assistant1,
+      timestamp: '2026-06-19T00:00:02.000Z',
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: user2,
+      parentUuid: status,
+      timestamp: '2026-06-19T00:00:03.000Z',
+      message: { role: 'user', content: 'Continue' },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: assistant2,
+      parentUuid: user2,
+      timestamp: '2026-06-19T00:00:04.000Z',
+      message: {
+        id: 'msg_02',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done' }],
+      },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: sideUser,
+      parentUuid: null,
+      isSidechain: true,
+      timestamp: '2026-06-19T00:00:05.000Z',
+      message: { role: 'user', content: 'Side question' },
     }),
     JSON.stringify({ type: 'summary', summary: 'Session summary' }),
     '',
@@ -356,6 +406,44 @@ if (session.cwd !== projectDir) {
 }
 if (session.createdAt !== Date.parse('2026-06-19T00:00:00.000Z')) {
   throw new Error('wrong createdAt: ' + JSON.stringify(session));
+}
+const messages = await getSessionMessages(sessionId, { dir: projectDir });
+const messageIds = messages.map(message => message.uuid);
+const expectedIds = [user1, assistant1, user2, assistant2];
+if (JSON.stringify(messageIds) !== JSON.stringify(expectedIds)) {
+  throw new Error('wrong session message chain: ' + JSON.stringify(messages));
+}
+if (messages.some(message => message.type === 'system')) {
+  throw new Error('system messages should be hidden by default: ' + JSON.stringify(messages));
+}
+if (messages.some(message => message.session_id !== sessionId)) {
+  throw new Error('messages should include session_id fallback: ' + JSON.stringify(messages));
+}
+if (messages.some(message => message.parent_tool_use_id !== null)) {
+  throw new Error('messages should include parent_tool_use_id fallback: ' + JSON.stringify(messages));
+}
+const page = await getSessionMessages(sessionId, {
+  dir: projectDir,
+  offset: 1,
+  limit: 2,
+});
+if (JSON.stringify(page.map(message => message.uuid)) !== JSON.stringify([assistant1, user2])) {
+  throw new Error('wrong paginated session messages: ' + JSON.stringify(page));
+}
+const withSystem = await getSessionMessages(sessionId, {
+  dir: projectDir,
+  includeSystemMessages: true,
+});
+const statusMessage = withSystem.find(message => message.uuid === status);
+if (!statusMessage || statusMessage.type !== 'system') {
+  throw new Error('status message missing from system-inclusive messages: ' + JSON.stringify(withSystem));
+}
+if (statusMessage.status !== 'compacting') {
+  throw new Error('status message was not preserved in SDK shape: ' + JSON.stringify(statusMessage));
+}
+const invalidMessages = await getSessionMessages('not-a-session-id', { dir: projectDir });
+if (invalidMessages.length !== 0) {
+  throw new Error('invalid session id should return empty messages: ' + JSON.stringify(invalidMessages));
 }
 console.log('agent SDK session metadata OK');`,
   )

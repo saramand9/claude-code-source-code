@@ -8,8 +8,10 @@
  */
 
 import type { Dirent } from 'fs'
+import type { UUID } from 'crypto'
 import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
+import type { SDKMessage } from '../entrypoints/sdk/coreTypes.js'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import type { LiteSessionFile } from './sessionStoragePortable.js'
 import {
@@ -20,6 +22,7 @@ import {
   findProjectDir,
   getProjectsDir,
   MAX_SANITIZED_LENGTH,
+  readTranscriptForLoad,
   readSessionLite,
   resolveSessionFilePath,
   sanitizePath,
@@ -68,6 +71,24 @@ export type ListSessionsOptions = {
 
 export type GetSessionInfoOptions = {
   dir?: string
+}
+
+export type GetSessionMessagesOptions = {
+  dir?: string
+  limit?: number
+  offset?: number
+  includeSystemMessages?: boolean
+}
+
+type TranscriptEntry = Record<string, unknown> & {
+  type: 'user' | 'assistant' | 'system'
+  uuid: UUID
+  parentUuid: UUID | null
+  sessionId: string
+  timestamp?: string
+  isSidechain?: boolean
+  message?: Record<string, unknown>
+  order: number
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +178,367 @@ export function parseSessionInfoFromLite(
 // Candidate discovery — stat-only pass. Cheap: 1 syscall per file, no
 // data reads. Lets us sort/filter before doing expensive head/tail reads.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Session message loading - full JSONL parse for a single session.
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseJsonlRecords(buf: Buffer): Record<string, unknown>[] {
+  const text = buf.toString('utf8')
+  const records: Record<string, unknown>[] = []
+  let start = 0
+
+  while (start < text.length) {
+    let end = text.indexOf('\n', start)
+    if (end < 0) end = text.length
+
+    const line = text.slice(start, end).trim()
+    start = end + 1
+    if (!line) continue
+
+    try {
+      const parsed = JSON.parse(line)
+      if (isRecord(parsed)) records.push(parsed)
+    } catch {
+      // Match the CLI JSONL reader: malformed lines are ignored.
+    }
+  }
+
+  return records
+}
+
+function normalizeTranscriptEntry(
+  entry: Record<string, unknown>,
+  fallbackSessionId: UUID,
+  order: number,
+): TranscriptEntry | null {
+  const type = entry.type
+  if (type !== 'user' && type !== 'assistant' && type !== 'system') return null
+
+  const uuid = validateUuid(entry.uuid)
+  if (!uuid) return null
+
+  if ((type === 'user' || type === 'assistant') && !isRecord(entry.message)) {
+    return null
+  }
+
+  const parentUuid =
+    entry.parentUuid === null ? null : (validateUuid(entry.parentUuid) ?? null)
+  const sessionId =
+    typeof entry.session_id === 'string'
+      ? entry.session_id
+      : typeof entry.sessionId === 'string'
+        ? entry.sessionId
+        : fallbackSessionId
+
+  return {
+    ...entry,
+    type,
+    uuid,
+    parentUuid,
+    sessionId,
+    isSidechain: entry.isSidechain === true,
+    timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : undefined,
+    message: isRecord(entry.message) ? entry.message : undefined,
+    order,
+  }
+}
+
+function compareTranscriptOrder(
+  a: TranscriptEntry,
+  b: TranscriptEntry,
+): number {
+  const aTime = a.timestamp ? Date.parse(a.timestamp) : Number.NEGATIVE_INFINITY
+  const bTime = b.timestamp ? Date.parse(b.timestamp) : Number.NEGATIVE_INFINITY
+  const aSort = Number.isNaN(aTime) ? Number.NEGATIVE_INFINITY : aTime
+  const bSort = Number.isNaN(bTime) ? Number.NEGATIVE_INFINITY : bTime
+  if (aSort !== bSort) return aSort - bSort
+  return a.order - b.order
+}
+
+function findLatestMessage<T extends TranscriptEntry>(
+  messages: Iterable<T>,
+  predicate: (message: T) => boolean,
+): T | undefined {
+  let latest: T | undefined
+  for (const message of messages) {
+    if (!predicate(message)) continue
+    if (!latest || compareTranscriptOrder(latest, message) < 0) {
+      latest = message
+    }
+  }
+  return latest
+}
+
+function findLatestUserAssistantLeaf(
+  messages: Map<UUID, TranscriptEntry>,
+): TranscriptEntry | undefined {
+  const parentUuids = new Set<UUID>()
+  for (const message of messages.values()) {
+    if (message.parentUuid) parentUuids.add(message.parentUuid)
+  }
+
+  const leafUuids = new Set<UUID>()
+  for (const terminal of messages.values()) {
+    if (parentUuids.has(terminal.uuid)) continue
+
+    const seen = new Set<UUID>()
+    let current: TranscriptEntry | undefined = terminal
+    while (current) {
+      if (seen.has(current.uuid)) break
+      seen.add(current.uuid)
+
+      if (
+        (current.type === 'user' || current.type === 'assistant') &&
+        !current.isSidechain
+      ) {
+        leafUuids.add(current.uuid)
+        break
+      }
+
+      current = current.parentUuid ? messages.get(current.parentUuid) : undefined
+    }
+  }
+
+  return findLatestMessage(
+    messages.values(),
+    message => leafUuids.has(message.uuid) && !message.isSidechain,
+  )
+}
+
+function getAssistantMessageId(message: TranscriptEntry): string | undefined {
+  if (message.type !== 'assistant') return undefined
+  const id = message.message?.id
+  return typeof id === 'string' ? id : undefined
+}
+
+function hasToolResultContent(message: TranscriptEntry): boolean {
+  if (message.type !== 'user' || !message.message) return false
+  const content = message.message.content
+  return (
+    Array.isArray(content) &&
+    content.some(block => isRecord(block) && block.type === 'tool_result')
+  )
+}
+
+function recoverOrphanedParallelToolResults(
+  messages: Map<UUID, TranscriptEntry>,
+  chain: TranscriptEntry[],
+  seen: Set<UUID>,
+): TranscriptEntry[] {
+  const chainAssistants = chain.filter(
+    message => message.type === 'assistant',
+  )
+  if (chainAssistants.length === 0) return chain
+
+  const anchorByMessageId = new Map<string, TranscriptEntry>()
+  for (const assistant of chainAssistants) {
+    const messageId = getAssistantMessageId(assistant)
+    if (messageId) anchorByMessageId.set(messageId, assistant)
+  }
+
+  const siblingsByMessageId = new Map<string, TranscriptEntry[]>()
+  const toolResultsByAssistant = new Map<UUID, TranscriptEntry[]>()
+  for (const message of messages.values()) {
+    const messageId = getAssistantMessageId(message)
+    if (messageId) {
+      const siblings = siblingsByMessageId.get(messageId)
+      if (siblings) siblings.push(message)
+      else siblingsByMessageId.set(messageId, [message])
+    } else if (message.parentUuid && hasToolResultContent(message)) {
+      const results = toolResultsByAssistant.get(message.parentUuid)
+      if (results) results.push(message)
+      else toolResultsByAssistant.set(message.parentUuid, [message])
+    }
+  }
+
+  const processedGroups = new Set<string>()
+  const inserts = new Map<UUID, TranscriptEntry[]>()
+
+  for (const assistant of chainAssistants) {
+    const messageId = getAssistantMessageId(assistant)
+    if (!messageId || processedGroups.has(messageId)) continue
+    processedGroups.add(messageId)
+
+    const siblings = siblingsByMessageId.get(messageId) ?? [assistant]
+    const orphanedSiblings = siblings.filter(sibling => !seen.has(sibling.uuid))
+    const orphanedToolResults: TranscriptEntry[] = []
+    for (const sibling of siblings) {
+      const results = toolResultsByAssistant.get(sibling.uuid)
+      if (!results) continue
+      for (const result of results) {
+        if (!seen.has(result.uuid)) orphanedToolResults.push(result)
+      }
+    }
+
+    if (orphanedSiblings.length === 0 && orphanedToolResults.length === 0) {
+      continue
+    }
+
+    orphanedSiblings.sort(compareTranscriptOrder)
+    orphanedToolResults.sort(compareTranscriptOrder)
+
+    const anchor = anchorByMessageId.get(messageId)!
+    const recovered = [...orphanedSiblings, ...orphanedToolResults]
+    for (const message of recovered) seen.add(message.uuid)
+    inserts.set(anchor.uuid, recovered)
+  }
+
+  if (inserts.size === 0) return chain
+
+  const result: TranscriptEntry[] = []
+  for (const message of chain) {
+    result.push(message)
+    const insert = inserts.get(message.uuid)
+    if (insert) result.push(...insert)
+  }
+  return result
+}
+
+function buildConversationChain(
+  messages: Map<UUID, TranscriptEntry>,
+  leafMessage: TranscriptEntry,
+): TranscriptEntry[] {
+  const chain: TranscriptEntry[] = []
+  const seen = new Set<UUID>()
+  let current: TranscriptEntry | undefined = leafMessage
+
+  while (current) {
+    if (seen.has(current.uuid)) break
+    seen.add(current.uuid)
+    chain.push(current)
+    current = current.parentUuid ? messages.get(current.parentUuid) : undefined
+  }
+
+  chain.reverse()
+  return recoverOrphanedParallelToolResults(messages, chain, seen)
+}
+
+function toSdkCompactMetadata(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+
+  const trigger = value.trigger
+  const preTokens =
+    typeof value.preTokens === 'number' ? value.preTokens : value.pre_tokens
+  if ((trigger !== 'manual' && trigger !== 'auto') || typeof preTokens !== 'number') {
+    return undefined
+  }
+
+  const preservedSegment = isRecord(value.preservedSegment)
+    ? value.preservedSegment
+    : isRecord(value.preserved_segment)
+      ? value.preserved_segment
+      : undefined
+
+  const result: Record<string, unknown> = {
+    trigger,
+    pre_tokens: preTokens,
+  }
+
+  if (preservedSegment) {
+    const headUuid =
+      typeof preservedSegment.headUuid === 'string'
+        ? preservedSegment.headUuid
+        : preservedSegment.head_uuid
+    const anchorUuid =
+      typeof preservedSegment.anchorUuid === 'string'
+        ? preservedSegment.anchorUuid
+        : preservedSegment.anchor_uuid
+    const tailUuid =
+      typeof preservedSegment.tailUuid === 'string'
+        ? preservedSegment.tailUuid
+        : preservedSegment.tail_uuid
+    if (
+      typeof headUuid === 'string' &&
+      typeof anchorUuid === 'string' &&
+      typeof tailUuid === 'string'
+    ) {
+      result.preserved_segment = {
+        head_uuid: headUuid,
+        anchor_uuid: anchorUuid,
+        tail_uuid: tailUuid,
+      }
+    }
+  }
+
+  return result
+}
+
+function isSdkEmittableMessage(
+  entry: TranscriptEntry,
+  includeSystemMessages: boolean,
+): boolean {
+  if (entry.type === 'user' || entry.type === 'assistant') return true
+  if (!includeSystemMessages) return false
+  if (entry.subtype === 'status') {
+    return entry.status === null || entry.status === 'compacting'
+  }
+  if (entry.subtype !== 'compact_boundary') return false
+  return (
+    toSdkCompactMetadata(entry.compactMetadata ?? entry.compact_metadata) !==
+    undefined
+  )
+}
+
+function toSdkMessage(entry: TranscriptEntry): SDKMessage {
+  const {
+    compactMetadata,
+    compact_metadata,
+    isSidechain,
+    logicalParentUuid,
+    parentUuid,
+    sessionId,
+    order,
+    ...rest
+  } = entry
+
+  const result: Record<string, unknown> = {
+    ...rest,
+    session_id:
+      typeof rest.session_id === 'string' ? rest.session_id : sessionId,
+  }
+
+  if (entry.type === 'user' || entry.type === 'assistant') {
+    delete result.userType
+    delete result.entrypoint
+    delete result.cwd
+    delete result.version
+    delete result.gitBranch
+    delete result.slug
+    delete result.teamName
+    delete result.agentName
+    delete result.promptId
+    delete result.agentId
+    result.parent_tool_use_id =
+      typeof result.parent_tool_use_id === 'string' ||
+      result.parent_tool_use_id === null
+        ? result.parent_tool_use_id
+        : null
+  } else {
+    const sdkCompactMetadata = toSdkCompactMetadata(
+      compactMetadata ?? compact_metadata,
+    )
+    if (sdkCompactMetadata) result.compact_metadata = sdkCompactMetadata
+  }
+
+  return result as SDKMessage
+}
+
+function applyMessagePagination(
+  messages: SDKMessage[],
+  limit: number | undefined,
+  offset: number | undefined,
+): SDKMessage[] {
+  const start = Math.max(0, offset ?? 0)
+  const end = limit && limit > 0 ? start + limit : undefined
+  return messages.slice(start, end)
+}
 
 type Candidate = {
   sessionId: string
@@ -474,4 +856,47 @@ export async function getSessionInfoImpl(
   return (
     parseSessionInfoFromLite(uuid, lite, resolved.projectPath) ?? undefined
   )
+}
+
+export async function getSessionMessagesImpl(
+  sessionId: string,
+  options?: GetSessionMessagesOptions,
+): Promise<SDKMessage[]> {
+  const uuid = validateUuid(sessionId)
+  if (!uuid) return []
+
+  const resolved = await resolveSessionFilePath(uuid, options?.dir)
+  if (!resolved) return []
+
+  let postBoundaryBuf: Buffer
+  try {
+    postBoundaryBuf = (
+      await readTranscriptForLoad(resolved.filePath, resolved.fileSize)
+    ).postBoundaryBuf
+  } catch {
+    return []
+  }
+
+  const messages = new Map<UUID, TranscriptEntry>()
+  const records = parseJsonlRecords(postBoundaryBuf)
+  records.forEach((record, index) => {
+    const message = normalizeTranscriptEntry(
+      record,
+      uuid,
+      index,
+    )
+    if (message) messages.set(message.uuid, message)
+  })
+
+  if (messages.size === 0) return []
+
+  const leaf = findLatestUserAssistantLeaf(messages)
+  if (!leaf) return []
+
+  const chain = buildConversationChain(messages, leaf)
+    .filter(message =>
+      isSdkEmittableMessage(message, options?.includeSystemMessages === true),
+    )
+    .map(toSdkMessage)
+  return applyMessagePagination(chain, options?.limit, options?.offset)
 }
