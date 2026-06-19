@@ -3199,6 +3199,8 @@ const commandPath = join(commandDir, 'post-tool-use-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
 const malformedCommandPath = join(commandDir, 'post-tool-use-malformed-command-hook.mjs');
 const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
+const stopCommandPath = join(commandDir, 'post-tool-use-stop-command-hook.mjs');
+const stopCommandPathForHook = stopCommandPath.replace(/\\\\/g, '/');
 const timeoutCommandPath = join(commandDir, 'post-tool-use-timeout-command-hook.mjs');
 const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const timeoutStartMarkerPath = join(commandDir, 'post-tool-use-timeout-started.txt');
@@ -3210,6 +3212,7 @@ const inputQuery = 'post tool command input marker 4286';
 const originalText = 'original command output marker 4286';
 const replacementText = 'rewritten command output marker 4286';
 const additionalContext = 'post tool command context marker 4286';
+const stopReason = 'post tool command stop marker 4286';
 await writeFile(
   commandPath,
   [
@@ -3230,6 +3233,14 @@ await writeFile(
   malformedCommandPath,
   [
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: true } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  stopCommandPath,
+  [
+    "process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + stopReason + "', hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: { content: [{ type: 'text', text: 'stopped replacement should not apply' }] } } }));",
     "process.exit(0);",
   ].join('\\n'),
   'utf8',
@@ -3401,6 +3412,51 @@ const malformedError = malformed.find(update => {
 });
 if (!malformedError) {
   throw new Error('PostToolUse malformed command output should surface non-blocking error: ' + JSON.stringify(malformed));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostToolUse: [
+    {
+      matcher: toolName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + stopCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const stopped = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  tool,
+  'toolu_post_tool_command_hook_stop',
+  'msg_post_tool_command_hook_stop',
+  { query: inputQuery },
+  originalOutput,
+  'req_post_tool_command_hook_stop',
+  'stdio',
+  undefined,
+)) {
+  stopped.push(update);
+}
+if (stopped.some(update => update.updatedMCPToolOutput)) {
+  throw new Error('PostToolUse stopped command output must not update MCP output: ' + JSON.stringify(stopped));
+}
+const stoppedAttachment = stopped.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_stopped_continuation' &&
+    attachment.hookEvent === 'PostToolUse' &&
+    attachment.message === stopReason
+  );
+});
+if (!stoppedAttachment) {
+  throw new Error('PostToolUse stopped command should surface stop reason: ' + JSON.stringify(stopped));
 }
 
 clearRegisteredHooks();

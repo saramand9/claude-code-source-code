@@ -3261,6 +3261,42 @@ ok - PermissionDenied command hooks can request retry
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PostToolUse prevent-continuation coverage
+
+This round closes the direct command-hook coverage gap for `PostToolUse`
+prevent-continuation output.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the `PostToolUse` command-hook regression with a command that
+    returns `continue: false`, a `stopReason`, and a same-hook
+    `updatedMCPToolOutput` payload.
+  - Verifies the hook produces a `hook_stopped_continuation` attachment with
+    the stop reason.
+  - Verifies the stopped hook does not apply the MCP output replacement that
+    was present in the same JSON payload.
+
+Risk boundary update: `PostToolUse` command hooks now have direct build-safety
+coverage for success, matcher filtering, wrong-event JSON output,
+prevent-continuation, and simple-helper timeout cleanup. Remaining gaps include
+full CLI E2E for post-tool hook side effects, complex-shell timeout cleanup, and
+larger hook ordering/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PostToolUse command hooks can update MCP output
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.
