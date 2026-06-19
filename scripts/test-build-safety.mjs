@@ -2154,6 +2154,101 @@ console.log('config change policy hook OK');`,
   assert.equal(output, 'config change policy hook OK')
 })
 
+await test('outside REPL command hooks ignore failed JSON decisions', async () => {
+  const output = await buildAndRunSnippet(
+    'outside-repl-failed-json-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'outside-repl-failed-json-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandPath = join(configDir, 'failed-json-block-command.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'ConfigChange') { process.stderr.write('bad event'); process.exit(3); }",
+    "if (data.source !== 'user_settings') { process.stderr.write('bad source'); process.exit(4); }",
+    "process.stdout.write(JSON.stringify({ decision: 'block', reason: 'stdout block should be ignored 9327' }));",
+    "process.stderr.write('nonzero config change marker 9327');",
+    "process.exit(1);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        ConfigChange: [
+          {
+            matcher: 'user_settings',
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + commandPathForHook,
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeConfigChangeHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+
+const results = await executeConfigChangeHooks(
+  'user_settings',
+  join(configDir, 'settings.json'),
+  10000,
+);
+if (results.length !== 1) {
+  throw new Error('expected one ConfigChange result: ' + JSON.stringify(results));
+}
+if (results[0].succeeded !== false) {
+  throw new Error('non-zero ConfigChange command should fail: ' + JSON.stringify(results));
+}
+if (results[0].blocked !== false) {
+  throw new Error('non-zero ConfigChange stdout JSON must not block: ' + JSON.stringify(results));
+}
+if (!String(results[0].output).includes('nonzero config change marker 9327')) {
+  throw new Error('non-zero ConfigChange should return stderr output: ' + JSON.stringify(results));
+}
+if (String(results[0].output).includes('stdout block should be ignored 9327')) {
+  throw new Error('non-zero ConfigChange should not return stdout JSON as output: ' + JSON.stringify(results));
+}
+
+console.log('outside repl failed json hooks OK');`,
+  )
+  assert.equal(output, 'outside repl failed json hooks OK')
+})
+
 await test('environment hooks collect watch paths and system messages', async () => {
   const output = await buildAndRunSnippet(
     'environment-watch-hook-test',

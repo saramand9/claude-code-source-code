@@ -3326,8 +3326,12 @@ async function executeHooksOutsideREPL({
           `${hookName} [${hook.command}] completed with status ${result.status}`,
         )
 
-        // Parse JSON for any messages to print out.
-        const { json, validationError } = parseHookOutput(result.stdout)
+        // Parse JSON only for successful hooks. Failed commands must not
+        // influence blocking, watch paths, or system messages through stdout.
+        const { json, validationError } =
+          result.status === 0
+            ? parseHookOutput(result.stdout)
+            : { json: undefined, validationError: undefined }
         if (validationError) {
           // Validation error is logged via logForDebugging and returned in output
           throw new Error(validationError)

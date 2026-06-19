@@ -3099,3 +3099,39 @@ Expected new output:
 ```text
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
+
+## 2026-06-19 outside-REPL command hook failure coverage
+
+This round applies the same failed-command JSON decision guard to hooks executed
+outside the REPL path, such as `ConfigChange`.
+
+- `src/utils/hooks.ts`
+  - Parses stdout JSON for `executeHooksOutsideREPL()` command hooks only when
+    the command exits successfully.
+  - Keeps exit code 2 as the explicit blocking signal.
+  - Prevents failed commands from injecting block decisions, watch paths, or
+    system messages through stdout JSON.
+- `scripts/test-build-safety.mjs`
+  - Adds a `ConfigChange` command hook that writes a JSON block decision to
+    stdout but exits 1.
+  - Asserts the result is a non-blocking failure.
+  - Asserts stderr is returned and stdout JSON is ignored.
+
+Risk boundary update: failed command hook decisions are now ignored in both the
+main hook generator path and outside-REPL hook path. Remaining gaps are
+interactive PermissionRequest UI, live timeout race coverage, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - outside REPL command hooks ignore failed JSON decisions
+```
