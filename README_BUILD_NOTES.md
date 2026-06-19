@@ -5085,6 +5085,45 @@ ok - SubagentStart command hooks attach context with agent metadata
 92/92 build-safety tests passed.
 ```
 
+## 2026-06-19 Subagent command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for subagent lifecycle
+command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `SubagentStart` and `SubagentStop` through the same direct Windows
+    helper path used by other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends `SubagentStart` command coverage with a timed-out helper that would
+    otherwise emit late `additionalContext`.
+  - Extends `SubagentStop` command coverage with a timed-out helper that would
+    otherwise emit a late blocking decision.
+  - Verifies both cancelled helpers surface `hook_cancelled` attachments.
+  - Asserts both helper processes start but are killed before writing late
+    markers.
+
+Risk boundary update: subagent lifecycle command hooks now have build-safety
+coverage for metadata input, matcher filtering, context/block output, and
+simple-helper timeout cleanup. Remaining gaps include prompt/agent subagent
+hooks, complex-shell timeout cleanup, and full multi-agent TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - SubagentStart command hooks attach context with agent metadata
+ok - SubagentStop command hooks block with agent metadata
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI

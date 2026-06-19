@@ -7203,7 +7203,7 @@ console.log('subagent lifecycle hooks OK');`,
 await test('SubagentStart command hooks attach context with agent metadata', async () => {
   const output = await buildAndRunSnippet(
     'subagent-start-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/subagent-start-command-hook-config';
@@ -7214,9 +7214,16 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'subagent-start-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'subagent-start-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'subagent-start-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'subagent-start-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const agentId = 'agent-start-command-7143';
 const agentType = 'reviewer-start-command-7143';
 const additionalContext = 'subagent start command context marker 7143';
+const timeoutLateContext = 'late subagent start context should not attach marker 7143';
 await writeFile(
   commandPath,
   [
@@ -7227,6 +7234,18 @@ await writeFile(
     "if (data.agent_id !== '" + agentId + "') { process.stderr.write('bad agent id ' + data.agent_id); process.exit(4); }",
     "if (data.agent_type !== '" + agentType + "') { process.stderr.write('bad agent type ' + data.agent_type); process.exit(5); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: '" + additionalContext + "' } }));",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: '" + timeoutLateContext + "' } }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -7289,6 +7308,56 @@ if (skippedStart.length !== 0) {
   throw new Error('SubagentStart command matcher should skip other agent type: ' + JSON.stringify(skippedStart));
 }
 
+clearRegisteredHooks();
+registerHookCallbacks({
+  SubagentStart: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutResults = [];
+for await (const result of executeSubagentStartHooks(
+  agentId,
+  agentType,
+  undefined,
+  10000,
+)) {
+  timeoutResults.push(result);
+}
+if (timeoutResults.some(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(timeoutLateContext)
+)) {
+  throw new Error('SubagentStart timed-out command should not attach late context: ' + JSON.stringify(timeoutResults));
+}
+if (!timeoutResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'SubagentStart';
+})) {
+  throw new Error('SubagentStart timed-out command should report cancellation: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('SubagentStart timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('SubagentStart timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
+
 console.log('subagent start command hook OK');`,
   )
   assert.equal(output, 'subagent start command hook OK')
@@ -7297,7 +7366,7 @@ console.log('subagent start command hook OK');`,
 await test('SubagentStop command hooks block with agent metadata', async () => {
   const output = await buildAndRunSnippet(
     'subagent-stop-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/subagent-stop-command-hook-config';
@@ -7308,10 +7377,17 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'subagent-stop-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'subagent-stop-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'subagent-stop-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'subagent-stop-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const agentId = 'agent-command-7142';
 const agentType = 'reviewer-command-7142';
 const lastAssistantText = 'subagent command final assistant marker 7142';
 const blockReason = 'subagent command stop block marker 7142';
+const timeoutBlockReason = 'late subagent command stop block should not apply marker 7142';
 await writeFile(
   commandPath,
   [
@@ -7325,6 +7401,18 @@ await writeFile(
     "if (data.stop_hook_active !== true) { process.stderr.write('bad active flag'); process.exit(7); }",
     "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text'); process.exit(8); }",
     "process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + blockReason + "' }));",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + timeoutBlockReason + "' }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -7427,6 +7515,60 @@ const blockingAttachment = stopResults.find(result => {
 });
 if (!blockingAttachment) {
   throw new Error('SubagentStop command hook should return blocking attachment: ' + JSON.stringify(stopResults));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  SubagentStop: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutResults = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  true,
+  agentId,
+  context,
+  messages,
+  agentType,
+)) {
+  timeoutResults.push(result);
+}
+if (timeoutResults.some(result =>
+  result.blockingError?.blockingError === timeoutBlockReason ||
+  result.message?.attachment?.blockingError?.blockingError === timeoutBlockReason
+)) {
+  throw new Error('SubagentStop timed-out command should not apply late block: ' + JSON.stringify(timeoutResults));
+}
+if (!timeoutResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'SubagentStop';
+})) {
+  throw new Error('SubagentStop timed-out command should report cancellation: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('SubagentStop timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('SubagentStop timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('subagent stop command hook OK');`,

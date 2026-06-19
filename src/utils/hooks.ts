@@ -1038,6 +1038,8 @@ async function execCommandHook(
         hookEvent === 'FileSuggestion' ||
         hookEvent === 'SessionStart' ||
         hookEvent === 'Setup' ||
+        hookEvent === 'SubagentStart' ||
+        hookEvent === 'SubagentStop' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||
