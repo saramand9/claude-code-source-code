@@ -3374,6 +3374,110 @@ console.log('instructions loaded hook OK');`,
   assert.equal(output, 'instructions loaded hook OK')
 })
 
+await test('InstructionsLoaded command hooks receive load metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'instructions-loaded-command-hook-test',
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/instructions-loaded-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'instructions-loaded-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'instructions-loaded-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'instructions-loaded-marker.json');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const filePath = 'build-src/test-artifacts/project-rules-command-3813.md';
+const triggerFilePath = 'build-src/test-artifacts/src/app-command-3813.ts';
+const parentFilePath = 'build-src/test-artifacts/CLAUDE-command.md';
+await writeFile(
+  commandPath,
+  [
+    "const { writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'InstructionsLoaded') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.file_path !== '" + filePath + "') { process.stderr.write('bad file path ' + data.file_path); process.exit(4); }",
+    "if (data.memory_type !== 'Project') { process.stderr.write('bad memory type ' + data.memory_type); process.exit(5); }",
+    "if (data.load_reason !== 'include') { process.stderr.write('bad load reason ' + data.load_reason); process.exit(6); }",
+    "if (!Array.isArray(data.globs) || data.globs[0] !== 'docs/**/*.md') { process.stderr.write('bad globs ' + JSON.stringify(data.globs)); process.exit(7); }",
+    "if (data.trigger_file_path !== '" + triggerFilePath + "') { process.stderr.write('bad trigger ' + data.trigger_file_path); process.exit(8); }",
+    "if (data.parent_file_path !== '" + parentFilePath + "') { process.stderr.write('bad parent ' + data.parent_file_path); process.exit(9); }",
+    "await writeFile('" + markerPathForScript + "', JSON.stringify({ loadReason: data.load_reason, memoryType: data.memory_type }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  {
+    executeInstructionsLoadedHooks,
+    hasInstructionsLoadedHook,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  InstructionsLoaded: [
+    {
+      matcher: 'include',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+if (!hasInstructionsLoadedHook()) {
+  throw new Error('InstructionsLoaded command hook should be detected after registration');
+}
+
+await executeInstructionsLoadedHooks(filePath, 'Project', 'include', {
+  globs: ['docs/**/*.md'],
+  triggerFilePath,
+  parentFilePath,
+  timeoutMs: 10000,
+});
+const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+if (marker.loadReason !== 'include' || marker.memoryType !== 'Project') {
+  throw new Error('InstructionsLoaded command marker mismatch: ' + JSON.stringify(marker));
+}
+
+await rm(markerPath, { force: true });
+await executeInstructionsLoadedHooks(filePath, 'Project', 'session_start', {
+  timeoutMs: 10000,
+});
+let skippedCreated = true;
+try {
+  await stat(markerPath);
+} catch {
+  skippedCreated = false;
+}
+if (skippedCreated) {
+  throw new Error('InstructionsLoaded command matcher should skip session_start');
+}
+
+console.log('instructions loaded command hook OK');`,
+  )
+  assert.equal(output, 'instructions loaded command hook OK')
+})
+
 await test('SessionEnd hooks receive exit reason metadata', async () => {
   const output = await buildAndRunSnippet(
     'session-end-hook-test',
