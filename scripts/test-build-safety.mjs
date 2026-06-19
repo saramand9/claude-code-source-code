@@ -695,6 +695,122 @@ console.log('agent frontmatter permission metadata OK');`,
   assert.equal(output, 'agent frontmatter permission metadata OK')
 })
 
+await test('agent tool filtering scopes plan-mode permissions', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-tool-filter-permission-test',
+    `process.env.USER_TYPE = '';
+
+const [
+  { filterToolsForAgent, resolveAgentTools },
+  { EXIT_PLAN_MODE_V2_TOOL_NAME },
+  { AGENT_TOOL_NAME },
+] = await Promise.all([
+  import('./src/tools/AgentTool/agentToolFiltering.ts'),
+  import('./src/tools/ExitPlanModeTool/constants.ts'),
+  import('./src/tools/AgentTool/constants.ts'),
+]);
+
+const tool = name => ({ name });
+const tools = [
+  tool('Read'),
+  tool('Bash'),
+  tool('TaskOutput'),
+  tool(EXIT_PLAN_MODE_V2_TOOL_NAME),
+  tool(AGENT_TOOL_NAME),
+  tool('mcp__server__tool'),
+];
+const names = list => list.map(item => item.name).sort();
+
+const defaultNames = names(filterToolsForAgent({
+  tools,
+  isBuiltIn: false,
+  permissionMode: 'default',
+}));
+if (defaultNames.includes(EXIT_PLAN_MODE_V2_TOOL_NAME)) {
+  throw new Error('default custom agents should not expose ExitPlanMode: ' + defaultNames.join(','));
+}
+if (defaultNames.includes(AGENT_TOOL_NAME)) {
+  throw new Error('external custom agents should not expose nested Agent tool: ' + defaultNames.join(','));
+}
+if (!defaultNames.includes('mcp__server__tool')) {
+  throw new Error('MCP tools should remain available to agents: ' + defaultNames.join(','));
+}
+
+const planNames = names(filterToolsForAgent({
+  tools,
+  isBuiltIn: false,
+  permissionMode: 'plan',
+}));
+if (!planNames.includes(EXIT_PLAN_MODE_V2_TOOL_NAME)) {
+  throw new Error('plan-mode agents should expose ExitPlanMode: ' + planNames.join(','));
+}
+if (planNames.includes('TaskOutput')) {
+  throw new Error('plan mode should not expose globally disallowed tools: ' + planNames.join(','));
+}
+
+const asyncNames = names(filterToolsForAgent({
+  tools,
+  isBuiltIn: false,
+  isAsync: true,
+  permissionMode: 'plan',
+}));
+if (!asyncNames.includes(EXIT_PLAN_MODE_V2_TOOL_NAME)) {
+  throw new Error('async plan-mode agents should preserve ExitPlanMode: ' + asyncNames.join(','));
+}
+if (asyncNames.includes(AGENT_TOOL_NAME)) {
+  throw new Error('async custom agents should not expose nested Agent tool: ' + asyncNames.join(','));
+}
+
+const resolved = resolveAgentTools(
+  {
+    source: 'userSettings',
+    tools: ['*'],
+    disallowedTools: ['Read'],
+    permissionMode: 'plan',
+  },
+  tools,
+  true,
+  false,
+);
+const resolvedNames = names(resolved.resolvedTools);
+if (!resolved.hasWildcard) {
+  throw new Error('wildcard agent tools should be reported as wildcard');
+}
+if (resolvedNames.includes('Read')) {
+  throw new Error('agent disallowedTools should remove Read: ' + resolvedNames.join(','));
+}
+if (!resolvedNames.includes(EXIT_PLAN_MODE_V2_TOOL_NAME)) {
+  throw new Error('resolved plan-mode wildcard should include ExitPlanMode: ' + resolvedNames.join(','));
+}
+if (!resolvedNames.includes('mcp__server__tool')) {
+  throw new Error('resolved plan-mode wildcard should keep MCP tools: ' + resolvedNames.join(','));
+}
+
+const mainResolved = resolveAgentTools(
+  {
+    source: 'userSettings',
+    tools: [AGENT_TOOL_NAME + '(reviewer, verifier)', EXIT_PLAN_MODE_V2_TOOL_NAME, 'MissingTool'],
+    disallowedTools: [],
+  },
+  tools,
+  false,
+  true,
+);
+if (JSON.stringify(mainResolved.allowedAgentTypes) !== JSON.stringify(['reviewer', 'verifier'])) {
+  throw new Error('main thread Agent spec should preserve allowed agent types: ' + JSON.stringify(mainResolved));
+}
+if (!mainResolved.validTools.includes(EXIT_PLAN_MODE_V2_TOOL_NAME)) {
+  throw new Error('main thread resolution should allow explicit ExitPlanMode: ' + JSON.stringify(mainResolved));
+}
+if (!mainResolved.invalidTools.includes('MissingTool')) {
+  throw new Error('main thread resolution should report unknown tools: ' + JSON.stringify(mainResolved));
+}
+
+console.log('agent tool filtering permissions OK');`,
+  )
+  assert.equal(output, 'agent tool filtering permissions OK')
+})
+
 await test('resume and user text feature modules use static bundled requires', async () => {
   const resumeSource = await readFile(
     join(BUILD, 'src/screens/ResumeConversation.tsx'),

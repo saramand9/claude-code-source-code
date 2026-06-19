@@ -3166,3 +3166,43 @@ Expected new output:
 ```text
 ok - agent frontmatter preserves valid permission metadata only
 ```
+
+## 2026-06-19 agent tool filtering permission coverage
+
+This round covers agent tool filtering and resolution around permission-mode
+metadata.
+
+- `scripts/test-build-safety.mjs`
+  - Verifies default custom agents do not expose `ExitPlanMode` or nested
+    `Agent` in external builds.
+  - Verifies plan-mode agents preserve `ExitPlanMode` without re-enabling other
+    globally disallowed tools.
+  - Verifies async plan-mode agents keep the same safety boundary.
+  - Verifies wildcard tool resolution respects `disallowedTools` while keeping
+    MCP tools available.
+  - Verifies main-thread `Agent(type-a, type-b)` specs preserve allowed agent
+    type metadata and report unknown tools.
+- `src/tools/AgentTool/agentToolFiltering.ts`
+  - Splits `filterToolsForAgent()` and `resolveAgentTools()` into a lightweight
+    module.
+  - Keeps the existing `agentToolUtils` export surface as a re-export while
+    avoiding heavy lifecycle imports for tool filtering callers.
+
+Risk boundary update: agent permission-mode tool filtering now has direct
+build-safety coverage, and direct filtering imports no longer trigger the
+heavier AgentTool lifecycle initialization cycle. Remaining gaps are
+interactive PermissionRequest UI, live timeout race coverage, and larger
+mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - agent tool filtering scopes plan-mode permissions
+```
