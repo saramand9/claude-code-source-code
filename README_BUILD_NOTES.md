@@ -4848,6 +4848,46 @@ ok - SessionStart and Setup command hooks expose startup context
 86/86 build-safety tests passed.
 ```
 
+## 2026-06-19 SessionStart and Setup command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for startup command
+hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `SessionStart` and `Setup` through the same direct Windows helper
+    path used by other short lifecycle command hooks.
+  - Preserves the existing shell-specific `CLAUDE_ENV_FILE` behavior for
+    startup hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the startup command-hook fixture with timed-out `SessionStart` and
+    `Setup` commands.
+  - Verifies timed-out `SessionStart` output does not attach
+    `additionalContext`, `initialUserMessage`, or `watchPaths`.
+  - Verifies timed-out `Setup` output does not attach setup context.
+  - Asserts both helper processes start but are killed before writing late
+    markers.
+
+Risk boundary update: startup command hooks now have build-safety coverage for
+stdin metadata, matcher filtering, context output, env-file compatibility, and
+simple-helper timeout cleanup. Remaining gaps include prompt/agent startup
+hooks, complex-shell timeout cleanup, and full keyboard-driven TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - SessionStart and Setup command hooks expose startup context
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 InstructionsLoaded command hook coverage
 
 This round extends instruction-load hook coverage from SDK callback hooks to

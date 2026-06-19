@@ -1036,6 +1036,8 @@ async function execCommandHook(
       isWindows &&
       (hookEvent === 'StatusLine' ||
         hookEvent === 'FileSuggestion' ||
+        hookEvent === 'SessionStart' ||
+        hookEvent === 'Setup' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||

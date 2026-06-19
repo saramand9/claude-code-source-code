@@ -10369,7 +10369,7 @@ console.log('session start setup hooks OK');`,
 await test('SessionStart and Setup command hooks expose startup context', async () => {
   const output = await buildAndRunSnippet(
     'session-start-setup-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/session-start-setup-command-hook-config';
@@ -10380,10 +10380,24 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'startup-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutSessionCommandPath = join(commandDir, 'session-start-timeout-command-hook.mjs');
+const timeoutSessionCommandPathForHook = timeoutSessionCommandPath.replace(/\\\\/g, '/');
+const timeoutSessionStartMarkerPath = join(commandDir, 'session-start-timeout-started.txt');
+const timeoutSessionStartMarkerPathForScript = timeoutSessionStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutSessionLateMarkerPath = join(commandDir, 'session-start-timeout-late.txt');
+const timeoutSessionLateMarkerPathForScript = timeoutSessionLateMarkerPath.replace(/\\\\/g, '/');
+const timeoutSetupCommandPath = join(commandDir, 'setup-timeout-command-hook.mjs');
+const timeoutSetupCommandPathForHook = timeoutSetupCommandPath.replace(/\\\\/g, '/');
+const timeoutSetupStartMarkerPath = join(commandDir, 'setup-timeout-started.txt');
+const timeoutSetupStartMarkerPathForScript = timeoutSetupStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutSetupLateMarkerPath = join(commandDir, 'setup-timeout-late.txt');
+const timeoutSetupLateMarkerPathForScript = timeoutSetupLateMarkerPath.replace(/\\\\/g, '/');
 const sessionContext = 'session command context marker 8712';
 const setupContext = 'setup command context marker 8712';
 const initialUserMessage = 'session command initial user marker 8712';
 const watchPath = commandDir.replace(/\\\\/g, '/') + '/watched.txt';
+const timeoutSessionLateOutput = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'late session start context should not attach marker 8712', initialUserMessage: 'late session start message should not attach marker 8712', watchPaths: [watchPath] } });
+const timeoutSetupLateOutput = JSON.stringify({ hookSpecificOutput: { hookEventName: 'Setup', additionalContext: 'late setup context should not attach marker 8712' } });
 await writeFile(
   commandPath,
   [
@@ -10404,6 +10418,30 @@ await writeFile(
     "}",
     "process.stderr.write('bad event ' + data.hook_event_name);",
     "process.exit(7);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutSessionCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutSessionStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutSessionLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('" + timeoutSessionLateOutput.replace(/'/g, "\\\\'") + "');",
+    "}, 1600);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutSetupCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutSetupStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutSetupLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('" + timeoutSetupLateOutput.replace(/'/g, "\\\\'") + "');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -10508,6 +10546,101 @@ for await (const result of executeSetupHooks('maintenance', undefined, 10000)) {
 }
 if (skippedSetup.length !== 0) {
   throw new Error('Setup command matcher should skip maintenance: ' + JSON.stringify(skippedSetup));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  SessionStart: [
+    {
+      matcher: 'startup',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutSessionCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutSessionResults = [];
+for await (const result of executeSessionStartHooks(
+  'startup',
+  'session-timeout-8712',
+  'command-agent-8712',
+  'model-command-8712',
+  undefined,
+  10000,
+)) {
+  timeoutSessionResults.push(result);
+}
+if (timeoutSessionResults.some(result =>
+  result.additionalContexts || result.initialUserMessage || result.watchPaths
+)) {
+  throw new Error('SessionStart timed-out command should not attach late startup output: ' + JSON.stringify(timeoutSessionResults));
+}
+if (!timeoutSessionResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'SessionStart';
+})) {
+  throw new Error('SessionStart timed-out command should report cancellation: ' + JSON.stringify(timeoutSessionResults));
+}
+try {
+  await stat(timeoutSessionStartMarkerPath);
+} catch (error) {
+  throw new Error('SessionStart timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutSessionLateMarkerPath);
+  throw new Error('SessionStart timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  Setup: [
+    {
+      matcher: 'init',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutSetupCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutSetupResults = [];
+for await (const result of executeSetupHooks('init', undefined, 10000)) {
+  timeoutSetupResults.push(result);
+}
+if (timeoutSetupResults.some(result =>
+  result.additionalContexts || result.initialUserMessage || result.watchPaths
+)) {
+  throw new Error('Setup timed-out command should not attach late setup output: ' + JSON.stringify(timeoutSetupResults));
+}
+if (!timeoutSetupResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'Setup';
+})) {
+  throw new Error('Setup timed-out command should report cancellation: ' + JSON.stringify(timeoutSetupResults));
+}
+try {
+  await stat(timeoutSetupStartMarkerPath);
+} catch (error) {
+  throw new Error('Setup timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutSetupLateMarkerPath);
+  throw new Error('Setup timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('session start setup command hooks OK');`,
