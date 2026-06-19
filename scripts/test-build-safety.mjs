@@ -3992,6 +3992,146 @@ console.log('subagent lifecycle hooks OK');`,
   assert.equal(output, 'subagent lifecycle hooks OK')
 })
 
+await test('SubagentStop command hooks block with agent metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'subagent-stop-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/subagent-stop-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'subagent-stop-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'subagent-stop-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const agentId = 'agent-command-7142';
+const agentType = 'reviewer-command-7142';
+const lastAssistantText = 'subagent command final assistant marker 7142';
+const blockReason = 'subagent command stop block marker 7142';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'SubagentStop') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.agent_id !== '" + agentId + "') { process.stderr.write('bad agent id ' + data.agent_id); process.exit(4); }",
+    "if (data.agent_type !== '" + agentType + "') { process.stderr.write('bad agent type ' + data.agent_type); process.exit(5); }",
+    "if (!String(data.agent_transcript_path).endsWith('agent-" + agentId + ".jsonl')) { process.stderr.write('bad transcript ' + data.agent_transcript_path); process.exit(6); }",
+    "if (data.stop_hook_active !== true) { process.stderr.write('bad active flag'); process.exit(7); }",
+    "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text'); process.exit(8); }",
+    "process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + blockReason + "' }));",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeStopHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  SubagentStop: [
+    {
+      matcher: agentType,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  agentId,
+  agentType,
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const messages = [
+  {
+    type: 'assistant',
+    uuid: '00000000-0000-0000-0000-000000007142',
+    timestamp: '2026-06-19T00:00:00.000Z',
+    message: {
+      id: 'msg_subagent_stop_command_7142',
+      role: 'assistant',
+      content: [{ type: 'text', text: lastAssistantText }],
+    },
+  },
+];
+
+const stopResults = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  true,
+  agentId,
+  context,
+  messages,
+  agentType,
+)) {
+  stopResults.push(result);
+}
+
+const blocking = stopResults.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  String(result.blockingError?.command).includes('subagent-stop-command-hook.mjs')
+);
+if (!blocking) {
+  throw new Error('SubagentStop command hook should return blocking feedback: ' + JSON.stringify(stopResults));
+}
+const blockingAttachment = stopResults.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_blocking_error' &&
+    attachment.hookEvent === 'SubagentStop' &&
+    attachment.blockingError?.blockingError === blockReason
+  );
+});
+if (!blockingAttachment) {
+  throw new Error('SubagentStop command hook should return blocking attachment: ' + JSON.stringify(stopResults));
+}
+
+console.log('subagent stop command hook OK');`,
+  )
+  assert.equal(output, 'subagent stop command hook OK')
+})
+
 await test('teammate task lifecycle hooks block with metadata', async () => {
   const output = await buildAndRunSnippet(
     'teammate-task-lifecycle-hook-test',
