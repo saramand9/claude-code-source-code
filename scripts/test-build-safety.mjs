@@ -1905,6 +1905,92 @@ console.log('permission denied hook OK');`,
   assert.equal(output, 'permission denied hook OK')
 })
 
+await test('ConfigChange hooks cannot block policy settings', async () => {
+  const output = await buildAndRunSnippet(
+    'config-change-policy-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'config-change-policy-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        ConfigChange: [
+          {
+            matcher: 'user_settings|policy_settings',
+            hooks: [
+              {
+                type: 'command',
+                shell: 'powershell',
+                command: "[Console]::Error.WriteLine('config change block marker 5086'); exit 2",
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeConfigChangeHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const userResults = await executeConfigChangeHooks(
+  'user_settings',
+  join(configDir, 'settings.json'),
+  10000,
+);
+if (userResults.length !== 1) {
+  throw new Error('expected one user settings ConfigChange result: ' + JSON.stringify(userResults));
+}
+if (userResults[0].blocked !== true) {
+  throw new Error('user settings ConfigChange should be blocked: ' + JSON.stringify(userResults));
+}
+if (!String(userResults[0].output).includes('config change block marker 5086')) {
+  throw new Error('user settings ConfigChange should include hook stderr: ' + JSON.stringify(userResults));
+}
+
+const policyResults = await executeConfigChangeHooks(
+  'policy_settings',
+  join(configDir, 'policy-settings.json'),
+  10000,
+);
+if (policyResults.length !== 1) {
+  throw new Error('expected one policy settings ConfigChange result: ' + JSON.stringify(policyResults));
+}
+if (policyResults[0].blocked !== false) {
+  throw new Error('policy settings ConfigChange must not be blockable: ' + JSON.stringify(policyResults));
+}
+if (!String(policyResults[0].output).includes('config change block marker 5086')) {
+  throw new Error('policy settings ConfigChange should still execute audit hook: ' + JSON.stringify(policyResults));
+}
+
+console.log('config change policy hook OK');`,
+  )
+  assert.equal(output, 'config change policy hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

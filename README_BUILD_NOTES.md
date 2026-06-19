@@ -2503,3 +2503,35 @@ Expected new output:
 ```text
 ok - PermissionDenied hooks can request retry
 ```
+
+## 2026-06-19 ConfigChange policy hook build-safety coverage
+
+This round covers a configuration-change safety boundary. `ConfigChange` hooks
+may block ordinary settings changes, but policy/managed settings changes must
+remain auditable without being blockable by user-controlled hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Creates a temporary `settings.json` with a `ConfigChange` command hook.
+  - The hook writes a marker to stderr and exits with code 2.
+  - Asserts `executeConfigChangeHooks("user_settings", ...)` reports a blocked
+    result and preserves the hook output.
+  - Asserts `executeConfigChangeHooks("policy_settings", ...)` still runs the
+    audit hook but forces `blocked: false`.
+
+Risk boundary update: policy ConfigChange hooks now have direct build-safety
+coverage for the "audit but do not block" rule. Remaining hook gaps are mainly
+full CLI E2E around config watchers, interactive PermissionRequest UI, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - ConfigChange hooks cannot block policy settings
+```
