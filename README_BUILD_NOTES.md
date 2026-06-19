@@ -3178,6 +3178,45 @@ ok - interactive PermissionRequest hook failures keep prompt alive
 82/82 build-safety tests passed.
 ```
 
+## 2026-06-19 PreToolUse permission metadata precedence
+
+This round fixes a lower-level hook aggregation edge case for concurrent
+`PreToolUse` hooks.
+
+- `src/utils/hooks.ts`
+  - Tracks the permission decision's behavior, reason, source, and updated
+    input as one aggregate decision.
+  - Preserves the metadata from the hook that currently owns the highest
+    precedence decision (`deny > ask > allow`).
+  - Prevents a later lower-priority result, such as `allow`, from replacing a
+    prior `deny` reason or attaching allow-only `updatedInput` to a deny.
+- `scripts/test-build-safety.mjs`
+  - Adds a parallel PreToolUse regression with a fast `deny` and slower
+    `allow`.
+  - Verifies both hooks run, final behavior remains `deny`, the deny reason is
+    preserved, and lower-priority allow input is not attached.
+
+Risk boundary update: concurrent PreToolUse hook metadata now follows the same
+precedence as the permission behavior itself. Remaining gaps are full
+keyboard-driven TTY interaction and broader hook concurrency cases outside
+permission decisions.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PreToolUse permission aggregation preserves deny metadata
+83/83 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI

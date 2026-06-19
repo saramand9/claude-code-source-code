@@ -2753,10 +2753,15 @@ async function* executeHooks({
   }
 
   let permissionBehavior: PermissionResult['behavior'] | undefined
+  let permissionDecisionReason: string | undefined
+  let permissionHookSource: string | undefined
+  let permissionUpdatedInput: Record<string, unknown> | undefined
 
   // Run all hooks in parallel and wait for all to complete
   for await (const result of all(hookPromises)) {
     outcomes[result.outcome]++
+    const hookSource = matchingHooks.find(m => m.hook === result.hook)
+      ?.hookSource
 
     // Check for preventContinuation early
     if (result.preventContinuation) {
@@ -2841,17 +2846,26 @@ async function* executeHooks({
         case 'deny':
           // deny always takes precedence
           permissionBehavior = 'deny'
+          permissionDecisionReason = result.hookPermissionDecisionReason
+          permissionHookSource = hookSource
+          permissionUpdatedInput = undefined
           break
         case 'ask':
           // ask takes precedence over allow but not deny
           if (permissionBehavior !== 'deny') {
             permissionBehavior = 'ask'
+            permissionDecisionReason = result.hookPermissionDecisionReason
+            permissionHookSource = hookSource
+            permissionUpdatedInput = result.updatedInput
           }
           break
         case 'allow':
           // allow only if no other behavior set
-          if (!permissionBehavior) {
+          if (!permissionBehavior || permissionBehavior === 'allow') {
             permissionBehavior = 'allow'
+            permissionDecisionReason = result.hookPermissionDecisionReason
+            permissionHookSource = hookSource
+            permissionUpdatedInput = result.updatedInput
           }
           break
         case 'passthrough':
@@ -2863,10 +2877,9 @@ async function* executeHooks({
     // Yield permission behavior and updatedInput if provided (from allow or ask behavior)
     if (permissionBehavior !== undefined) {
       const updatedInput =
-        result.updatedInput &&
-        (result.permissionBehavior === 'allow' ||
-          result.permissionBehavior === 'ask')
-          ? result.updatedInput
+        permissionUpdatedInput &&
+        (permissionBehavior === 'allow' || permissionBehavior === 'ask')
+          ? permissionUpdatedInput
           : undefined
       if (updatedInput) {
         logForDebugging(
@@ -2875,8 +2888,8 @@ async function* executeHooks({
       }
       yield {
         permissionBehavior,
-        hookPermissionDecisionReason: result.hookPermissionDecisionReason,
-        hookSource: matchingHooks.find(m => m.hook === result.hook)?.hookSource,
+        hookPermissionDecisionReason: permissionDecisionReason,
+        hookSource: permissionHookSource,
         updatedInput,
       }
     }

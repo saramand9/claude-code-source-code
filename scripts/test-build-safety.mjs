@@ -1647,6 +1647,123 @@ console.log('pretool hook allow deny rules OK');`,
   assert.equal(output, 'pretool hook allow deny rules OK')
 })
 
+await test('PreToolUse permission aggregation preserves deny metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'pretool-hook-deny-metadata-test',
+    `const [
+  { executePreToolHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const input = {
+  file_path: 'build-src/test-artifacts/pretool-hook-deny-metadata.txt',
+  content: 'pretool deny should keep metadata',
+};
+const denyReason = 'fast deny should keep its reason';
+const allowReason = 'slow allow should not replace deny reason';
+let fastDenyCalls = 0;
+let slowAllowCalls = 0;
+
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Write',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async () => {
+            fastDenyCalls += 1;
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: denyReason,
+              },
+            };
+          },
+        },
+        {
+          type: 'callback',
+          callback: async () => {
+            slowAllowCalls += 1;
+            await new Promise(resolve => setTimeout(resolve, 25));
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'allow',
+                permissionDecisionReason: allowReason,
+                updatedInput: {
+                  ...input,
+                  content: 'slow allow input should not attach to deny',
+                },
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: false },
+  getAppState() {
+    return {
+      sessionHooks: new Map(),
+      toolPermissionContext: {
+        mode: 'default',
+        additionalWorkingDirectories: new Map(),
+        alwaysAllowRules: {},
+        alwaysDenyRules: {},
+        alwaysAskRules: {},
+        isBypassPermissionsModeAvailable: false,
+      },
+    };
+  },
+};
+
+let lastPermissionResult = null;
+for await (const result of executePreToolHooks(
+  'Write',
+  'toolu_pretool_hook_deny_metadata',
+  input,
+  context,
+  'default',
+  context.abortController.signal,
+)) {
+  if (result.permissionBehavior !== undefined) {
+    lastPermissionResult = result;
+  }
+}
+
+if (fastDenyCalls !== 1 || slowAllowCalls !== 1) {
+  throw new Error('both PreToolUse hooks should run: ' + fastDenyCalls + '/' + slowAllowCalls);
+}
+if (lastPermissionResult?.permissionBehavior !== 'deny') {
+  throw new Error('PreToolUse deny should remain final: ' + JSON.stringify(lastPermissionResult));
+}
+if (lastPermissionResult.hookPermissionDecisionReason !== denyReason) {
+  throw new Error('PreToolUse deny reason should survive later allow: ' + JSON.stringify(lastPermissionResult));
+}
+if (lastPermissionResult.updatedInput !== undefined) {
+  throw new Error('PreToolUse deny should not carry lower-priority allow input: ' + JSON.stringify(lastPermissionResult));
+}
+
+console.log('pretool hook deny metadata OK');`,
+  )
+  assert.equal(output, 'pretool hook deny metadata OK')
+})
+
 await test('PermissionRequest hooks decide headless permission prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-headless-hook-test',
