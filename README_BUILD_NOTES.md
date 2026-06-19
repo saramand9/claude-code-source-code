@@ -3717,8 +3717,7 @@ stdin and receive `CLAUDE_ENV_FILE`.
 
 Risk boundary update: environment command hooks now have direct coverage for
 JSON input delivery, environment-file injection, watch path output, and matcher
-filtering. Remaining gaps include reading the session environment back into
-Bash execution on non-Windows platforms and malformed env-file content.
+filtering. Remaining gaps include malformed env-file content.
 
 Verification:
 
@@ -3734,6 +3733,45 @@ Expected new output:
 ```text
 ok - environment command hooks receive input and env files
 101/101 build-safety tests passed.
+```
+
+## 2026-06-19 Session environment Bash injection
+
+This round restores session environment read-back for Bash commands on Windows
+and keeps the existing non-PowerShell `.sh` environment-file contract intact.
+
+- `src/utils/sessionEnvironment.ts`
+  - Removes the platform-wide Windows early return from
+    `getSessionEnvironmentScript()`.
+  - Allows hook-written `.sh` files from `Setup`, `SessionStart`,
+    `CwdChanged`, and `FileChanged` to be loaded on Windows when the Bash
+    provider is used.
+  - Leaves PowerShell behavior unchanged; PowerShell hooks still do not receive
+    or consume `.sh` env files.
+- `scripts/test-build-safety.mjs`
+  - Adds a regression test that writes multiple hook env files, verifies stable
+    priority ordering, and confirms `createBashShellProvider()` injects the
+    resulting exports into generated Bash commands.
+
+Risk boundary update: environment hooks can now write session environment
+exports that are read back into subsequent Bash commands on Windows as well as
+non-Windows platforms. Remaining gaps include malformed env-file content and a
+separate PowerShell-native environment file format.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - session environment hook files are injected into bash commands
+111/111 build-safety tests passed.
 ```
 
 ## 2026-06-19 Post-sampling hook coverage

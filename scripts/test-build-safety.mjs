@@ -4161,6 +4161,76 @@ console.log('environment command input hooks OK');`,
   assert.equal(output, 'environment command input hooks OK')
 })
 
+await test('session environment hook files are injected into bash commands', async () => {
+  const output = await buildAndRunSnippet(
+    'session-environment-bash-injection-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'session-environment-bash-injection-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  {
+    getHookEnvFilePath,
+    getSessionEnvironmentScript,
+    invalidateSessionEnvCache,
+  },
+  { createBashShellProvider },
+  { setIsInteractive },
+] = await Promise.all([
+  import('./src/utils/sessionEnvironment.ts'),
+  import('./src/utils/shell/bashProvider.ts'),
+  import('./src/bootstrap/state.ts'),
+]);
+
+setIsInteractive(false);
+
+const setupPath = await getHookEnvFilePath('Setup', 1);
+const sessionStartPath = await getHookEnvFilePath('SessionStart', 0);
+const cwdChangedPath = await getHookEnvFilePath('CwdChanged', 3);
+await writeFile(sessionStartPath, 'export CLAUDE_SESSION_START_HOOK=8463\\n', 'utf8');
+await writeFile(cwdChangedPath, 'export CLAUDE_CWD_CHANGED_HOOK=8463\\n', 'utf8');
+await writeFile(setupPath, 'export CLAUDE_SETUP_HOOK=8463\\n', 'utf8');
+
+invalidateSessionEnvCache();
+const sessionScript = await getSessionEnvironmentScript();
+if (!sessionScript) {
+  throw new Error('session environment script should load hook env files');
+}
+const setupIndex = sessionScript.indexOf('CLAUDE_SETUP_HOOK=8463');
+const sessionStartIndex = sessionScript.indexOf('CLAUDE_SESSION_START_HOOK=8463');
+const cwdChangedIndex = sessionScript.indexOf('CLAUDE_CWD_CHANGED_HOOK=8463');
+if (setupIndex === -1 || sessionStartIndex === -1 || cwdChangedIndex === -1) {
+  throw new Error('session environment script missing hook content: ' + JSON.stringify(sessionScript));
+}
+if (!(setupIndex < sessionStartIndex && sessionStartIndex < cwdChangedIndex)) {
+  throw new Error('session environment hook script order is unstable: ' + JSON.stringify(sessionScript));
+}
+
+const provider = await createBashShellProvider('bash', { skipSnapshot: true });
+const { commandString } = await provider.buildExecCommand(
+  'node -e "console.log(process.env.CLAUDE_SETUP_HOOK)"',
+  { id: 'session-env-8463', useSandbox: false },
+);
+if (!commandString.includes('export CLAUDE_SETUP_HOOK=8463')) {
+  throw new Error('bash command should include setup env script: ' + commandString);
+}
+if (!commandString.includes('export CLAUDE_SESSION_START_HOOK=8463')) {
+  throw new Error('bash command should include session start env script: ' + commandString);
+}
+if (!commandString.includes('export CLAUDE_CWD_CHANGED_HOOK=8463')) {
+  throw new Error('bash command should include cwd changed env script: ' + commandString);
+}
+
+console.log('session environment bash injection OK');`,
+  )
+  assert.equal(output, 'session environment bash injection OK')
+})
+
 await test('post-sampling hooks receive context and isolate failures', async () => {
   const output = await buildAndRunSnippet(
     'post-sampling-hook-test',
@@ -7664,6 +7734,8 @@ addFunctionHook(
     if (!signal || typeof signal.aborted !== 'boolean') {
       throw new Error('timeout function hook should receive abort signal');
     }
+    const keepAlive = setTimeout(() => {}, 1000);
+    signal.addEventListener('abort', () => clearTimeout(keepAlive), { once: true });
     return new Promise(() => {});
   },
   'timeout hook should not block',
