@@ -3018,6 +3018,10 @@ function hookResultToOutsideReplResult(
     result.message?.type === 'attachment' ? result.message.attachment : null
   let output = result.systemMessage ?? result.blockingError?.blockingError ?? ''
 
+  if (!output && result.outcome === 'cancelled') {
+    output = 'Hook cancelled'
+  }
+
   if (!output && attachment) {
     switch (attachment.type) {
       case 'hook_success':
@@ -3799,6 +3803,7 @@ export async function executeStopFailureHooks(
     timeoutMs,
     matchQuery: error,
     messages: [lastMessage],
+    signal: toolUseContext?.abortController.signal,
     toolUseContext,
   })
 }

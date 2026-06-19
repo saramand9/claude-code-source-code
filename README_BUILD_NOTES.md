@@ -3287,8 +3287,7 @@ on the outside-REPL path when the caller can provide conversation messages.
 Risk boundary update: `StopFailure` now supports command, prompt, agent, and
 session function hook types outside the REPL when the caller supplies the
 required context/messages. Remaining gaps include function-hook coverage for
-other outside-REPL lifecycle events that do not currently provide messages and
-timeout/cancellation behavior specific to outside-REPL function hooks.
+other outside-REPL lifecycle events that do not currently provide messages.
 
 Verification:
 
@@ -3304,6 +3303,43 @@ Expected new output:
 ```text
 ok - StopFailure function hooks execute outside REPL with messages
 109/109 build-safety tests passed.
+```
+
+## 2026-06-19 StopFailure function hook abort handling
+
+This round closes the timeout/cancellation gap discovered after enabling
+outside-REPL `StopFailure` function hooks.
+
+- `src/utils/hooks.ts`
+  - Passes `toolUseContext.abortController.signal` from
+    `executeStopFailureHooks()` into `executeHooksOutsideREPL()`.
+  - Ensures `hookResultToOutsideReplResult()` reports cancelled hook results as
+    `Hook cancelled` even when the underlying `HookResult` has no attachment.
+- `scripts/test-build-safety.mjs`
+  - Adds a pre-aborted `StopFailure` function hook regression test and verifies
+    the callback is not invoked.
+  - Adds a hanging function hook fixture with a 1 ms timeout and verifies it
+    returns a non-blocking cancellation result instead of an empty output.
+
+Risk boundary update: outside-REPL `StopFailure` function hooks now respect the
+caller abort signal and expose timeout cancellation consistently. Remaining gaps
+include function-hook coverage for other outside-REPL lifecycle events that do
+not currently provide messages.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - StopFailure function hooks respect outside REPL aborts and timeouts
+110/110 build-safety tests passed.
 ```
 
 ## 2026-06-19 HTTP hook build-safety coverage

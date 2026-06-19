@@ -7550,6 +7550,145 @@ console.log('stop failure function hook OK');`,
   assert.equal(output, 'stop failure function hook OK')
 })
 
+await test('StopFailure function hooks respect outside REPL aborts and timeouts', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-function-hook-abort-timeout-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-function-hook-abort-timeout-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeStopFailureHooks },
+  { getSessionId, setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { addFunctionHook },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/hooks/sessionHooks.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const error = 'stop failure function abort timeout marker 5332';
+const lastAssistantText = 'last assistant before function abort timeout marker 5332';
+const sessionId = getSessionId();
+
+function createAppState() {
+  return {
+    sessionHooks: new Map(),
+    toolPermissionContext: {
+      mode: 'default',
+      additionalWorkingDirectories: new Map(),
+      alwaysAllowRules: {},
+      alwaysDenyRules: {},
+      alwaysAskRules: {},
+      isBypassPermissionsModeAvailable: false,
+    },
+  };
+}
+
+function createContext(appState, abortController) {
+  return {
+    abortController,
+    options: { isNonInteractiveSession: true },
+    getAppState() {
+      return appState;
+    },
+    setAppState(updater) {
+      const next = updater(appState);
+      if (next !== appState) {
+        Object.assign(appState, next);
+      }
+    },
+    updateAttributionState() {},
+  };
+}
+
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000005332',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  message: {
+    id: 'msg_stop_failure_function_timeout_5332',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+let abortedState = createAppState();
+function setAbortedState(updater) {
+  abortedState = updater(abortedState);
+}
+let abortedCalls = 0;
+addFunctionHook(
+  setAbortedState,
+  sessionId,
+  'StopFailure',
+  error,
+  () => {
+    abortedCalls += 1;
+    return true;
+  },
+  'aborted hook should not block',
+  { id: 'stop-failure-function-aborted-5332', timeout: 5000 },
+);
+const abortedController = new AbortController();
+abortedController.abort('pre-aborted stop failure marker 5332');
+const abortedResults = await executeStopFailureHooks(
+  lastMessage,
+  createContext(abortedState, abortedController),
+  10000,
+);
+if (abortedCalls !== 0) {
+  throw new Error('pre-aborted StopFailure function hook should not run, got ' + abortedCalls);
+}
+if (abortedResults.length !== 0) {
+  throw new Error('pre-aborted StopFailure should return no results: ' + JSON.stringify(abortedResults));
+}
+
+let timeoutState = createAppState();
+function setTimeoutState(updater) {
+  timeoutState = updater(timeoutState);
+}
+let timeoutCalls = 0;
+addFunctionHook(
+  setTimeoutState,
+  sessionId,
+  'StopFailure',
+  error,
+  (_messages, signal) => {
+    timeoutCalls += 1;
+    if (!signal || typeof signal.aborted !== 'boolean') {
+      throw new Error('timeout function hook should receive abort signal');
+    }
+    return new Promise(() => {});
+  },
+  'timeout hook should not block',
+  { id: 'stop-failure-function-timeout-5332', timeout: 1 },
+);
+const timeoutResults = await executeStopFailureHooks(
+  lastMessage,
+  createContext(timeoutState, new AbortController()),
+  10000,
+);
+if (timeoutCalls !== 1) {
+  throw new Error('timeout StopFailure function hook should run once, got ' + timeoutCalls);
+}
+if (timeoutResults.length !== 1) {
+  throw new Error('timeout StopFailure function hook should return one result: ' + JSON.stringify(timeoutResults));
+}
+if (timeoutResults[0].command !== 'function' || timeoutResults[0].succeeded !== false || timeoutResults[0].blocked !== false || timeoutResults[0].output !== 'Hook cancelled') {
+  throw new Error('timeout StopFailure function hook should return cancellation result: ' + JSON.stringify(timeoutResults));
+}
+
+console.log('stop failure function abort timeout OK');`,
+  )
+  assert.equal(output, 'stop failure function abort timeout OK')
+})
+
 await test('outside REPL once skill hooks are removed after success', async () => {
   const output = await buildAndRunSnippet(
     'outside-repl-once-skill-hook-test',
