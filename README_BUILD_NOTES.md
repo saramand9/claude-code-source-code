@@ -2994,3 +2994,33 @@ Expected new output:
 ```text
 ok - Stop hooks block and prevent continuation
 ```
+
+## 2026-06-19 StatusLine/FileSuggestion fallback coverage
+
+This round covers failure fallback behavior for helper commands used by the
+status line and file suggestion UI.
+
+- `scripts/test-build-safety.mjs`
+  - Adds failing command fixtures that write stdout and exit non-zero.
+  - Asserts failed `StatusLine` command output is ignored.
+  - Asserts failed `FileSuggestion` command output returns an empty list.
+  - Adds successful-but-blank command fixtures.
+  - Asserts blank status output and blank file suggestions are filtered away.
+
+Risk boundary update: status/file suggestion command success paths, trimming,
+empty output, and non-zero exit behavior now have direct build-safety coverage.
+Remaining gaps are interactive PermissionRequest UI, command abort timing, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - status line and file suggestion commands ignore failed or empty output
+```

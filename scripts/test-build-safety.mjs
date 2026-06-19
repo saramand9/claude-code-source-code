@@ -3443,6 +3443,119 @@ console.log('status line file suggestion commands OK');`,
   assert.equal(output, 'status line file suggestion commands OK')
 })
 
+await test('status line and file suggestion commands ignore failed or empty output', async () => {
+  const output = await buildAndRunSnippet(
+    'status-line-file-suggestion-fallback-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+
+const configDirRel = 'build-src/test-artifacts/status-line-file-suggestion-fallback-config';
+await rm(configDirRel, { recursive: true, force: true });
+await mkdir(configDirRel, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDirRel;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const statusFailCommandPath = configDirRel + '/status-line-fail-command.mjs';
+const suggestionFailCommandPath = configDirRel + '/file-suggestion-fail-command.mjs';
+const statusBlankCommandPath = configDirRel + '/status-line-blank-command.mjs';
+const suggestionBlankCommandPath = configDirRel + '/file-suggestion-blank-command.mjs';
+await writeFile(
+  statusFailCommandPath,
+  "process.stdout.write('failed status should be ignored');\\nprocess.exit(7);\\n",
+  'utf8',
+);
+await writeFile(
+  suggestionFailCommandPath,
+  "process.stdout.write('failed-suggestion.ts');\\nprocess.exit(7);\\n",
+  'utf8',
+);
+await writeFile(
+  statusBlankCommandPath,
+  "process.stdout.write('  \\\\n  \\\\n');\\n",
+  'utf8',
+);
+await writeFile(
+  suggestionBlankCommandPath,
+  "process.stdout.write('  \\\\n\\\\n');\\n",
+  'utf8',
+);
+
+const [
+  { executeStatusLineCommand, executeFileSuggestionCommand },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+function resetHookSettings() {
+  setIsInteractive(false);
+  resetHooksConfigSnapshot();
+  resetSettingsCache();
+}
+
+async function writeSettings(statusCommand, suggestionCommand) {
+  await writeFile(
+    configDirRel + '/settings.json',
+    JSON.stringify(
+      {
+        statusLine: {
+          type: 'command',
+          command: 'node ' + statusCommand,
+        },
+        fileSuggestion: {
+          type: 'command',
+          command: 'node ' + suggestionCommand,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  resetHookSettings();
+}
+
+const statusInput = {
+  marker: 'status-marker-8519',
+  cwd: process.cwd(),
+  model: { id: 'model-8519', display_name: 'Model 8519' },
+  transcriptPath: 'build-src/test-artifacts/status-transcript-8519.jsonl',
+};
+const suggestionInput = {
+  command: '@ig',
+  cwd: process.cwd(),
+  paths: ['src/index.ts'],
+};
+
+await writeSettings(statusFailCommandPath, suggestionFailCommandPath);
+const failedStatusLine = await executeStatusLineCommand(statusInput, undefined, 10000, true);
+if (failedStatusLine !== undefined) {
+  throw new Error('failed status line output should be ignored: ' + JSON.stringify(failedStatusLine));
+}
+const failedSuggestions = await executeFileSuggestionCommand(suggestionInput, undefined, 10000);
+if (JSON.stringify(failedSuggestions) !== JSON.stringify([])) {
+  throw new Error('failed file suggestions should be empty: ' + JSON.stringify(failedSuggestions));
+}
+
+await writeSettings(statusBlankCommandPath, suggestionBlankCommandPath);
+const blankStatusLine = await executeStatusLineCommand(statusInput, undefined, 10000, true);
+if (blankStatusLine !== undefined) {
+  throw new Error('blank status line output should be ignored: ' + JSON.stringify(blankStatusLine));
+}
+const blankSuggestions = await executeFileSuggestionCommand(suggestionInput, undefined, 10000);
+if (JSON.stringify(blankSuggestions) !== JSON.stringify([])) {
+  throw new Error('blank file suggestions should be empty: ' + JSON.stringify(blankSuggestions));
+}
+
+console.log('status line file suggestion fallback OK');`,
+  )
+  assert.equal(output, 'status line file suggestion fallback OK')
+})
+
 await test('StopFailure hooks receive error metadata', async () => {
   const output = await buildAndRunSnippet(
     'stop-failure-hook-test',
