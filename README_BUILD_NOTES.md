@@ -3409,6 +3409,40 @@ ok - PreToolUse command hooks can allow and update input
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PreToolUse command stop coverage
+
+This round closes the direct command-hook coverage gap for `PreToolUse`
+prevent-continuation output.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the `PreToolUse` command-hook regression with a command fixture that
+    returns `continue: false` and a `stopReason`.
+  - Verifies `runPreToolUseHooks()` yields a `preventContinuation` result.
+  - Verifies the stop reason is preserved as a separate `stopReason` result for
+    the tool execution path.
+
+Risk boundary update: `PreToolUse` command hooks now have direct build-safety
+coverage for allow, deny, ask, input rewriting, additional context, decision
+reasons, matcher filtering, and prevent-continuation output. Remaining gaps
+include complex-shell timeout cleanup and larger callback/command precedence
+combinations.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PreToolUse command hooks can allow and update input
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

@@ -1782,6 +1782,8 @@ const denyCommandPath = join(commandDir, 'pretool-deny-command-hook.mjs');
 const denyCommandPathForHook = denyCommandPath.replace(/\\\\/g, '/');
 const askCommandPath = join(commandDir, 'pretool-ask-command-hook.mjs');
 const askCommandPathForHook = askCommandPath.replace(/\\\\/g, '/');
+const stopCommandPath = join(commandDir, 'pretool-stop-command-hook.mjs');
+const stopCommandPathForHook = stopCommandPath.replace(/\\\\/g, '/');
 const originalCommand = 'echo pretool command hook original 3946';
 const updatedCommand = 'echo pretool command hook updated 3946';
 const askUpdatedCommand = 'echo pretool command hook ask updated 3946';
@@ -1789,6 +1791,7 @@ const additionalContext = 'pretool command hook context marker 3946';
 const allowReason = 'pretool command allow marker 3946';
 const denyReason = 'pretool command deny marker 3946';
 const askReason = 'pretool command ask marker 3946';
+const stopReason = 'pretool command stop marker 3946';
 await writeFile(
   commandPath,
   [
@@ -1800,6 +1803,19 @@ await writeFile(
     "if (data.tool_use_id !== 'toolu_pretool_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
     "if (data.tool_input.command !== '" + originalCommand + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '" + allowReason + "', updatedInput: { command: '" + updatedCommand + "' }, additionalContext: '" + additionalContext + "' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  stopCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PreToolUse') { process.stderr.write('bad stop event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad stop tool ' + data.tool_name); process.exit(4); }",
+    "process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + stopReason + "', hookSpecificOutput: { hookEventName: 'PreToolUse' } }));",
     "process.exit(0);",
   ].join('\\n'),
   'utf8',
@@ -2023,6 +2039,41 @@ if (askPermissionResult.updatedInput?.command !== askUpdatedCommand) {
 }
 if (askPermissionResult.message !== askReason || askPermissionResult.decisionReason?.reason !== askReason) {
   throw new Error('PreToolUse command ask should preserve reason: ' + JSON.stringify(askPermissionResult));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + stopCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+const stopped = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  tool,
+  { command: originalCommand },
+  'toolu_pretool_command_hook_stop',
+  'msg_pretool_command_hook_stop',
+  'req_pretool_command_hook_stop',
+  undefined,
+  undefined,
+)) {
+  stopped.push(result);
+}
+if (!stopped.some(result => result.type === 'preventContinuation' && result.shouldPreventContinuation === true)) {
+  throw new Error('PreToolUse command stop should request preventContinuation: ' + JSON.stringify(stopped));
+}
+if (!stopped.some(result => result.type === 'stopReason' && result.stopReason === stopReason)) {
+  throw new Error('PreToolUse command stop should preserve stopReason: ' + JSON.stringify(stopped));
 }
 
 console.log('pretool command hook OK');`,
