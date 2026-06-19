@@ -2399,6 +2399,202 @@ console.log('session end hook OK');`,
   assert.equal(output, 'session end hook OK')
 })
 
+await test('UserPromptSubmit hooks attach context and block prompts', async () => {
+  const output = await buildAndRunSnippet(
+    'user-prompt-submit-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/user-prompt-submit-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeUserPromptSubmitHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+
+const beforeRegistration = [];
+for await (const result of executeUserPromptSubmitHooks(
+  'prompt before registration',
+  'default',
+  context,
+)) {
+  beforeRegistration.push(result);
+}
+if (beforeRegistration.length !== 0) {
+  throw new Error('UserPromptSubmit should not run before hooks are registered: ' + JSON.stringify(beforeRegistration));
+}
+
+const prompt = 'user prompt submit marker 9137';
+const additionalContext = 'user prompt submit context marker 9137';
+let contextCalls = 0;
+registerHookCallbacks({
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async (hookInput, toolUseID, signal, hookIndex, callbackContext) => {
+            contextCalls += 1;
+            if (hookInput.hook_event_name !== 'UserPromptSubmit') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.prompt !== prompt) {
+              throw new Error('unexpected prompt: ' + hookInput.prompt);
+            }
+            if (hookInput.permission_mode !== 'default') {
+              throw new Error('unexpected permission mode: ' + hookInput.permission_mode);
+            }
+            if (typeof toolUseID !== 'string' || toolUseID.length === 0) {
+              throw new Error('unexpected hook tool use id: ' + toolUseID);
+            }
+            if (signal.aborted) {
+              throw new Error('UserPromptSubmit callback received aborted signal');
+            }
+            if (hookIndex !== 0) {
+              throw new Error('unexpected hook index: ' + hookIndex);
+            }
+            if (!callbackContext || callbackContext.getAppState() !== appState) {
+              throw new Error('callback context should expose current app state');
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'UserPromptSubmit',
+                additionalContext,
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const contextResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  prompt,
+  'default',
+  context,
+)) {
+  contextResults.push(result);
+}
+if (contextCalls !== 1) {
+  throw new Error('UserPromptSubmit context hook should run once, got ' + contextCalls);
+}
+if (!contextResults.some(result => result.message?.type === 'progress')) {
+  throw new Error('UserPromptSubmit should yield hook progress: ' + JSON.stringify(contextResults));
+}
+const additional = contextResults.find(result =>
+  Array.isArray(result.additionalContexts) &&
+  result.additionalContexts.includes(additionalContext)
+);
+if (!additional) {
+  throw new Error('missing UserPromptSubmit additional context: ' + JSON.stringify(contextResults));
+}
+const success = contextResults.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_success' &&
+    attachment.hookEvent === 'UserPromptSubmit' &&
+    attachment.hookName === 'UserPromptSubmit:Callback'
+  );
+});
+if (!success) {
+  throw new Error('missing UserPromptSubmit success attachment: ' + JSON.stringify(contextResults));
+}
+
+clearRegisteredHooks();
+let blockCalls = 0;
+const blockReason = 'blocked prompt submit marker 9137';
+registerHookCallbacks({
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            blockCalls += 1;
+            if (hookInput.prompt !== prompt) {
+              throw new Error('block hook saw unexpected prompt: ' + hookInput.prompt);
+            }
+            return {
+              decision: 'block',
+              reason: blockReason,
+              hookSpecificOutput: {
+                hookEventName: 'UserPromptSubmit',
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const blockedResults = [];
+for await (const result of executeUserPromptSubmitHooks(
+  prompt,
+  'default',
+  context,
+)) {
+  blockedResults.push(result);
+}
+if (blockCalls !== 1) {
+  throw new Error('UserPromptSubmit block hook should run once, got ' + blockCalls);
+}
+const blocking = blockedResults.find(result =>
+  result.blockingError?.blockingError === blockReason &&
+  result.blockingError?.command === 'callback'
+);
+if (!blocking) {
+  throw new Error('missing UserPromptSubmit blocking result: ' + JSON.stringify(blockedResults));
+}
+const blockingAttachment = blockedResults.find(result => {
+  const attachment = result.message?.attachment;
+  return (
+    attachment?.type === 'hook_blocking_error' &&
+    attachment.hookEvent === 'UserPromptSubmit' &&
+    attachment.blockingError?.blockingError === blockReason
+  );
+});
+if (!blockingAttachment) {
+  throw new Error('missing UserPromptSubmit blocking attachment: ' + JSON.stringify(blockedResults));
+}
+
+console.log('user prompt submit hook OK');`,
+  )
+  assert.equal(output, 'user prompt submit hook OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

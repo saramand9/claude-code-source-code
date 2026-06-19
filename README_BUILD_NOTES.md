@@ -2661,3 +2661,38 @@ Expected new output:
 ```text
 ok - SessionEnd hooks receive exit reason metadata
 ```
+
+## 2026-06-19 UserPromptSubmit hook build-safety coverage
+
+This round covers prompt-submit hooks, which run before a user prompt is handed
+to the model. These hooks can inject extra model context or block prompt
+processing, so regressions here directly affect native Claude Code parity for
+input auditing and policy enforcement.
+
+- `scripts/test-build-safety.mjs`
+  - Asserts `executeUserPromptSubmitHooks()` yields nothing when no hook is
+    registered.
+  - Registers a callback hook and verifies the hook input includes the original
+    prompt and permission mode.
+  - Asserts callback-provided `additionalContext` is surfaced through the
+    aggregated hook result.
+  - Registers a blocking callback and asserts the block reason is returned both
+    as a blocking result and a hook attachment.
+
+Risk boundary update: prompt-submit hook context injection and prompt blocking
+now have direct build-safety coverage. Remaining gaps are compact hooks,
+subagent lifecycle hooks, teammate/task lifecycle hooks, interactive
+PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - UserPromptSubmit hooks attach context and block prompts
+```
