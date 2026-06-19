@@ -1,6 +1,7 @@
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
+import { getSessionEnvironmentScript } from '../sessionEnvironment.js'
 import { getSessionEnvVars } from '../sessionEnvVars.js'
 import type { ShellProvider } from './shellProvider.js'
 
@@ -63,7 +64,12 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       // exit code (was 0 — old logic only looked at $? which the trailing
       // cmdlet set true). Both rarer than the git/npm/curl stderr case.
       const cwdTracking = `\n; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }\n; (Get-Location).Path | Out-File -FilePath '${escapedCwdFilePath}' -Encoding utf8 -NoNewline\n; exit $_ec`
-      const psCommand = command + cwdTracking
+      const sessionEnvScript =
+        await getSessionEnvironmentScript('powershell')
+      const commandWithSessionEnv = sessionEnvScript
+        ? `${sessionEnvScript}\n${command}`
+        : command
+      const psCommand = commandWithSessionEnv + cwdTracking
 
       // Sandbox wraps the returned commandString as `<binShell> -c '<cmd>'` —
       // hardcoded `-c`, no way to inject -NoProfile -NonInteractive. So for

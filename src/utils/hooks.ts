@@ -918,21 +918,21 @@ async function execCommandHook(
     envVars.CLAUDE_PLUGIN_ROOT = toHookPath(skillRoot)
   }
 
-  // CLAUDE_ENV_FILE points to a .sh file that the hook writes env var
-  // definitions into; getSessionEnvironmentScript() concatenates them and
-  // bashProvider injects the content into bash commands. A PS hook would
-  // naturally write PS syntax ($env:FOO = 'bar'), which bash can't parse.
-  // Skip for PS — consistent with how .sh prepend and SHELL_PREFIX are
-  // already bash-only above.
+  // CLAUDE_ENV_FILE points to a shell-specific file that the hook writes env
+  // var definitions into. Bash hooks write .sh exports; PowerShell hooks write
+  // .ps1 assignments, and each shell provider only reads its own format.
   if (
-    !isPowerShell &&
     (hookEvent === 'SessionStart' ||
       hookEvent === 'Setup' ||
       hookEvent === 'CwdChanged' ||
       hookEvent === 'FileChanged') &&
     hookIndex !== undefined
   ) {
-    envVars.CLAUDE_ENV_FILE = await getHookEnvFilePath(hookEvent, hookIndex)
+    envVars.CLAUDE_ENV_FILE = await getHookEnvFilePath(
+      hookEvent,
+      hookIndex,
+      isPowerShell ? 'powershell' : 'sh',
+    )
   }
 
   // When agent worktrees are removed, getCwd() may return a deleted path via

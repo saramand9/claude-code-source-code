@@ -3755,8 +3755,7 @@ and keeps the existing non-PowerShell `.sh` environment-file contract intact.
 
 Risk boundary update: environment hooks can now write session environment
 exports that are read back into subsequent Bash commands on Windows as well as
-non-Windows platforms. Remaining gaps include malformed env-file content and a
-separate PowerShell-native environment file format.
+non-Windows platforms. Remaining gaps include malformed env-file content.
 
 Verification:
 
@@ -3772,6 +3771,50 @@ Expected new output:
 ```text
 ok - session environment hook files are injected into bash commands
 111/111 build-safety tests passed.
+```
+
+## 2026-06-19 PowerShell session environment injection
+
+This round adds a PowerShell-native session environment file format alongside
+the existing Bash `.sh` hook env files.
+
+- `src/utils/sessionEnvironment.ts`
+  - Adds a `SessionEnvironmentFormat` parameter for hook env file paths and
+    script loading.
+  - Keeps Bash files as `.sh` and stores PowerShell files as `.ps1`.
+  - Separates cached session environment scripts by shell format so Bash never
+    consumes PowerShell assignments and PowerShell never consumes Bash exports.
+  - Extends cwd/file env cleanup to cover both `.sh` and `.ps1` hook files.
+- `src/utils/hooks.ts`
+  - Provides `CLAUDE_ENV_FILE` to PowerShell lifecycle hooks using the `.ps1`
+    path instead of skipping PowerShell hooks entirely.
+- `src/utils/shell/powershellProvider.ts`
+  - Prepends the PowerShell session environment script before the user command,
+    mirroring the Bash provider behavior with shell-specific syntax.
+- `scripts/test-build-safety.mjs`
+  - Adds a regression test that writes both `.sh` and `.ps1` hook env files,
+    verifies format isolation and priority ordering, and confirms PowerShell
+    generated commands include only the `.ps1` assignments before the command.
+
+Risk boundary update: environment hooks can now persist shell-specific session
+environment state for both Bash and PowerShell command execution. Remaining
+gaps include malformed env-file content and executing a full PowerShell hook
+round-trip on hosts without a discoverable PowerShell binary.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - powershell session environment hook files are isolated and injected
+112/112 build-safety tests passed.
 ```
 
 ## 2026-06-19 Post-sampling hook coverage

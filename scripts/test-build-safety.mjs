@@ -4231,6 +4231,93 @@ console.log('session environment bash injection OK');`,
   assert.equal(output, 'session environment bash injection OK')
 })
 
+await test('powershell session environment hook files are isolated and injected', async () => {
+  const output = await buildAndRunSnippet(
+    'powershell-session-environment-injection-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'powershell-session-environment-injection-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  {
+    getHookEnvFilePath,
+    getSessionEnvironmentScript,
+    invalidateSessionEnvCache,
+  },
+  { createPowerShellProvider },
+  { setIsInteractive },
+] = await Promise.all([
+  import('./src/utils/sessionEnvironment.ts'),
+  import('./src/utils/shell/powershellProvider.ts'),
+  import('./src/bootstrap/state.ts'),
+]);
+
+setIsInteractive(false);
+
+const shSetupPath = await getHookEnvFilePath('Setup', 0);
+const psSetupPath = await getHookEnvFilePath('Setup', 0, 'powershell');
+const psFileChangedPath = await getHookEnvFilePath('FileChanged', 2, 'powershell');
+if (!psSetupPath.endsWith('.ps1') || !psFileChangedPath.endsWith('.ps1')) {
+  throw new Error('PowerShell hook env files should use .ps1: ' + JSON.stringify({ psSetupPath, psFileChangedPath }));
+}
+await writeFile(shSetupPath, 'export CLAUDE_SH_ONLY_HOOK=8464\\n', 'utf8');
+await writeFile(psFileChangedPath, "$env:CLAUDE_PS_FILE_HOOK = '8464'\\n", 'utf8');
+await writeFile(psSetupPath, "$env:CLAUDE_PS_SETUP_HOOK = '8464'\\n", 'utf8');
+
+invalidateSessionEnvCache();
+const psScript = await getSessionEnvironmentScript('powershell');
+if (!psScript) {
+  throw new Error('PowerShell session environment script should load .ps1 hook env files');
+}
+if (!psScript.includes("$env:CLAUDE_PS_SETUP_HOOK = '8464'")) {
+  throw new Error('PowerShell session script missing setup assignment: ' + JSON.stringify(psScript));
+}
+if (!psScript.includes("$env:CLAUDE_PS_FILE_HOOK = '8464'")) {
+  throw new Error('PowerShell session script missing file assignment: ' + JSON.stringify(psScript));
+}
+if (psScript.includes('CLAUDE_SH_ONLY_HOOK')) {
+  throw new Error('PowerShell session script should not include .sh content: ' + JSON.stringify(psScript));
+}
+if (!(psScript.indexOf('CLAUDE_PS_SETUP_HOOK') < psScript.indexOf('CLAUDE_PS_FILE_HOOK'))) {
+  throw new Error('PowerShell session script order is unstable: ' + JSON.stringify(psScript));
+}
+
+const shScript = await getSessionEnvironmentScript('sh');
+if (!shScript || !shScript.includes('CLAUDE_SH_ONLY_HOOK=8464')) {
+  throw new Error('Bash session script should still include .sh content: ' + JSON.stringify(shScript));
+}
+if (shScript.includes('CLAUDE_PS_SETUP_HOOK')) {
+  throw new Error('Bash session script should not include .ps1 content: ' + JSON.stringify(shScript));
+}
+
+const provider = createPowerShellProvider('pwsh');
+const { commandString } = await provider.buildExecCommand(
+  'Write-Output $env:CLAUDE_PS_SETUP_HOOK',
+  { id: 'powershell-session-env-8464', useSandbox: false },
+);
+if (!commandString.includes("$env:CLAUDE_PS_SETUP_HOOK = '8464'")) {
+  throw new Error('PowerShell command should include setup env script: ' + commandString);
+}
+if (!commandString.includes("$env:CLAUDE_PS_FILE_HOOK = '8464'")) {
+  throw new Error('PowerShell command should include file env script: ' + commandString);
+}
+if (commandString.includes('CLAUDE_SH_ONLY_HOOK')) {
+  throw new Error('PowerShell command should not include bash env script: ' + commandString);
+}
+if (!(commandString.indexOf("$env:CLAUDE_PS_SETUP_HOOK = '8464'") < commandString.indexOf('Write-Output $env:CLAUDE_PS_SETUP_HOOK'))) {
+  throw new Error('PowerShell env script should be prepended before command: ' + commandString);
+}
+
+console.log('powershell session environment injection OK');`,
+  )
+  assert.equal(output, 'powershell session environment injection OK')
+})
+
 await test('post-sampling hooks receive context and isolate failures', async () => {
   const output = await buildAndRunSnippet(
     'post-sampling-hook-test',

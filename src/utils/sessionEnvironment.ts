@@ -5,11 +5,19 @@ import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 
+export type SessionEnvironmentFormat = 'sh' | 'powershell'
+
 // Cache states:
 // undefined = not yet loaded (need to check disk)
 // null = checked disk, no files exist (don't check again)
 // string = loaded and cached (use cached value)
-let sessionEnvScript: string | null | undefined = undefined
+const sessionEnvScripts: Record<
+  SessionEnvironmentFormat,
+  string | null | undefined
+> = {
+  sh: undefined,
+  powershell: undefined,
+}
 
 export async function getSessionEnvDirPath(): Promise<string> {
   const sessionEnvDir = join(
@@ -24,9 +32,13 @@ export async function getSessionEnvDirPath(): Promise<string> {
 export async function getHookEnvFilePath(
   hookEvent: 'Setup' | 'SessionStart' | 'CwdChanged' | 'FileChanged',
   hookIndex: number,
+  format: SessionEnvironmentFormat = 'sh',
 ): Promise<string> {
   const prefix = hookEvent.toLowerCase()
-  return join(await getSessionEnvDirPath(), `${prefix}-hook-${hookIndex}.sh`)
+  return join(
+    await getSessionEnvDirPath(),
+    `${prefix}-hook-${hookIndex}.${HOOK_ENV_EXTENSION[format]}`,
+  )
 }
 
 export async function clearCwdEnvFiles(): Promise<void> {
@@ -53,12 +65,15 @@ export async function clearCwdEnvFiles(): Promise<void> {
 
 export function invalidateSessionEnvCache(): void {
   logForDebugging('Invalidating session environment cache')
-  sessionEnvScript = undefined
+  sessionEnvScripts.sh = undefined
+  sessionEnvScripts.powershell = undefined
 }
 
-export async function getSessionEnvironmentScript(): Promise<string | null> {
-  if (sessionEnvScript !== undefined) {
-    return sessionEnvScript
+export async function getSessionEnvironmentScript(
+  format: SessionEnvironmentFormat = 'sh',
+): Promise<string | null> {
+  if (sessionEnvScripts[format] !== undefined) {
+    return sessionEnvScripts[format]
   }
 
   const scripts: string[] = []
@@ -66,7 +81,7 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
   // Check for CLAUDE_ENV_FILE passed from parent process (e.g., HFI trajectory runner)
   // This allows venv/conda activation to persist across shell commands
   const envFile = process.env.CLAUDE_ENV_FILE
-  if (envFile) {
+  if (envFile && shouldLoadExplicitEnvFile(format, envFile)) {
     try {
       const envScript = (await readFile(envFile, 'utf8')).trim()
       if (envScript) {
@@ -90,7 +105,10 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
     // We are sorting the hook env files by the order in which they are listed
     // in the settings.json file so that the resulting env is deterministic
     const hookFiles = files
-      .filter(f => HOOK_ENV_REGEX.test(f))
+      .filter(f => {
+        const match = f.match(HOOK_ENV_REGEX)
+        return match?.[3] === HOOK_ENV_EXTENSION[format]
+      })
       .sort(sortHookEnvFiles)
 
     for (const file of hookFiles) {
@@ -126,11 +144,12 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
 
   if (scripts.length === 0) {
     logForDebugging('No session environment scripts found')
-    sessionEnvScript = null
-    return sessionEnvScript
+    sessionEnvScripts[format] = null
+    return sessionEnvScripts[format]
   }
 
-  sessionEnvScript = scripts.join('\n')
+  const sessionEnvScript = scripts.join('\n')
+  sessionEnvScripts[format] = sessionEnvScript
   logForDebugging(
     `Session environment script ready (${sessionEnvScript.length} chars total)`,
   )
@@ -143,8 +162,21 @@ const HOOK_ENV_PRIORITY: Record<string, number> = {
   cwdchanged: 2,
   filechanged: 3,
 }
+
+const HOOK_ENV_EXTENSION: Record<SessionEnvironmentFormat, 'sh' | 'ps1'> = {
+  sh: 'sh',
+  powershell: 'ps1',
+}
+
 const HOOK_ENV_REGEX =
-  /^(setup|sessionstart|cwdchanged|filechanged)-hook-(\d+)\.sh$/
+  /^(setup|sessionstart|cwdchanged|filechanged)-hook-(\d+)\.(sh|ps1)$/
+
+function shouldLoadExplicitEnvFile(
+  format: SessionEnvironmentFormat,
+  envFile: string,
+): boolean {
+  return format === 'sh' || envFile.toLowerCase().endsWith('.ps1')
+}
 
 function sortHookEnvFiles(a: string, b: string): number {
   const aMatch = a.match(HOOK_ENV_REGEX)
