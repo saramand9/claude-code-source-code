@@ -3069,6 +3069,8 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'post-tool-use-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const malformedCommandPath = join(commandDir, 'post-tool-use-malformed-command-hook.mjs');
+const malformedCommandPathForHook = malformedCommandPath.replace(/\\\\/g, '/');
 const toolName = 'mcp__fixture__command_lookup';
 const inputQuery = 'post tool command input marker 4286';
 const originalText = 'original command output marker 4286';
@@ -3086,6 +3088,14 @@ await writeFile(
     "if (data.tool_input.query !== '" + inputQuery + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
     "if (data.tool_response.content?.[0]?.text !== '" + originalText + "') { process.stderr.write('bad response ' + JSON.stringify(data.tool_response)); process.exit(7); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: '" + additionalContext + "', updatedMCPToolOutput: { content: [{ type: 'text', text: '" + replacementText + "' }], structuredContent: { commandRewritten: true } } } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  malformedCommandPath,
+  [
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionDenied', retry: true } }));",
     "process.exit(0);",
   ].join('\\n'),
   'utf8',
@@ -3200,6 +3210,50 @@ for await (const update of runPostToolUseHooks(
 }
 if (skipped.length !== 0) {
   throw new Error('PostToolUse command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PostToolUse: [
+    {
+      matcher: toolName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + malformedCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const malformed = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  tool,
+  'toolu_post_tool_command_hook_malformed',
+  'msg_post_tool_command_hook_malformed',
+  { query: inputQuery },
+  originalOutput,
+  'req_post_tool_command_hook_malformed',
+  'stdio',
+  undefined,
+)) {
+  malformed.push(update);
+}
+if (malformed.some(update => update.updatedMCPToolOutput)) {
+  throw new Error('PostToolUse malformed command output must not update MCP output: ' + JSON.stringify(malformed));
+}
+const malformedError = malformed.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_non_blocking_error' &&
+    String(attachment.stderr).includes("expected 'PostToolUse'")
+  );
+});
+if (!malformedError) {
+  throw new Error('PostToolUse malformed command output should surface non-blocking error: ' + JSON.stringify(malformed));
 }
 
 console.log('post tool use command hook OK');`,

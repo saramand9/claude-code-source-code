@@ -3262,6 +3262,40 @@ ok - HTTP hooks post JSON input and enforce allowlists
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PostToolUse command malformed-output coverage
+
+This round tightens `PostToolUse` command-hook coverage for malformed JSON
+decisions.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the `PostToolUse` command-hook fixture with a second command that
+    emits valid hook JSON for the wrong hook event.
+  - Verifies the malformed event-specific output does not replace MCP tool
+    output.
+  - Verifies the hook surfaces a non-blocking error attachment instead of
+    interrupting the post-tool hook stream.
+
+Risk boundary update: `PostToolUse` command hooks now have build-safety
+coverage for successful MCP output replacement, matcher filtering, and
+wrong-event JSON output. Remaining gaps include prevent-continuation behavior
+for post-tool hooks and timeout behavior specific to this lifecycle.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PostToolUse command hooks can update MCP output
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 Agent-scoped one-shot hook removal
 
 This round fixes one-shot session hook cleanup for agent-scoped skill hooks.
