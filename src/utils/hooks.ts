@@ -2506,6 +2506,61 @@ async function* executeHooks({
         return
       }
 
+      if (result.status !== 0) {
+        // Hooks with exit code 2 provide blocking feedback.
+        if (result.status === 2) {
+          emitHookResponse({
+            hookId,
+            hookName,
+            hookEvent,
+            output: result.output,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: result.status,
+            outcome: 'error',
+          })
+          yield {
+            blockingError: {
+              blockingError: `[${hook.command}]: ${result.stderr || 'No stderr output'}`,
+              command: hook.command,
+            },
+            outcome: 'blocking' as const,
+            hook,
+          }
+          return
+        }
+
+        // Any other non-zero exit code is a non-critical error that should just
+        // be shown to the user. Do not parse stdout as hook JSON because a
+        // failed command must not make permission or lifecycle decisions.
+        emitHookResponse({
+          hookId,
+          hookName,
+          hookEvent,
+          output: result.output,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exitCode: result.status,
+          outcome: 'error',
+        })
+        yield {
+          message: createAttachmentMessage({
+            type: 'hook_non_blocking_error',
+            hookName,
+            toolUseID,
+            hookEvent,
+            stderr: `Failed with non-blocking status code: ${result.stderr.trim() || 'No stderr output'}`,
+            stdout: result.stdout,
+            exitCode: result.status,
+            command: hookCommand,
+            durationMs,
+          }),
+          outcome: 'non_blocking_error' as const,
+          hook,
+        }
+        return
+      }
+
       // Try JSON parsing first
       const { json, plainText, validationError } = parseHookOutput(
         result.stdout,
@@ -2654,57 +2709,6 @@ async function* executeHooks({
         return
       }
 
-      // Hooks with exit code 2 provide blocking feedback
-      if (result.status === 2) {
-        emitHookResponse({
-          hookId,
-          hookName,
-          hookEvent,
-          output: result.output,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          exitCode: result.status,
-          outcome: 'error',
-        })
-        yield {
-          blockingError: {
-            blockingError: `[${hook.command}]: ${result.stderr || 'No stderr output'}`,
-            command: hook.command,
-          },
-          outcome: 'blocking' as const,
-          hook,
-        }
-        return
-      }
-
-      // Any other non-zero exit code is a non-critical error that should just
-      // be shown to the user.
-      emitHookResponse({
-        hookId,
-        hookName,
-        hookEvent,
-        output: result.output,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.status,
-        outcome: 'error',
-      })
-      yield {
-        message: createAttachmentMessage({
-          type: 'hook_non_blocking_error',
-          hookName,
-          toolUseID,
-          hookEvent,
-          stderr: `Failed with non-blocking status code: ${result.stderr.trim() || 'No stderr output'}`,
-          stdout: result.stdout,
-          exitCode: result.status,
-          command: hookCommand,
-          durationMs,
-        }),
-        outcome: 'non_blocking_error' as const,
-        hook,
-      }
-      return
     } catch (error) {
       // Clean up on error
       cleanup?.()

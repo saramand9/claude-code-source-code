@@ -3062,3 +3062,40 @@ Expected new output:
 ```text
 ok - status line and file suggestion commands respect pre-aborted signals
 ```
+
+## 2026-06-19 PermissionRequest command hook coverage
+
+This round extends headless `PermissionRequest` coverage from callback-only
+hooks to settings-backed command hooks and a non-`Write` tool family.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a settings-backed `PermissionRequest` command hook for `Bash`.
+  - Verifies the command receives `PermissionRequest`, `tool_name`, `tool_input`,
+    and permission suggestions.
+  - Asserts a non-zero command exit does not grant permission, even if stdout
+    contains an allow decision.
+  - Asserts a successful command hook can allow `Bash` and return updated input
+    in headless mode.
+- `src/utils/hooks.ts`
+  - Handles non-zero command hook exits before stdout JSON parsing in
+    `executeHooks()`.
+  - Preserves exit code 2 as blocking feedback and treats other non-zero exits
+    as non-blocking errors without applying hook decisions.
+
+Risk boundary update: command-hook exit-code behavior and non-`Write`
+`PermissionRequest` allow flow now have direct build-safety coverage. Remaining
+gaps are interactive PermissionRequest UI, live timeout race coverage, and
+larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionRequest command hooks decide Bash headless prompts
+```

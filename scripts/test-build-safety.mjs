@@ -1540,6 +1540,169 @@ console.log('permission request headless hook OK');`,
   assert.equal(output, 'permission request headless hook OK')
 })
 
+await test('PermissionRequest command hooks decide Bash headless prompts', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-request-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+
+const configDirRel = 'build-src/test-artifacts/permission-request-command-config';
+await rm(configDirRel, { recursive: true, force: true });
+await mkdir(configDirRel, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDirRel;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const failingCommandPath = configDirRel + '/permission-request-fail-command.mjs';
+const allowCommandPath = configDirRel + '/permission-request-allow-command.mjs';
+await writeFile(
+  failingCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PermissionRequest') process.exit(3);",
+    "if (data.tool_name !== 'Bash') process.exit(4);",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: { command: 'echo should-not-allow-6284' } } } }));",
+    "process.exit(1);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  allowCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PermissionRequest') { process.stderr.write('bad event'); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad tool'); process.exit(4); }",
+    "if (data.tool_input?.command !== 'echo original permission command 6284') { process.stderr.write('bad command'); process.exit(5); }",
+    "if (!Array.isArray(data.permission_suggestions) || data.permission_suggestions[0]?.rule !== 'Bash(echo:*)') { process.stderr.write('bad suggestions'); process.exit(6); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: { ...data.tool_input, command: 'echo allowed permission command 6284' } } } }));",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { hasPermissionsToUseTool },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+  { resetSettingsCache },
+] = await Promise.all([
+  import('./src/utils/permissions/permissions.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+  import('./src/utils/settings/settingsCache.ts'),
+]);
+
+async function writeSettings(commandPath) {
+  await writeFile(
+    configDirRel + '/settings.json',
+    JSON.stringify(
+      {
+        hooks: {
+          PermissionRequest: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'node ' + commandPath,
+                  timeout: 5,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  setIsInteractive(false);
+  resetHooksConfigSnapshot();
+  resetSettingsCache();
+}
+
+const input = {
+  command: 'echo original permission command 6284',
+};
+const assistantMessage = {
+  uuid: 'assistant-permission-command-uuid',
+  message: {
+    id: 'msg_permission_request_command_hook',
+    role: 'assistant',
+    content: [],
+  },
+};
+const tool = {
+  name: 'Bash',
+  inputSchema: {
+    parse(value) {
+      return value;
+    },
+  },
+  async checkPermissions() {
+    return {
+      behavior: 'passthrough',
+      suggestions: [{ behavior: 'allow', destination: 'userSettings', rule: 'Bash(echo:*)' }],
+    };
+  },
+};
+function makeContext() {
+  let appState = {
+    sessionHooks: new Map(),
+    toolPermissionContext: {
+      mode: 'default',
+      shouldAvoidPermissionPrompts: true,
+      additionalWorkingDirectories: new Map(),
+      alwaysAllowRules: {},
+      alwaysDenyRules: {},
+      alwaysAskRules: {},
+      isBypassPermissionsModeAvailable: false,
+    },
+  };
+  return {
+    abortController: new AbortController(),
+    options: { isNonInteractiveSession: true },
+    getAppState() {
+      return appState;
+    },
+    setAppState(updater) {
+      appState = updater(appState);
+    },
+    updateAttributionState() {},
+  };
+}
+async function runPermissionCheck() {
+  return await hasPermissionsToUseTool(
+    tool,
+    input,
+    makeContext(),
+    assistantMessage,
+    'toolu_permission_request_command_hook',
+  );
+}
+
+await writeSettings(failingCommandPath);
+const failed = await runPermissionCheck();
+if (failed.behavior !== 'deny' || failed.decisionReason?.type !== 'asyncAgent') {
+  throw new Error('non-zero PermissionRequest command should not decide permission: ' + JSON.stringify(failed));
+}
+
+await writeSettings(allowCommandPath);
+const allowed = await runPermissionCheck();
+if (allowed.behavior !== 'allow' || allowed.decisionReason?.hookName !== 'PermissionRequest') {
+  throw new Error('PermissionRequest command hook should allow Bash: ' + JSON.stringify(allowed));
+}
+if (allowed.updatedInput?.command !== 'echo allowed permission command 6284') {
+  throw new Error('PermissionRequest command hook should preserve updated Bash input: ' + JSON.stringify(allowed));
+}
+
+console.log('permission request command hook OK');`,
+  )
+  assert.equal(output, 'permission request command hook OK')
+})
+
 await test('PostToolUseFailure hooks attach additional context', async () => {
   const output = await buildAndRunSnippet(
     'post-tool-use-failure-hook-test',
