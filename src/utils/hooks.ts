@@ -3153,6 +3153,7 @@ async function executeHooksOutsideREPL({
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(
     async ({ hook, pluginRoot, pluginId }, hookIndex) => {
+      const result = await (async (): Promise<HookOutsideReplResult> => {
       // Handle callback hooks
       if (hook.type === 'callback') {
         const callbackTimeoutMs = hook.timeout ? hook.timeout * 1000 : timeoutMs
@@ -3470,11 +3471,45 @@ async function executeHooksOutsideREPL({
           blocked: false,
         }
       }
+      })()
+      return { hook, result }
     },
   )
 
   // Wait for all hooks to complete and collect results
-  return await Promise.all(hookPromises)
+  const completedHooks = await Promise.all(hookPromises)
+
+  for (const { hook, result } of completedHooks) {
+    if (appState && hook.type !== 'callback' && result.succeeded) {
+      const hookEntry = getSessionHookCallback(
+        appState,
+        sessionId,
+        hookEvent,
+        matchQuery ?? '',
+        hook,
+      )
+      if (hookEntry?.onHookSuccess) {
+        try {
+          const callbackResult: AggregatedHookResult = {
+            ...(result.blocked && {
+              blockingError: {
+                blockingError: result.output,
+                command: result.command,
+              },
+            }),
+            ...(result.watchPaths && { watchPaths: result.watchPaths }),
+          }
+          hookEntry.onHookSuccess(hook, callbackResult)
+        } catch (error) {
+          logError(
+            Error('Session hook success callback failed', { cause: error }),
+          )
+        }
+      }
+    }
+  }
+
+  return completedHooks.map(({ result }) => result)
 }
 
 /**

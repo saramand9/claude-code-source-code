@@ -3179,6 +3179,46 @@ ok - StopFailure prompt hooks execute outside REPL with context
 106/106 build-safety tests passed.
 ```
 
+## 2026-06-19 Outside-REPL one-shot hook cleanup
+
+This round aligns one-shot skill hook cleanup between the REPL and
+outside-REPL hook executors.
+
+- `src/utils/hooks.ts`
+  - Keeps the originating hook with each outside-REPL result until all parallel
+    hooks finish.
+  - Looks up the matching session hook callback after successful outside-REPL
+    execution.
+  - Invokes `onHookSuccess` for successful session hooks, so `once: true` skill
+    hooks are removed after outside-REPL command, HTTP, or prompt execution.
+  - Preserves the existing outside-REPL return shape for callers.
+- `scripts/test-build-safety.mjs`
+  - Adds a `StopFailure` skill hook test using `once: true`.
+  - Verifies the first outside-REPL execution succeeds and removes the hook
+    from the session store.
+  - Verifies a second `StopFailure` event does not rerun the command hook.
+
+Risk boundary update: one-shot skill hooks now clean up after successful
+outside-REPL execution in the same way as REPL hook execution. Remaining gaps
+include unsupported outside-REPL agent hooks and broader prompt-hook coverage
+for outside-REPL events without a `ToolUseContext`.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - outside REPL once skill hooks are removed after success
+107/107 build-safety tests passed.
+```
+
 ## 2026-06-19 HTTP hook build-safety coverage
 
 This round adds direct build-safety coverage for HTTP hooks using a local

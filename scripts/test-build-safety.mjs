@@ -7426,6 +7426,144 @@ console.log('stop failure command hook OK');`,
   assert.equal(output, 'stop failure command hook OK')
 })
 
+await test('outside REPL once skill hooks are removed after success', async () => {
+  const output = await buildAndRunSnippet(
+    'outside-repl-once-skill-hook-test',
+    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/outside-repl-once-skill-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'outside-repl-once-skill-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'outside-repl-once-skill-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'outside-repl-once-marker.txt');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const error = 'outside repl once stop failure marker 4728';
+const errorDetails = 'outside repl once stop failure details marker 4728';
+const lastAssistantText = 'outside repl once last assistant marker 4728';
+await writeFile(
+  commandPath,
+  [
+    "const { readFile, writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'StopFailure') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.error !== '" + error + "') { process.stderr.write('bad error ' + data.error); process.exit(4); }",
+    "if (data.error_details !== '" + errorDetails + "') { process.stderr.write('bad details ' + data.error_details); process.exit(5); }",
+    "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text ' + data.last_assistant_message); process.exit(6); }",
+    "const current = Number(await readFile('" + markerPathForScript + "', 'utf8').catch(() => '0'));",
+    "await writeFile('" + markerPathForScript + "', String(current + 1), 'utf8');",
+    "process.stdout.write('outside repl once success marker 4728');",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeStopFailureHooks },
+  { registerSkillHooks },
+  { getSessionId, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/utils/hooks/registerSkillHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+function setAppState(updater) {
+  appState = updater(appState);
+}
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState,
+  updateAttributionState() {},
+};
+const sessionId = getSessionId();
+registerSkillHooks(
+  setAppState,
+  sessionId,
+  {
+    StopFailure: [
+      {
+        matcher: error,
+        hooks: [
+          {
+            type: 'command',
+            command: 'node ' + commandPathForHook,
+            timeout: 5,
+            once: true,
+          },
+        ],
+      },
+    ],
+  },
+  'outside-repl-once-skill',
+  commandDir,
+);
+
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000004728',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_outside_repl_once_4728',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+const firstResults = await executeStopFailureHooks(lastMessage, context, 10000);
+if (firstResults.length !== 1 || firstResults[0].succeeded !== true) {
+  throw new Error('outside REPL once skill hook should succeed first time: ' + JSON.stringify(firstResults));
+}
+const countAfterFirst = await readFile(markerPath, 'utf8');
+if (countAfterFirst !== '1') {
+  throw new Error('outside REPL once skill hook should run once after first call: ' + countAfterFirst);
+}
+const remainingAfterFirst = appState.sessionHooks.get(sessionId)?.hooks.StopFailure ?? [];
+if (remainingAfterFirst.length !== 0) {
+  throw new Error('outside REPL once skill hook should be removed after success: ' + JSON.stringify(remainingAfterFirst));
+}
+
+const secondResults = await executeStopFailureHooks(lastMessage, context, 10000);
+if (secondResults.length !== 0) {
+  throw new Error('outside REPL once skill hook should not run twice: ' + JSON.stringify(secondResults));
+}
+const countAfterSecond = await readFile(markerPath, 'utf8');
+if (countAfterSecond !== '1') {
+  throw new Error('outside REPL once skill hook should not increment twice: ' + countAfterSecond);
+}
+
+console.log('outside repl once skill hooks OK');`,
+  )
+  assert.equal(output, 'outside repl once skill hooks OK')
+})
+
 await test('StopFailure prompt hooks execute outside REPL with context', async () => {
   const output = await buildAndRunSnippet(
     'stop-failure-prompt-hook-test',
