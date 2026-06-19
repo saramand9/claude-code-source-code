@@ -11092,7 +11092,7 @@ console.log('stop hooks OK');`,
 await test('Stop command hooks block and prevent continuation', async () => {
   const output = await buildAndRunSnippet(
     'stop-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-command-hook-config';
@@ -11103,9 +11103,17 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'stop-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'stop-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'stop-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'stop-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const lastAssistantText = 'main stop command assistant marker 1964';
 const blockReason = 'main stop command block marker 1964';
 const stopReason = 'main stop command continuation marker 1964';
+const timeoutBlockReason = 'late main stop command block should not apply marker 1964';
+const timeoutStopReason = 'late main stop command continuation should not apply marker 1964';
 await writeFile(
   commandPath,
   [
@@ -11117,6 +11125,18 @@ await writeFile(
     "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text'); process.exit(5); }",
     "if (data.permission_mode !== 'default') { process.stderr.write('bad permission mode'); process.exit(6); }",
     "process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + stopReason + "', decision: 'block', reason: '" + blockReason + "' }));",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ continue: false, stopReason: '" + timeoutStopReason + "', decision: 'block', reason: '" + timeoutBlockReason + "' }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -11214,6 +11234,64 @@ if (!prevented) {
 }
 if (!getStopHookMessage({ blockingError: blockReason, command: commandPathForHook }).includes(blockReason)) {
   throw new Error('Stop command hook message helper should include block reason');
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  Stop: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutResults = [];
+for await (const result of executeStopHooks(
+  'default',
+  context.abortController.signal,
+  10000,
+  true,
+  undefined,
+  context,
+  messages,
+)) {
+  timeoutResults.push(result);
+}
+if (timeoutResults.some(result =>
+  result.blockingError?.blockingError === timeoutBlockReason ||
+  result.message?.attachment?.blockingError?.blockingError === timeoutBlockReason
+)) {
+  throw new Error('Stop timed-out command should not apply late block: ' + JSON.stringify(timeoutResults));
+}
+if (timeoutResults.some(result =>
+  result.preventContinuation === true ||
+  result.stopReason === timeoutStopReason
+)) {
+  throw new Error('Stop timed-out command should not prevent continuation from late output: ' + JSON.stringify(timeoutResults));
+}
+if (!timeoutResults.some(result => {
+  const attachment = result.message?.attachment;
+  return attachment?.type === 'hook_cancelled' && attachment.hookEvent === 'Stop';
+})) {
+  throw new Error('Stop timed-out command should report cancellation: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('Stop timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('Stop timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('stop command hook OK');`,

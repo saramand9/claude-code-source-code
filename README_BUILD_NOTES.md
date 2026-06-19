@@ -4818,6 +4818,45 @@ ok - Stop command hooks block and prevent continuation
 84/84 build-safety tests passed.
 ```
 
+## 2026-06-19 Stop command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for main `Stop`
+command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `Stop` through the same direct Windows helper path used by other
+    short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the `Stop` command-hook fixture with a timed-out helper that would
+    otherwise emit `continue: false` and a blocking decision.
+  - Verifies late blocking output does not produce blocking feedback or
+    blocking attachments.
+  - Verifies late `continue: false` output does not prevent continuation.
+  - Asserts the cancelled helper surfaces a `hook_cancelled` attachment and is
+    killed before writing its late marker.
+
+Risk boundary update: main `Stop` command hooks now have build-safety coverage
+for metadata input, blocking output, prevent-continuation output, helper-message
+formatting, and simple-helper timeout cleanup. Remaining gaps include prompt
+and agent Stop hook execution outside the REPL path, complex-shell timeout
+cleanup, and full keyboard-driven TTY interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - Stop command hooks block and prevent continuation
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 SubagentStop command hook build-safety coverage
 
 This round extends subagent stop coverage from SDK callback hooks to command

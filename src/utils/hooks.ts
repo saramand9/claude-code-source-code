@@ -1043,6 +1043,7 @@ async function execCommandHook(
         hookEvent === 'TeammateIdle' ||
         hookEvent === 'TaskCreated' ||
         hookEvent === 'TaskCompleted' ||
+        hookEvent === 'Stop' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||
