@@ -10,7 +10,7 @@ import {
   KEYBINDING_ACTIONS,
   KEYBINDING_CONTEXT_DESCRIPTIONS,
   KEYBINDING_CONTEXTS,
-} from '../../keybindings/schema.js'
+} from '../../keybindings/constants.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 

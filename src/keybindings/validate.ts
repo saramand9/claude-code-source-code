@@ -4,7 +4,7 @@ import {
   getReservedShortcuts,
   normalizeKeyForComparison,
 } from './reservedShortcuts.js'
-import { KEYBINDING_ACTIONS, KEYBINDING_CONTEXTS } from './schema.js'
+import { KEYBINDING_ACTIONS, KEYBINDING_CONTEXTS } from './constants.js'
 import type {
   KeybindingBlock,
   KeybindingContextName,

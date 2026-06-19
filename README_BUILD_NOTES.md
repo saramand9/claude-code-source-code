@@ -3100,6 +3100,74 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 keybinding constants split
+
+This round separates keybinding source-of-truth constants from the Zod-backed
+schema module.
+
+- `src/keybindings/constants.ts`
+  - Adds the shared `KEYBINDING_CONTEXTS`, `KEYBINDING_CONTEXT_DESCRIPTIONS`,
+    and `KEYBINDING_ACTIONS` constants without importing Zod.
+- `src/keybindings/schema.ts`
+  - Reuses the shared constants for schema construction.
+  - Re-exports the constants so existing schema-module imports remain
+    compatible.
+- `src/keybindings/validate.ts`
+  - Imports pure constants directly instead of pulling in the schema module for
+    runtime validation.
+- `src/skills/bundled/keybindings.ts`
+  - Imports pure constants directly while keeping schema-derived types as a
+    type-only dependency.
+- `scripts/test-build-safety.mjs`
+  - Uses the pure constants module for default-binding alignment coverage.
+  - Adds a static regression that keybinding validation does not import the
+    Zod-backed schema module.
+
+Risk boundary update: keybinding validation keeps the same documented
+context/action behavior while avoiding an unnecessary runtime dependency on
+schema construction. The schema module remains a compatibility surface for
+existing callers.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - keybinding validation does not import zod schema module
+```
+
+## 2026-06-19 ant callout build-safety isolation
+
+This round also fixes the ant-only callout build-safety harness so it does not
+read the developer's real Claude config before installing its temporary config
+directory.
+
+- `scripts/test-build-safety.mjs`
+  - Sets `CLAUDE_CONFIG_DIR`, creates the isolated config directory, and calls
+    `enableConfigs()` before the first `shouldShowModelSwitchCallout()` check.
+
+Risk boundary update: the ant model switch callout regression now remains
+hermetic even when the host global config has prior callout state.
+
+Verification:
+
+```text
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - ant-only callout components are loadable and conservative
+```
+
 ## 2026-06-19 shortcut display default resolution
 
 This round tightens keybinding display behavior when a React shortcut hint is

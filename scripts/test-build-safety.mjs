@@ -368,15 +368,15 @@ import { AntModelSwitchCallout, shouldShowModelSwitchCallout } from './src/compo
 import { UndercoverAutoCallout } from './src/components/UndercoverAutoCallout.tsx';
 const initialEnv = { ...process.env };
 process.env.USER_TYPE = 'ant';
+process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/callout-config';
 delete process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT;
 delete process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET;
-if (shouldShowModelSwitchCallout()) throw new Error('model switch should be disabled by default');
-process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT = '1';
-process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET = 'claude-sonnet-4-6';
-process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/callout-config';
 await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
 const { enableConfigs } = await import('./src/utils/config.ts');
 enableConfigs();
+if (shouldShowModelSwitchCallout()) throw new Error('model switch should be disabled by default');
+process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT = '1';
+process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET = 'claude-sonnet-4-6';
 const { renderSync } = await import('./src/ink/root.ts');
 if (!shouldShowModelSwitchCallout()) throw new Error('model switch should be opt-in visible');
 const modelElement = React.createElement(AntModelSwitchCallout, { onDone: () => {} });
@@ -13242,7 +13242,7 @@ await test('default keybindings stay aligned with schema actions', async () => {
 import {
   KEYBINDING_ACTIONS,
   KEYBINDING_CONTEXTS,
-} from './src/keybindings/schema.ts';
+} from './src/keybindings/constants.ts';
 import { validateUserConfig } from './src/keybindings/validate.ts';
 const contexts = new Set(KEYBINDING_CONTEXTS);
 const actions = new Set(KEYBINDING_ACTIONS);
@@ -13302,6 +13302,23 @@ if (
 console.log('keybinding default schema alignment OK');`,
   )
   assert.equal(output, 'keybinding default schema alignment OK')
+})
+
+await test('keybinding validation does not import zod schema module', async () => {
+  const validateSource = await readFile(
+    join(ROOT, 'src/keybindings/validate.ts'),
+    'utf8',
+  )
+  assert.doesNotMatch(
+    validateSource,
+    /from ['"]\.\/schema\.js['"]/,
+    'runtime validation should not import the Zod-backed schema module',
+  )
+  assert.match(
+    validateSource,
+    /from ['"]\.\/constants\.js['"]/,
+    'runtime validation should import the pure keybinding constants module',
+  )
 })
 
 await test('keybinding bundled skill infers contexts for documented actions', async () => {
