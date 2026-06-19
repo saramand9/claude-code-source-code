@@ -3143,6 +3143,36 @@ Expected new output:
 ok - keybinding validation does not import zod schema module
 ```
 
+## 2026-06-19 configurable shortcut hint coverage
+
+This round adds drift coverage for configurable shortcut hints used by the UI.
+
+- `scripts/test-build-safety.mjs`
+  - Scans source files for literal `ConfigurableShortcutHint` action/context
+    pairs.
+  - Verifies every literal UI hint action exists in `KEYBINDING_ACTIONS`.
+  - Verifies every literal UI hint context exists in `KEYBINDING_CONTEXTS`.
+  - Handles action/context attributes independent of JSX attribute order.
+
+Risk boundary update: UI surfaces that display user-configurable shortcut hints
+are now guarded against drifting away from the keybinding schema/constants
+source of truth.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
+Expected new output:
+
+```text
+ok - configurable shortcut hints stay aligned with keybinding constants
+```
+
 ## 2026-06-19 ant callout build-safety isolation
 
 This round also fixes the ant-only callout build-safety harness so it does not

@@ -13304,6 +13304,41 @@ console.log('keybinding default schema alignment OK');`,
   assert.equal(output, 'keybinding default schema alignment OK')
 })
 
+await test('configurable shortcut hints stay aligned with keybinding constants', async () => {
+  const constantsSource = await readFile(
+    join(ROOT, 'src/keybindings/constants.ts'),
+    'utf8',
+  )
+  const readConstArray = name => {
+    const match = constantsSource.match(
+      new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\] as const`),
+    )
+    assert.ok(match, `missing ${name}`)
+    return new Set([...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]))
+  }
+  const actions = readConstArray('KEYBINDING_ACTIONS')
+  const contexts = readConstArray('KEYBINDING_CONTEXTS')
+  const literalHintPattern = /<ConfigurableShortcutHint\b[^>]*>/g
+  const missing = []
+
+  for await (const absoluteFile of walkFiles(join(ROOT, 'src'))) {
+    const file = relative(ROOT, absoluteFile)
+    if (!/\.(?:ts|tsx)$/.test(file)) continue
+    const source = await readFile(absoluteFile, 'utf8')
+    for (const match of source.matchAll(literalHintPattern)) {
+      const tag = match[0]
+      const action = tag.match(/\baction="([^"]+)"/)?.[1]
+      const context = tag.match(/\bcontext="([^"]+)"/)?.[1]
+      if (!action || !context) continue
+      if (!actions.has(action) || !contexts.has(context)) {
+        missing.push(`${file}: ${action} / ${context}`)
+      }
+    }
+  }
+
+  assert.deepEqual(missing, [])
+})
+
 await test('keybinding validation does not import zod schema module', async () => {
   const validateSource = await readFile(
     join(ROOT, 'src/keybindings/validate.ts'),
