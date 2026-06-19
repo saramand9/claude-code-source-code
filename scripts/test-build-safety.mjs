@@ -2764,6 +2764,158 @@ console.log('post tool use hook OK');`,
   assert.equal(output, 'post tool use hook OK')
 })
 
+await test('PostToolUse command hooks can update MCP output', async () => {
+  const output = await buildAndRunSnippet(
+    'post-tool-use-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/post-tool-use-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'post-tool-use-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'post-tool-use-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const toolName = 'mcp__fixture__command_lookup';
+const inputQuery = 'post tool command input marker 4286';
+const originalText = 'original command output marker 4286';
+const replacementText = 'rewritten command output marker 4286';
+const additionalContext = 'post tool command context marker 4286';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PostToolUse') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== '" + toolName + "') { process.stderr.write('bad tool ' + data.tool_name); process.exit(4); }",
+    "if (data.tool_use_id !== 'toolu_post_tool_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
+    "if (data.tool_input.query !== '" + inputQuery + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
+    "if (data.tool_response.content?.[0]?.text !== '" + originalText + "') { process.stderr.write('bad response ' + JSON.stringify(data.tool_response)); process.exit(7); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: '" + additionalContext + "', updatedMCPToolOutput: { content: [{ type: 'text', text: '" + replacementText + "' }], structuredContent: { commandRewritten: true } } } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { runPostToolUseHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/services/tools/toolHooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  PostToolUse: [
+    {
+      matcher: toolName,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+const originalOutput = {
+  content: [{ type: 'text', text: originalText }],
+};
+const tool = { name: toolName, isMcp: true };
+const updates = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  tool,
+  'toolu_post_tool_command_hook',
+  'msg_post_tool_command_hook',
+  { query: inputQuery },
+  originalOutput,
+  'req_post_tool_command_hook',
+  'stdio',
+  undefined,
+)) {
+  updates.push(update);
+}
+const contextAttachment = updates.find(update => {
+  const attachment = update.message?.attachment;
+  return (
+    attachment?.type === 'hook_additional_context' &&
+    attachment.hookEvent === 'PostToolUse' &&
+    attachment.hookName === 'PostToolUse:' + toolName &&
+    Array.isArray(attachment.content) &&
+    attachment.content.includes(additionalContext)
+  );
+});
+if (!contextAttachment) {
+  throw new Error('missing PostToolUse command additional context attachment: ' + JSON.stringify(updates));
+}
+const replacement = updates.find(update => update.updatedMCPToolOutput);
+if (!replacement) {
+  throw new Error('missing command updated MCP output: ' + JSON.stringify(updates));
+}
+if (replacement.updatedMCPToolOutput.content?.[0]?.text !== replacementText) {
+  throw new Error('command updated MCP output did not preserve replacement: ' + JSON.stringify(replacement));
+}
+if (replacement.updatedMCPToolOutput.structuredContent?.commandRewritten !== true) {
+  throw new Error('command updated MCP output lost structured content: ' + JSON.stringify(replacement));
+}
+
+const skipped = [];
+for await (const update of runPostToolUseHooks(
+  context,
+  { name: 'mcp__fixture__other_command_lookup', isMcp: true },
+  'toolu_post_tool_command_hook_skip',
+  'msg_post_tool_command_hook_skip',
+  { query: inputQuery },
+  originalOutput,
+  'req_post_tool_command_hook_skip',
+  'stdio',
+  undefined,
+)) {
+  skipped.push(update);
+}
+if (skipped.length !== 0) {
+  throw new Error('PostToolUse command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+console.log('post tool use command hook OK');`,
+  )
+  assert.equal(output, 'post tool use command hook OK')
+})
+
 await test('PermissionDenied hooks can request retry', async () => {
   const output = await buildAndRunSnippet(
     'permission-denied-hook-test',

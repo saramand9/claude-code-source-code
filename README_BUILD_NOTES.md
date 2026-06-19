@@ -3211,6 +3211,43 @@ ok - teammate task lifecycle command hooks block with metadata
 95/95 build-safety tests passed.
 ```
 
+## 2026-06-19 PostToolUse command hook coverage
+
+This round extends `PostToolUse` coverage from callback hooks to real command
+hooks for MCP tool output rewriting.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture for an MCP `PostToolUse` event.
+  - Verifies command hooks receive tool name, tool use id, tool input, and the
+    original tool response.
+  - Asserts structured command stdout can add post-tool context and replace MCP
+    tool output.
+  - Verifies rewritten MCP output preserves both text content and structured
+    content.
+  - Asserts matcher misses skip unrelated MCP tools without producing updates.
+
+Risk boundary update: MCP `PostToolUse` command hooks now have direct regression
+coverage for real command execution, additional context, matcher filtering, and
+MCP output replacement. Remaining gaps include command-hook blocking/prevent
+continuation for post-tool hooks and malformed-output behavior specific to this
+event.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PostToolUse command hooks can update MCP output
+96/96 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the
