@@ -1897,6 +1897,190 @@ console.log('permission request headless hook OK');`,
   assert.equal(output, 'permission request headless hook OK')
 })
 
+await test('PermissionRequest hooks prefer denials in interactive permission context', async () => {
+  const output = await buildAndRunSnippet(
+    'permission-request-interactive-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/permission-request-interactive-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { createPermissionContext },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/hooks/toolPermission/PermissionContext.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const input = {
+  file_path: 'build-src/test-artifacts/permission-request-interactive.txt',
+  content: 'interactive permission request hook',
+};
+const suggestions = [
+  {
+    type: 'addRules',
+    rules: [{ toolName: 'Write' }],
+    behavior: 'allow',
+    destination: 'userSettings',
+  },
+];
+const assistantMessage = {
+  uuid: 'assistant-test-uuid',
+  message: {
+    id: 'msg_permission_request_interactive_hook',
+    role: 'assistant',
+    content: [],
+  },
+};
+const tool = {
+  name: 'Write',
+  inputSchema: {
+    parse(value) {
+      return value;
+    },
+  },
+};
+
+function makeAppState() {
+  return {
+    sessionHooks: new Map(),
+    toolPermissionContext: {
+      mode: 'default',
+      shouldAvoidPermissionPrompts: false,
+      additionalWorkingDirectories: new Map(),
+      alwaysAllowRules: {},
+      alwaysDenyRules: {},
+      alwaysAskRules: {},
+      isBypassPermissionsModeAvailable: false,
+    },
+  };
+}
+
+async function runInteractiveHooks(toolUseID) {
+  let appState = makeAppState();
+  const context = {
+    abortController: new AbortController(),
+    options: { isNonInteractiveSession: false },
+    getAppState() {
+      return appState;
+    },
+    setAppState(updater) {
+      appState = updater(appState);
+    },
+    updateAttributionState() {},
+  };
+  const setToolPermissionContext = next => {
+    appState = { ...appState, toolPermissionContext: next };
+  };
+  const permissionContext = createPermissionContext(
+    tool,
+    input,
+    context,
+    assistantMessage,
+    toolUseID,
+    setToolPermissionContext,
+  );
+  const decision = await permissionContext.runHooks(
+    'default',
+    suggestions,
+    undefined,
+    Date.now(),
+  );
+  return { decision, context };
+}
+
+const fallback = await runInteractiveHooks('toolu_permission_request_interactive_empty');
+if (fallback.decision !== null) {
+  throw new Error('interactive PermissionRequest should not decide without hooks: ' + JSON.stringify(fallback.decision));
+}
+
+let fastAllowCalls = 0;
+let slowDenyCalls = 0;
+registerHookCallbacks({
+  PermissionRequest: [
+    {
+      matcher: 'Write',
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            fastAllowCalls += 1;
+            if (hookInput.hook_event_name !== 'PermissionRequest') {
+              throw new Error('unexpected hook event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.tool_name !== 'Write') {
+              throw new Error('unexpected hook tool: ' + hookInput.tool_name);
+            }
+            if (!Array.isArray(hookInput.permission_suggestions) || hookInput.permission_suggestions.length !== 1) {
+              throw new Error('missing permission suggestions: ' + JSON.stringify(hookInput.permission_suggestions));
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'allow',
+                  updatedInput: { ...input, content: 'fast interactive allow should lose' },
+                  updatedPermissions: [
+                    {
+                      type: 'addRules',
+                      rules: [{ toolName: 'Write' }],
+                      behavior: 'allow',
+                      destination: 'userSettings',
+                    },
+                  ],
+                },
+              },
+            };
+          },
+        },
+        {
+          type: 'callback',
+          callback: async () => {
+            slowDenyCalls += 1;
+            await new Promise(resolve => setTimeout(resolve, 25));
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PermissionRequest',
+                decision: {
+                  behavior: 'deny',
+                  message: 'slow interactive deny should win',
+                },
+              },
+            };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const { decision, context } = await runInteractiveHooks(
+  'toolu_permission_request_interactive_hook',
+);
+if (fastAllowCalls !== 1 || slowDenyCalls !== 1) {
+  throw new Error('interactive PermissionRequest hooks should both run: ' + fastAllowCalls + '/' + slowDenyCalls);
+}
+if (decision?.behavior !== 'deny' || decision.decisionReason?.hookName !== 'PermissionRequest') {
+  throw new Error('interactive PermissionRequest deny should win over faster allow: ' + JSON.stringify(decision));
+}
+if (decision.message !== 'slow interactive deny should win') {
+  throw new Error('interactive PermissionRequest deny should preserve slow deny message: ' + JSON.stringify(decision));
+}
+const allowRulesAfterDeny = context.getAppState().toolPermissionContext.alwaysAllowRules;
+if (Object.keys(allowRulesAfterDeny).length !== 0) {
+  throw new Error('interactive denied PermissionRequest should not persist earlier allow updates: ' + JSON.stringify(allowRulesAfterDeny));
+}
+
+console.log('permission request interactive hook OK');`,
+  )
+  assert.equal(output, 'permission request interactive hook OK')
+})
+
 await test('PermissionRequest command hooks decide Bash headless prompts', async () => {
   const output = await buildAndRunSnippet(
     'permission-request-command-hook-test',

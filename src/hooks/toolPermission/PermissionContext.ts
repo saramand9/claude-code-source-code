@@ -37,6 +37,7 @@ import {
   supportsPersistence,
 } from '../../utils/permissions/PermissionUpdate.js'
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
+import type { PermissionRequestResult } from '../../types/hooks.js'
 import {
   logPermissionDecision,
   type PermissionDecisionArgs,
@@ -219,6 +220,9 @@ function createPermissionContext(
       updatedInput?: Record<string, unknown>,
       permissionPromptStartTimeMs?: number,
     ): Promise<PermissionDecision | null> {
+      let allowDecision:
+        | Extract<PermissionRequestResult, { behavior: 'allow' }>
+        | null = null
       for await (const hookResult of executePermissionRequestHooks(
         tool.name,
         toolUseID,
@@ -231,12 +235,8 @@ function createPermissionContext(
         if (hookResult.permissionRequestResult) {
           const decision = hookResult.permissionRequestResult
           if (decision.behavior === 'allow') {
-            const finalInput = decision.updatedInput ?? updatedInput ?? input
-            return await this.handleHookAllow(
-              finalInput,
-              decision.updatedPermissions ?? [],
-              permissionPromptStartTimeMs,
-            )
+            allowDecision = decision
+            continue
           } else if (decision.behavior === 'deny') {
             this.logDecision(
               { decision: 'reject', source: { type: 'hook' } },
@@ -258,6 +258,14 @@ function createPermissionContext(
             )
           }
         }
+      }
+      if (allowDecision) {
+        const finalInput = allowDecision.updatedInput ?? updatedInput ?? input
+        return await this.handleHookAllow(
+          finalInput,
+          allowDecision.updatedPermissions ?? [],
+          permissionPromptStartTimeMs,
+        )
       }
       return null
     },

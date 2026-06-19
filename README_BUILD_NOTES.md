@@ -3100,6 +3100,46 @@ Expected new output:
 ok - PermissionRequest command hooks decide Bash headless prompts
 ```
 
+## 2026-06-19 interactive PermissionRequest deny precedence
+
+This round applies the multi-hook PermissionRequest safety rule to the
+interactive permission context path as well as the headless path.
+
+- `src/hooks/toolPermission/PermissionContext.ts`
+  - Stops returning immediately on the first interactive PermissionRequest
+    `allow` hook result.
+  - Stores the allow decision, continues consuming the hook generator, and lets
+    any later `deny` result win.
+  - Delays `updatedPermissions` persistence until all PermissionRequest hooks
+    finish, so a later deny cannot leave behind an earlier allow rule.
+- `scripts/test-build-safety.mjs`
+  - Adds a direct `createPermissionContext().runHooks()` regression test.
+  - Verifies the no-hook path still returns `null`.
+  - Verifies a fast interactive allow and slower deny both run, the final
+    decision is deny, the deny message is preserved, and the earlier allow rule
+    is not persisted.
+
+Risk boundary update: interactive PermissionRequest hook ordering now matches
+the headless behavior and fails closed when concurrent hooks disagree.
+Remaining gaps are full keyboard-driven TTY interaction and broader hook
+concurrency cases outside PermissionRequest.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - PermissionRequest hooks prefer denials in interactive permission context
+81/81 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI
