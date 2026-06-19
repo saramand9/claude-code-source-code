@@ -3560,6 +3560,111 @@ console.log('session end hook OK');`,
   assert.equal(output, 'session end hook OK')
 })
 
+await test('SessionEnd command hooks receive exit reason metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'session-end-command-hook-test',
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/session-end-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'session-end-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'session-end-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const markerPath = join(commandDir, 'session-end-marker.json');
+const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+await writeFile(
+  commandPath,
+  [
+    "const { writeFile } = await import('node:fs/promises');",
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'SessionEnd') { process.stderr.write('bad event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.reason !== 'clear') { process.stderr.write('bad reason ' + data.reason); process.exit(4); }",
+    "await writeFile('" + markerPathForScript + "', JSON.stringify({ reason: data.reason }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  { executeSessionEndHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  SessionEnd: [
+    {
+      matcher: 'clear',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+const appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+await executeSessionEndHooks('clear', {
+  getAppState: () => appState,
+  setAppState: updater => {
+    updater(appState);
+  },
+  timeoutMs: 10000,
+});
+const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+if (marker.reason !== 'clear') {
+  throw new Error('SessionEnd command marker mismatch: ' + JSON.stringify(marker));
+}
+
+await rm(markerPath, { force: true });
+await executeSessionEndHooks('logout', {
+  getAppState: () => appState,
+  setAppState: updater => {
+    updater(appState);
+  },
+  timeoutMs: 10000,
+});
+let skippedCreated = true;
+try {
+  await stat(markerPath);
+} catch {
+  skippedCreated = false;
+}
+if (skippedCreated) {
+  throw new Error('SessionEnd command matcher should skip logout');
+}
+
+console.log('session end command hook OK');`,
+  )
+  assert.equal(output, 'session end command hook OK')
+})
+
 await test('UserPromptSubmit hooks attach context and block prompts', async () => {
   const output = await buildAndRunSnippet(
     'user-prompt-submit-hook-test',

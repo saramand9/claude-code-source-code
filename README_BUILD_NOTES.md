@@ -3356,6 +3356,38 @@ ok - InstructionsLoaded command hooks receive load metadata
 87/87 build-safety tests passed.
 ```
 
+## 2026-06-19 SessionEnd command hook coverage
+
+This round extends session-end hook coverage from SDK callback hooks to command
+hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a real Node command hook fixture registered for `SessionEnd`.
+  - Verifies the command receives `hook_event_name` and exit `reason`.
+  - Uses a marker file to assert command execution happened for `clear`.
+  - Asserts reason matchers skip unrelated session-end events such as `logout`.
+
+Risk boundary update: settings-style SessionEnd command hooks now have direct
+build-safety coverage alongside callback hooks. Remaining gaps are prompt and
+agent hook execution outside the REPL path, plus full keyboard-driven TTY
+interaction.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - SessionEnd command hooks receive exit reason metadata
+88/88 build-safety tests passed.
+```
+
 ## 2026-06-19 PermissionRequest component mapping coverage
 
 This round adds a stable build-safety check for the interactive permission UI
