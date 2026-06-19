@@ -2871,3 +2871,34 @@ Expected new output:
 ```text
 ok - status line and file suggestion commands consume JSON input
 ```
+
+## 2026-06-19 StopFailure hook build-safety coverage
+
+This round covers `StopFailure` hook metadata. These hooks run when an
+assistant turn ends with an error and give integrations a chance to audit the
+failure details.
+
+- `scripts/test-build-safety.mjs`
+  - Registers a `StopFailure` callback hook with an error matcher.
+  - Verifies hook input includes the error, error details, and final assistant
+    text.
+  - Asserts unrelated error matchers are skipped.
+  - Asserts missing assistant errors fall back to `unknown` and do not match the
+    specific error hook.
+
+Risk boundary update: StopFailure error metadata and matcher behavior now have
+direct build-safety coverage. Remaining gaps are interactive PermissionRequest
+UI and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - StopFailure hooks receive error metadata
+```

@@ -3443,6 +3443,122 @@ console.log('status line file suggestion commands OK');`,
   assert.equal(output, 'status line file suggestion commands OK')
 })
 
+await test('StopFailure hooks receive error metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'stop-failure-hook-test',
+    `process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/stop-failure-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const [
+  { executeStopFailureHooks },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+const error = 'stop failure marker 2746';
+const errorDetails = 'stop failure details marker 2746';
+const lastAssistantText = 'last assistant before stop failure marker 2746';
+let calls = 0;
+registerHookCallbacks({
+  StopFailure: [
+    {
+      matcher: error,
+      hooks: [
+        {
+          type: 'callback',
+          callback: async hookInput => {
+            calls += 1;
+            if (hookInput.hook_event_name !== 'StopFailure') {
+              throw new Error('unexpected stop failure event: ' + hookInput.hook_event_name);
+            }
+            if (hookInput.error !== error) {
+              throw new Error('unexpected stop failure error: ' + hookInput.error);
+            }
+            if (hookInput.error_details !== errorDetails) {
+              throw new Error('unexpected stop failure details: ' + hookInput.error_details);
+            }
+            if (hookInput.last_assistant_message !== lastAssistantText) {
+              throw new Error('unexpected stop failure assistant text: ' + hookInput.last_assistant_message);
+            }
+            return { systemMessage: 'stop failure hook observed 2746' };
+          },
+        },
+      ],
+    },
+  ],
+});
+
+const appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    updater(appState);
+  },
+  updateAttributionState() {},
+};
+const lastMessage = {
+  type: 'assistant',
+  uuid: '00000000-0000-0000-0000-000000002746',
+  timestamp: '2026-06-19T00:00:00.000Z',
+  error,
+  errorDetails,
+  message: {
+    id: 'msg_stop_failure_2746',
+    role: 'assistant',
+    content: [{ type: 'text', text: lastAssistantText }],
+  },
+};
+
+await executeStopFailureHooks(lastMessage, context, 10000);
+if (calls !== 1) {
+  throw new Error('StopFailure hook should run once, got ' + calls);
+}
+
+await executeStopFailureHooks(
+  { ...lastMessage, error: 'different failure marker 9172' },
+  context,
+  10000,
+);
+if (calls !== 1) {
+  throw new Error('StopFailure matcher should skip other errors, got ' + calls);
+}
+
+await executeStopFailureHooks(
+  { ...lastMessage, error: undefined, errorDetails: undefined },
+  context,
+  10000,
+);
+if (calls !== 1) {
+  throw new Error('StopFailure matcher should skip default unknown errors, got ' + calls);
+}
+
+console.log('stop failure hooks OK');`,
+  )
+  assert.equal(output, 'stop failure hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',
