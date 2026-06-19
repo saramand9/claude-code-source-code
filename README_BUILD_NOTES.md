@@ -3374,6 +3374,41 @@ ok - ConfigChange hooks cannot block policy settings
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 PreToolUse command deny/ask coverage
+
+This round closes the direct command-hook coverage gap for `PreToolUse`
+deny/ask variants.
+
+- `scripts/test-build-safety.mjs`
+  - Extends the `PreToolUse` command-hook regression with separate command
+    fixtures for `permissionDecision: "deny"` and `permissionDecision: "ask"`.
+  - Verifies command-hook deny yields a deny permission result, preserves the
+    hook reason, and does not carry an updated input that should never run.
+  - Verifies command-hook ask yields ask behavior, preserves the hook reason,
+    and carries the hook-updated input into the permission flow.
+
+Risk boundary update: `PreToolUse` command hooks now have direct build-safety
+coverage for allow, deny, ask, input rewriting, additional context, decision
+reasons, and matcher filtering. Remaining gaps include prevent-continuation
+behavior, complex-shell timeout cleanup, and larger callback/command precedence
+combinations.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - PreToolUse command hooks can allow and update input
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

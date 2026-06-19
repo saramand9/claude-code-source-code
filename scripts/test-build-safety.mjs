@@ -1778,10 +1778,17 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'pretool-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const denyCommandPath = join(commandDir, 'pretool-deny-command-hook.mjs');
+const denyCommandPathForHook = denyCommandPath.replace(/\\\\/g, '/');
+const askCommandPath = join(commandDir, 'pretool-ask-command-hook.mjs');
+const askCommandPathForHook = askCommandPath.replace(/\\\\/g, '/');
 const originalCommand = 'echo pretool command hook original 3946';
 const updatedCommand = 'echo pretool command hook updated 3946';
+const askUpdatedCommand = 'echo pretool command hook ask updated 3946';
 const additionalContext = 'pretool command hook context marker 3946';
 const allowReason = 'pretool command allow marker 3946';
+const denyReason = 'pretool command deny marker 3946';
+const askReason = 'pretool command ask marker 3946';
 await writeFile(
   commandPath,
   [
@@ -1793,6 +1800,32 @@ await writeFile(
     "if (data.tool_use_id !== 'toolu_pretool_command_hook') { process.stderr.write('bad tool use id ' + data.tool_use_id); process.exit(5); }",
     "if (data.tool_input.command !== '" + originalCommand + "') { process.stderr.write('bad input ' + JSON.stringify(data.tool_input)); process.exit(6); }",
     "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '" + allowReason + "', updatedInput: { command: '" + updatedCommand + "' }, additionalContext: '" + additionalContext + "' } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  denyCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PreToolUse') { process.stderr.write('bad deny event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad deny tool ' + data.tool_name); process.exit(4); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: '" + denyReason + "', updatedInput: { command: 'denied updated input should not run' } } }));",
+    "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  askCommandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name !== 'PreToolUse') { process.stderr.write('bad ask event ' + data.hook_event_name); process.exit(3); }",
+    "if (data.tool_name !== 'Bash') { process.stderr.write('bad ask tool ' + data.tool_name); process.exit(4); }",
+    "process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: '" + askReason + "', updatedInput: { command: '" + askUpdatedCommand + "' } } }));",
     "process.exit(0);",
   ].join('\\n'),
   'utf8',
@@ -1909,6 +1942,87 @@ for await (const result of runPreToolUseHooks(
 }
 if (skipped.length !== 0) {
   throw new Error('PreToolUse command matcher should skip other tools: ' + JSON.stringify(skipped));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + denyCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+const denied = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  tool,
+  { command: originalCommand },
+  'toolu_pretool_command_hook_deny',
+  'msg_pretool_command_hook_deny',
+  'req_pretool_command_hook_deny',
+  undefined,
+  undefined,
+)) {
+  denied.push(result);
+}
+const denyPermissionResults = denied
+  .filter(result => result.type === 'hookPermissionResult')
+  .map(result => result.hookPermissionResult)
+  .filter(result => result.behavior === 'deny');
+if (denyPermissionResults.length === 0) {
+  throw new Error('PreToolUse command deny should yield a deny permission result: ' + JSON.stringify(denied));
+}
+if (!denyPermissionResults.some(result => result.decisionReason?.reason === denyReason || String(result.message).includes(denyReason))) {
+  throw new Error('PreToolUse command deny should preserve deny reason: ' + JSON.stringify(denyPermissionResults));
+}
+if (denyPermissionResults.some(result => result.updatedInput !== undefined)) {
+  throw new Error('PreToolUse command deny must not carry updated input: ' + JSON.stringify(denyPermissionResults));
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + askCommandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+const asked = [];
+for await (const result of runPreToolUseHooks(
+  context,
+  tool,
+  { command: originalCommand },
+  'toolu_pretool_command_hook_ask',
+  'msg_pretool_command_hook_ask',
+  'req_pretool_command_hook_ask',
+  undefined,
+  undefined,
+)) {
+  asked.push(result);
+}
+const askPermissionResult = asked.find(result => result.type === 'hookPermissionResult')?.hookPermissionResult;
+if (askPermissionResult?.behavior !== 'ask') {
+  throw new Error('PreToolUse command ask should yield ask behavior: ' + JSON.stringify(asked));
+}
+if (askPermissionResult.updatedInput?.command !== askUpdatedCommand) {
+  throw new Error('PreToolUse command ask should preserve updated input: ' + JSON.stringify(askPermissionResult));
+}
+if (askPermissionResult.message !== askReason || askPermissionResult.decisionReason?.reason !== askReason) {
+  throw new Error('PreToolUse command ask should preserve reason: ' + JSON.stringify(askPermissionResult));
 }
 
 console.log('pretool command hook OK');`,
