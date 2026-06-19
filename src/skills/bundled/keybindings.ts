@@ -75,6 +75,7 @@ export function inferContextFromAction(action: string): string {
     attachments: 'Attachments',
     footer: 'Footer',
     messageSelector: 'MessageSelector',
+    messageActions: 'MessageActions',
     diff: 'DiffDialog',
     modelPicker: 'ModelPicker',
     select: 'Select',

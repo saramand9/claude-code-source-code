@@ -3283,6 +3283,35 @@ ok - default keybindings stay aligned with schema actions
 117/117 build-safety tests passed.
 ```
 
+## 2026-06-19 keybinding schema message actions alignment
+
+This round extends keybinding schema coverage to the message action navigation
+feature branch.
+
+- `src/keybindings/schema.ts`
+  - Adds the `MessageActions` context and user-facing description.
+  - Adds `messageActions:*` navigation and command actions used by
+    `src/components/messageActions.tsx` and the gated default binding block.
+- `src/skills/bundled/keybindings.ts`
+  - Maps `messageActions:*` to `MessageActions` in generated keybindings help.
+- `scripts/test-build-safety.mjs`
+  - Extends the schema-backed keybinding validation regression with a
+    `MessageActions` block.
+  - Extends context inference coverage for `messageActions:prev`.
+
+Risk boundary update: if the message actions feature is preserved or enabled,
+user keybinding validation and generated help now understand its context and
+actions instead of reporting them as unknown.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+npm run test:build-safety
+git diff --check
+```
+
 ## 2026-06-19 PermissionRequest command timeout cleanup
 
 This round closes the simple-helper process cleanup gap for

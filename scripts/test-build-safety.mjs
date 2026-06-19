@@ -13276,6 +13276,19 @@ const warnings = validateUserConfig([
       'ctrl+shift+c': 'selection:copy',
     },
   },
+  {
+    context: 'MessageActions',
+    bindings: {
+      up: 'messageActions:prev',
+      down: 'messageActions:next',
+      'shift+up': 'messageActions:prevUser',
+      'shift+down': 'messageActions:nextUser',
+      escape: 'messageActions:escape',
+      enter: 'messageActions:enter',
+      c: 'messageActions:c',
+      p: 'messageActions:p',
+    },
+  },
 ]);
 if (
   warnings.some(
@@ -13283,7 +13296,7 @@ if (
   )
 ) {
   throw new Error(
-    'scroll keybindings should validate: ' + JSON.stringify(warnings),
+    'schema-backed keybindings should validate: ' + JSON.stringify(warnings),
   );
 }
 console.log('keybinding default schema alignment OK');`,
@@ -13300,6 +13313,7 @@ const expected = {
   'plugin:install': 'Plugin',
   'scroll:pageUp': 'Scroll',
   'selection:copy': 'Scroll',
+  'messageActions:prev': 'MessageActions',
   'voice:pushToTalk': 'Chat',
   'unknown:action': 'Unknown',
 };
