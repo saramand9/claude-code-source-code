@@ -5099,6 +5099,44 @@ ok - StopFailure command hooks receive error metadata
 90/90 build-safety tests passed.
 ```
 
+## 2026-06-19 StopFailure command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for `StopFailure`
+command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `StopFailure` through the same direct Windows helper path used by
+    other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the `StopFailure` command-hook fixture with a timed-out helper that
+    would otherwise emit a late blocking decision.
+  - Verifies the timed-out command returns one failed, non-blocking
+    `Hook cancelled` result.
+  - Verifies late blocking output is not reported.
+  - Asserts the helper process starts but is killed before writing its late
+    marker.
+
+Risk boundary update: `StopFailure` command hooks now have build-safety
+coverage for error metadata, matcher filtering, and simple-helper timeout
+cleanup. Remaining gaps include malformed-output variants, complex-shell
+timeout cleanup, and full terminal stop-failure E2E.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - StopFailure command hooks receive error metadata
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 UserPromptSubmit command hook coverage
 
 This round extends UserPromptSubmit hook coverage from SDK callback hooks to

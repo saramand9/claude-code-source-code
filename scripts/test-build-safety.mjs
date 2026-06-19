@@ -9230,11 +9230,18 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'stop-failure-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(commandDir, 'stop-failure-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(commandDir, 'stop-failure-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(commandDir, 'stop-failure-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const markerPath = join(commandDir, 'stop-failure-marker.json');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
 const error = 'stop failure command marker 2747';
 const errorDetails = 'stop failure command details marker 2747';
 const lastAssistantText = 'last assistant before stop failure command marker 2747';
+const timeoutBlockReason = 'late stop failure command block should not apply marker 2747';
 await writeFile(
   commandPath,
   [
@@ -9247,6 +9254,18 @@ await writeFile(
     "if (data.error_details !== '" + errorDetails + "') { process.stderr.write('bad details ' + data.error_details); process.exit(5); }",
     "if (data.last_assistant_message !== '" + lastAssistantText + "') { process.stderr.write('bad assistant text ' + data.last_assistant_message); process.exit(6); }",
     "await writeFile('" + markerPathForScript + "', JSON.stringify({ error: data.error, details: data.error_details }), 'utf8');",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + timeoutBlockReason + "' }));",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -9335,6 +9354,49 @@ try {
 }
 if (skippedCreated) {
   throw new Error('StopFailure command matcher should skip other errors');
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  StopFailure: [
+    {
+      matcher: error,
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+
+const timeoutResults = await executeStopFailureHooks(lastMessage, context, 10000);
+if (timeoutResults.length !== 1) {
+  throw new Error('StopFailure timed-out command should return one result: ' + JSON.stringify(timeoutResults));
+}
+if (
+  timeoutResults[0].succeeded !== false ||
+  timeoutResults[0].blocked !== false ||
+  !String(timeoutResults[0].output).includes('Hook cancelled')
+) {
+  throw new Error('StopFailure timed-out command should report cancellation without blocking: ' + JSON.stringify(timeoutResults));
+}
+if (String(timeoutResults[0].output).includes(timeoutBlockReason)) {
+  throw new Error('StopFailure timed-out command should not report late output: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('StopFailure timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('StopFailure timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('stop failure command hook OK');`,
