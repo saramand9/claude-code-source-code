@@ -4926,6 +4926,219 @@ console.log('teammate task lifecycle hooks OK');`,
   assert.equal(output, 'teammate task lifecycle hooks OK')
 })
 
+await test('teammate task lifecycle command hooks block with metadata', async () => {
+  const output = await buildAndRunSnippet(
+    'teammate-task-lifecycle-command-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { join } = await import('node:path');
+
+process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/teammate-task-lifecycle-command-hook-config';
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+const commandDir = join(process.cwd(), 'build-src', 'test-artifacts', 'teammate-task-lifecycle-command-hook-config');
+await rm(commandDir, { recursive: true, force: true });
+await mkdir(commandDir, { recursive: true });
+const commandPath = join(commandDir, 'teammate-task-lifecycle-command-hook.mjs');
+const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const teammateName = 'researcher-command-8391';
+const teamName = 'analysis-team-command-8391';
+const taskId = 'task-command-8391';
+const taskSubject = 'Review command lifecycle hooks 8391';
+const taskDescription = 'Task command lifecycle hook metadata marker 8391';
+const idleReason = 'teammate idle command block marker 8391';
+const createReason = 'task created command block marker 8391';
+const completeReason = 'task completed command block marker 8391';
+await writeFile(
+  commandPath,
+  [
+    "let input = '';",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "const data = JSON.parse(input);",
+    "if (data.hook_event_name === 'TeammateIdle') {",
+    "  if (data.teammate_name !== '" + teammateName + "' || data.team_name !== '" + teamName + "') { process.stderr.write('bad idle metadata ' + JSON.stringify(data)); process.exit(3); }",
+    "  if (data.permission_mode !== 'default') { process.stderr.write('bad idle permission ' + data.permission_mode); process.exit(4); }",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + idleReason + "' }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'TaskCreated') {",
+    "  if (data.task_id !== '" + taskId + "' || data.task_subject !== '" + taskSubject + "') { process.stderr.write('bad created task ' + JSON.stringify(data)); process.exit(5); }",
+    "  if (data.task_description !== '" + taskDescription + "') { process.stderr.write('bad created description ' + data.task_description); process.exit(6); }",
+    "  if (data.teammate_name !== '" + teammateName + "' || data.team_name !== '" + teamName + "') { process.stderr.write('bad created teammate ' + JSON.stringify(data)); process.exit(7); }",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + createReason + "' }));",
+    "  process.exit(0);",
+    "}",
+    "if (data.hook_event_name === 'TaskCompleted') {",
+    "  if (data.task_id !== '" + taskId + "' || data.task_subject !== '" + taskSubject + "') { process.stderr.write('bad completed task ' + JSON.stringify(data)); process.exit(8); }",
+    "  if (data.task_description !== '" + taskDescription + "') { process.stderr.write('bad completed description ' + data.task_description); process.exit(9); }",
+    "  if (data.teammate_name !== '" + teammateName + "' || data.team_name !== '" + teamName + "') { process.stderr.write('bad completed teammate ' + JSON.stringify(data)); process.exit(10); }",
+    "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + completeReason + "' }));",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write('bad event ' + data.hook_event_name);",
+    "process.exit(11);",
+  ].join('\\n'),
+  'utf8',
+);
+
+const [
+  {
+    executeTeammateIdleHooks,
+    executeTaskCreatedHooks,
+    executeTaskCompletedHooks,
+    getTeammateIdleHookMessage,
+    getTaskCreatedHookMessage,
+    getTaskCompletedHookMessage,
+  },
+  { clearRegisteredHooks, registerHookCallbacks, setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+clearRegisteredHooks();
+resetHooksConfigSnapshot();
+
+registerHookCallbacks({
+  TeammateIdle: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  TaskCreated: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+  TaskCompleted: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + commandPathForHook,
+          timeout: 5,
+        },
+      ],
+    },
+  ],
+});
+
+let appState = {
+  sessionHooks: new Map(),
+  toolPermissionContext: {
+    mode: 'default',
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {},
+    alwaysDenyRules: {},
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+  },
+};
+const context = {
+  abortController: new AbortController(),
+  options: { isNonInteractiveSession: true },
+  messages: [],
+  getAppState() {
+    return appState;
+  },
+  setAppState(updater) {
+    appState = updater(appState);
+  },
+  updateAttributionState() {},
+};
+
+async function collect(generator) {
+  const results = [];
+  for await (const result of generator) {
+    results.push(result);
+  }
+  return results;
+}
+function assertCommandBlocked(results, eventName, reason) {
+  const blocking = results.find(result =>
+    result.blockingError?.blockingError === reason &&
+    String(result.blockingError?.command).includes('teammate-task-lifecycle-command-hook.mjs')
+  );
+  if (!blocking) {
+    throw new Error(eventName + ' command hook should return blocking feedback: ' + JSON.stringify(results));
+  }
+  const attachment = results.find(result => {
+    const candidate = result.message?.attachment;
+    return (
+      candidate?.type === 'hook_blocking_error' &&
+      candidate.hookEvent === eventName &&
+      candidate.blockingError?.blockingError === reason
+    );
+  });
+  if (!attachment) {
+    throw new Error(eventName + ' command hook should return blocking attachment: ' + JSON.stringify(results));
+  }
+}
+
+const idleResults = await collect(executeTeammateIdleHooks(
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+));
+assertCommandBlocked(idleResults, 'TeammateIdle', idleReason);
+
+const createdResults = await collect(executeTaskCreatedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+assertCommandBlocked(createdResults, 'TaskCreated', createReason);
+
+const completedResults = await collect(executeTaskCompletedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+assertCommandBlocked(completedResults, 'TaskCompleted', completeReason);
+
+if (!getTeammateIdleHookMessage({ blockingError: idleReason, command: commandPathForHook }).includes(idleReason)) {
+  throw new Error('TeammateIdle command helper should include block reason');
+}
+if (!getTaskCreatedHookMessage({ blockingError: createReason, command: commandPathForHook }).includes(createReason)) {
+  throw new Error('TaskCreated command helper should include block reason');
+}
+if (!getTaskCompletedHookMessage({ blockingError: completeReason, command: commandPathForHook }).includes(completeReason)) {
+  throw new Error('TaskCompleted command helper should include block reason');
+}
+
+console.log('teammate task lifecycle command hooks OK');`,
+  )
+  assert.equal(output, 'teammate task lifecycle command hooks OK')
+})
+
 await test('elicitation hooks can answer and block results', async () => {
   const output = await buildAndRunSnippet(
     'elicitation-hook-test',

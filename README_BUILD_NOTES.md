@@ -3173,6 +3173,44 @@ ok - elicitation command hooks can answer and block results
 94/94 build-safety tests passed.
 ```
 
+## 2026-06-19 Teammate task command hook coverage
+
+This round extends teammate/task lifecycle coverage from callback hooks to real
+command hooks.
+
+- `scripts/test-build-safety.mjs`
+  - Adds a Node command hook fixture shared by `TeammateIdle`, `TaskCreated`,
+    and `TaskCompleted`.
+  - Verifies teammate idle command hooks receive teammate, team, and permission
+    mode metadata.
+  - Verifies task created/completed command hooks receive task id, subject,
+    description, teammate, and team metadata.
+  - Asserts structured command `decision: "block"` output produces blocking
+    feedback and model-visible blocking attachments for all three events.
+  - Keeps the existing helper-message checks aligned with command-origin
+    blocking errors.
+
+Risk boundary update: teammate/task lifecycle command hooks now have direct
+regression coverage for metadata delivery and blocking behavior. Remaining gaps
+include multi-hook precedence across teammate/task callback plus command hooks
+and timeout or malformed-output edge cases for these lifecycle events.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - teammate task lifecycle command hooks block with metadata
+95/95 build-safety tests passed.
+```
+
 ## 2026-06-19 interactive PermissionRequest deny precedence
 
 This round applies the multi-hook PermissionRequest safety rule to the
