@@ -3297,6 +3297,47 @@ ok - PostToolUse command hooks can update MCP output
 113/113 build-safety tests passed.
 ```
 
+## 2026-06-19 ConfigChange command timeout cleanup
+
+This round closes the ConfigChange command-hook timeout cleanup gap for common
+short helper commands.
+
+- `src/utils/hooks.ts`
+  - Extends the Windows direct-spawn helper path to `ConfigChange` command
+    hooks, so simple helpers such as `node hook.mjs` get the same timeout
+    cleanup behavior as the other short helper hook lifecycles.
+  - Complex shell commands still use the normal Git Bash path.
+- `scripts/test-build-safety.mjs`
+  - Extends the ConfigChange command metadata regression with a timeout helper
+    that writes a start marker, flushes a blocking JSON payload, then hangs long
+    enough to try writing a late marker.
+  - Verifies the timed-out command returns one failed, non-blocking
+    `Hook cancelled` result.
+  - Verifies the helper starts and is killed before the late marker can be
+    written.
+
+Risk boundary update: ConfigChange command hooks now have direct build-safety
+coverage for policy settings audit/non-blocking behavior, source metadata,
+matcher filtering, and simple-helper timeout cleanup. Remaining gaps include
+multi-hook precedence for config changes, complex-shell timeout cleanup, and
+larger hook concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - ConfigChange command hooks receive source metadata
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 StatusLine/FileSuggestion live timeout cleanup
 
 This round closes the live-timeout cleanup gap for short helper commands.

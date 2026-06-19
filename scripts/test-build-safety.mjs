@@ -4004,7 +4004,7 @@ console.log('config change policy hook OK');`,
 await test('ConfigChange command hooks receive source metadata', async () => {
   const output = await buildAndRunSnippet(
     'config-change-command-metadata-hook-test',
-    `const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, readFile, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'config-change-command-metadata-hook-config');
@@ -4015,8 +4015,14 @@ delete process.env.CLAUDE_CODE_SIMPLE;
 
 const commandPath = join(configDir, 'config-change-command-metadata-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutCommandPath = join(configDir, 'config-change-timeout-command-hook.mjs');
+const timeoutCommandPathForHook = timeoutCommandPath.replace(/\\\\/g, '/');
 const markerPath = join(configDir, 'config-change-command-marker.json');
 const markerPathForScript = markerPath.replace(/\\\\/g, '/');
+const timeoutStartMarkerPath = join(configDir, 'config-change-timeout-started.txt');
+const timeoutStartMarkerPathForScript = timeoutStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutLateMarkerPath = join(configDir, 'config-change-timeout-late.txt');
+const timeoutLateMarkerPathForScript = timeoutLateMarkerPath.replace(/\\\\/g, '/');
 const localSettingsPath = join(configDir, 'local-settings.json');
 const localSettingsPathForHook = localSettingsPath.replace(/\\\\/g, '/');
 await writeFile(
@@ -4032,6 +4038,19 @@ await writeFile(
     "await writeFile('" + markerPathForScript + "', JSON.stringify({ source: data.source, filePath: data.file_path }), 'utf8');",
     "process.stdout.write('config change command metadata marker 6931');",
     "process.exit(0);",
+  ].join('\\n'),
+  'utf8',
+);
+await writeFile(
+  timeoutCommandPath,
+  [
+    "import { writeFileSync } from 'node:fs';",
+    "writeFileSync('" + timeoutStartMarkerPathForScript + "', 'started', 'utf8');",
+    "process.stdout.write(JSON.stringify({ decision: 'block', reason: 'late config change block should not apply 6931' }));",
+    "setTimeout(() => {",
+    "  writeFileSync('" + timeoutLateMarkerPathForScript + "', 'late', 'utf8');",
+    "  process.stdout.write('late config change timeout output');",
+    "}, 1600);",
   ].join('\\n'),
   'utf8',
 );
@@ -4110,6 +4129,59 @@ if (skippedResults.length !== 0) {
 const skippedMarker = await readFile(markerPath, 'utf8').catch(() => '');
 if (skippedMarker !== '') {
   throw new Error('ConfigChange skipped matcher should not run command: ' + JSON.stringify(skippedMarker));
+}
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        ConfigChange: [
+          {
+            matcher: 'local_settings',
+            hooks: [
+              {
+                type: 'command',
+                command: 'node ' + timeoutCommandPathForHook,
+                timeout: 0.5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+resetHooksConfigSnapshot();
+resetSettingsCache();
+const timeoutResults = await executeConfigChangeHooks(
+  'local_settings',
+  localSettingsPath,
+  10000,
+);
+if (timeoutResults.length !== 1) {
+  throw new Error('ConfigChange timeout command should return one result: ' + JSON.stringify(timeoutResults));
+}
+if (timeoutResults[0].succeeded !== false || timeoutResults[0].blocked !== false) {
+  throw new Error('ConfigChange timed-out command must not succeed or block: ' + JSON.stringify(timeoutResults));
+}
+if (!String(timeoutResults[0].output).includes('Hook cancelled')) {
+  throw new Error('ConfigChange timed-out command should report cancellation: ' + JSON.stringify(timeoutResults));
+}
+try {
+  await stat(timeoutStartMarkerPath);
+} catch (error) {
+  throw new Error('ConfigChange timeout command should have started: ' + error);
+}
+await new Promise(resolve => setTimeout(resolve, 1800));
+try {
+  await stat(timeoutLateMarkerPath);
+  throw new Error('ConfigChange timed-out command should be killed before late marker');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
 }
 
 console.log('config change command metadata OK');`,
