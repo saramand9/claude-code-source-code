@@ -4297,6 +4297,46 @@ ok - teammate task lifecycle command hooks block with metadata
 95/95 build-safety tests passed.
 ```
 
+## 2026-06-19 Teammate task command timeout cleanup
+
+This round closes the simple-helper timeout cleanup gap for teammate/task
+lifecycle command hooks.
+
+- `src/utils/hooks.ts`
+  - Routes `TeammateIdle`, `TaskCreated`, and `TaskCompleted` through the same
+    direct Windows helper path used by other short lifecycle command hooks.
+- `scripts/test-build-safety.mjs`
+  - Extends the teammate/task command fixture with timed-out helpers for all
+    three lifecycle events.
+  - Verifies late `decision: "block"` output from timed-out commands does not
+    produce blocking feedback or blocking attachments.
+  - Verifies each cancelled helper surfaces a `hook_cancelled` attachment.
+  - Asserts all helper processes start but are killed before writing late
+    markers.
+
+Risk boundary update: teammate/task lifecycle command hooks now have
+build-safety coverage for metadata delivery, blocking behavior, helper-message
+formatting, and simple-helper timeout cleanup. Remaining gaps include
+multi-hook precedence across teammate/task callback plus command hooks,
+malformed-output edge cases, complex-shell timeout cleanup, and full teammate
+workflow E2E.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run build
+git diff --check
+npm run test:build-safety
+```
+
+Expected output:
+
+```text
+ok - teammate task lifecycle command hooks block with metadata
+113/113 build-safety tests passed.
+```
+
 ## 2026-06-19 PostToolUse command hook coverage
 
 This round extends `PostToolUse` coverage from callback hooks to real command

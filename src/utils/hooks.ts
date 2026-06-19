@@ -1040,6 +1040,9 @@ async function execCommandHook(
         hookEvent === 'Setup' ||
         hookEvent === 'SubagentStart' ||
         hookEvent === 'SubagentStop' ||
+        hookEvent === 'TeammateIdle' ||
+        hookEvent === 'TaskCreated' ||
+        hookEvent === 'TaskCompleted' ||
         hookEvent === 'PostToolUse' ||
         hookEvent === 'PostToolUseFailure' ||
         hookEvent === 'PermissionDenied' ||

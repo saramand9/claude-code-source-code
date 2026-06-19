@@ -7803,7 +7803,7 @@ console.log('teammate task lifecycle hooks OK');`,
 await test('teammate task lifecycle command hooks block with metadata', async () => {
   const output = await buildAndRunSnippet(
     'teammate-task-lifecycle-command-hook-test',
-    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+    `const { mkdir, rm, stat, writeFile } = await import('node:fs/promises');
 const { join } = await import('node:path');
 
 process.env.CLAUDE_CONFIG_DIR = 'build-src/test-artifacts/teammate-task-lifecycle-command-hook-config';
@@ -7814,6 +7814,24 @@ await rm(commandDir, { recursive: true, force: true });
 await mkdir(commandDir, { recursive: true });
 const commandPath = join(commandDir, 'teammate-task-lifecycle-command-hook.mjs');
 const commandPathForHook = commandPath.replace(/\\\\/g, '/');
+const timeoutIdleCommandPath = join(commandDir, 'teammate-idle-timeout-command-hook.mjs');
+const timeoutIdleCommandPathForHook = timeoutIdleCommandPath.replace(/\\\\/g, '/');
+const timeoutIdleStartMarkerPath = join(commandDir, 'teammate-idle-timeout-started.txt');
+const timeoutIdleStartMarkerPathForScript = timeoutIdleStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutIdleLateMarkerPath = join(commandDir, 'teammate-idle-timeout-late.txt');
+const timeoutIdleLateMarkerPathForScript = timeoutIdleLateMarkerPath.replace(/\\\\/g, '/');
+const timeoutCreateCommandPath = join(commandDir, 'task-created-timeout-command-hook.mjs');
+const timeoutCreateCommandPathForHook = timeoutCreateCommandPath.replace(/\\\\/g, '/');
+const timeoutCreateStartMarkerPath = join(commandDir, 'task-created-timeout-started.txt');
+const timeoutCreateStartMarkerPathForScript = timeoutCreateStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutCreateLateMarkerPath = join(commandDir, 'task-created-timeout-late.txt');
+const timeoutCreateLateMarkerPathForScript = timeoutCreateLateMarkerPath.replace(/\\\\/g, '/');
+const timeoutCompleteCommandPath = join(commandDir, 'task-completed-timeout-command-hook.mjs');
+const timeoutCompleteCommandPathForHook = timeoutCompleteCommandPath.replace(/\\\\/g, '/');
+const timeoutCompleteStartMarkerPath = join(commandDir, 'task-completed-timeout-started.txt');
+const timeoutCompleteStartMarkerPathForScript = timeoutCompleteStartMarkerPath.replace(/\\\\/g, '/');
+const timeoutCompleteLateMarkerPath = join(commandDir, 'task-completed-timeout-late.txt');
+const timeoutCompleteLateMarkerPathForScript = timeoutCompleteLateMarkerPath.replace(/\\\\/g, '/');
 const teammateName = 'researcher-command-8391';
 const teamName = 'analysis-team-command-8391';
 const taskId = 'task-command-8391';
@@ -7822,6 +7840,9 @@ const taskDescription = 'Task command lifecycle hook metadata marker 8391';
 const idleReason = 'teammate idle command block marker 8391';
 const createReason = 'task created command block marker 8391';
 const completeReason = 'task completed command block marker 8391';
+const timeoutIdleReason = 'late teammate idle block should not apply marker 8391';
+const timeoutCreateReason = 'late task created block should not apply marker 8391';
+const timeoutCompleteReason = 'late task completed block should not apply marker 8391';
 await writeFile(
   commandPath,
   [
@@ -7853,6 +7874,23 @@ await writeFile(
   ].join('\\n'),
   'utf8',
 );
+async function writeTimeoutCommand(path, startMarkerPath, lateMarkerPath, lateReason) {
+  await writeFile(
+    path,
+    [
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync('" + startMarkerPath + "', 'started', 'utf8');",
+      "setTimeout(() => {",
+      "  writeFileSync('" + lateMarkerPath + "', 'late', 'utf8');",
+      "  process.stdout.write(JSON.stringify({ decision: 'block', reason: '" + lateReason + "' }));",
+      "}, 1600);",
+    ].join('\\n'),
+    'utf8',
+  );
+}
+await writeTimeoutCommand(timeoutIdleCommandPath, timeoutIdleStartMarkerPathForScript, timeoutIdleLateMarkerPathForScript, timeoutIdleReason);
+await writeTimeoutCommand(timeoutCreateCommandPath, timeoutCreateStartMarkerPathForScript, timeoutCreateLateMarkerPathForScript, timeoutCreateReason);
+await writeTimeoutCommand(timeoutCompleteCommandPath, timeoutCompleteStartMarkerPathForScript, timeoutCompleteLateMarkerPathForScript, timeoutCompleteReason);
 
 const [
   {
@@ -8007,6 +8045,125 @@ if (!getTaskCreatedHookMessage({ blockingError: createReason, command: commandPa
 if (!getTaskCompletedHookMessage({ blockingError: completeReason, command: commandPathForHook }).includes(completeReason)) {
   throw new Error('TaskCompleted command helper should include block reason');
 }
+
+function assertCommandCancelled(results, eventName, reason) {
+  if (results.some(result =>
+    result.blockingError?.blockingError === reason ||
+    result.message?.attachment?.blockingError?.blockingError === reason
+  )) {
+    throw new Error(eventName + ' timed-out command should not apply late block: ' + JSON.stringify(results));
+  }
+  if (!results.some(result => {
+    const attachment = result.message?.attachment;
+    return attachment?.type === 'hook_cancelled' && attachment.hookEvent === eventName;
+  })) {
+    throw new Error(eventName + ' timed-out command should report cancellation: ' + JSON.stringify(results));
+  }
+}
+async function assertLateMarkerAbsent(markerPath, eventName) {
+  await new Promise(resolve => setTimeout(resolve, 1800));
+  try {
+    await stat(markerPath);
+    throw new Error(eventName + ' timed-out command should be killed before late marker');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  TeammateIdle: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutIdleCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+const timeoutIdleResults = await collect(executeTeammateIdleHooks(
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+));
+assertCommandCancelled(timeoutIdleResults, 'TeammateIdle', timeoutIdleReason);
+try {
+  await stat(timeoutIdleStartMarkerPath);
+} catch (error) {
+  throw new Error('TeammateIdle timeout command should have started: ' + error);
+}
+await assertLateMarkerAbsent(timeoutIdleLateMarkerPath, 'TeammateIdle');
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  TaskCreated: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCreateCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+const timeoutCreateResults = await collect(executeTaskCreatedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+assertCommandCancelled(timeoutCreateResults, 'TaskCreated', timeoutCreateReason);
+try {
+  await stat(timeoutCreateStartMarkerPath);
+} catch (error) {
+  throw new Error('TaskCreated timeout command should have started: ' + error);
+}
+await assertLateMarkerAbsent(timeoutCreateLateMarkerPath, 'TaskCreated');
+
+clearRegisteredHooks();
+registerHookCallbacks({
+  TaskCompleted: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'node ' + timeoutCompleteCommandPathForHook,
+          timeout: 0.5,
+        },
+      ],
+    },
+  ],
+});
+const timeoutCompleteResults = await collect(executeTaskCompletedHooks(
+  taskId,
+  taskSubject,
+  taskDescription,
+  teammateName,
+  teamName,
+  'default',
+  context.abortController.signal,
+  10000,
+  context,
+));
+assertCommandCancelled(timeoutCompleteResults, 'TaskCompleted', timeoutCompleteReason);
+try {
+  await stat(timeoutCompleteStartMarkerPath);
+} catch (error) {
+  throw new Error('TaskCompleted timeout command should have started: ' + error);
+}
+await assertLateMarkerAbsent(timeoutCompleteLateMarkerPath, 'TaskCompleted');
 
 console.log('teammate task lifecycle command hooks OK');`,
   )
