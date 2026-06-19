@@ -1991,6 +1991,128 @@ console.log('config change policy hook OK');`,
   assert.equal(output, 'config change policy hook OK')
 })
 
+await test('environment hooks collect watch paths and system messages', async () => {
+  const output = await buildAndRunSnippet(
+    'environment-watch-hook-test',
+    `const { mkdir, rm, writeFile } = await import('node:fs/promises');
+const { basename, join } = await import('node:path');
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'environment-watch-hook-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+delete process.env.CLAUDE_CODE_SIMPLE;
+
+function psWriteJson(value) {
+  return "Write-Output '" + JSON.stringify(value).replace(/'/g, "''") + "'";
+}
+
+const cwdWatchPath = join(process.cwd(), 'build-src', 'test-artifacts', 'cwd-watch-marker-2741.txt').replace(/\\\\/g, '/');
+const fileWatchPath = join(process.cwd(), 'build-src', 'test-artifacts', 'file-watch-marker-2741.txt').replace(/\\\\/g, '/');
+const changedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'tracked-env-file-2741.env');
+const cwdSystemMessage = 'cwd changed system marker 2741';
+const fileSystemMessage = 'file changed system marker 2741';
+
+await writeFile(
+  join(configDir, 'settings.json'),
+  JSON.stringify(
+    {
+      hooks: {
+        CwdChanged: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                shell: 'powershell',
+                command: psWriteJson({
+                  systemMessage: cwdSystemMessage,
+                  hookSpecificOutput: {
+                    hookEventName: 'CwdChanged',
+                    watchPaths: [cwdWatchPath],
+                  },
+                }),
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+        FileChanged: [
+          {
+            matcher: basename(changedFile),
+            hooks: [
+              {
+                type: 'command',
+                shell: 'powershell',
+                command: psWriteJson({
+                  systemMessage: fileSystemMessage,
+                  hookSpecificOutput: {
+                    hookEventName: 'FileChanged',
+                    watchPaths: [fileWatchPath],
+                  },
+                }),
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+const [
+  { executeCwdChangedHooks, executeFileChangedHooks },
+  { setIsInteractive },
+  { resetHooksConfigSnapshot },
+] = await Promise.all([
+  import('./src/utils/hooks.ts'),
+  import('./src/bootstrap/state.ts'),
+  import('./src/utils/hooks/hooksConfigSnapshot.ts'),
+]);
+
+setIsInteractive(false);
+resetHooksConfigSnapshot();
+
+const cwdResult = await executeCwdChangedHooks(
+  join(process.cwd(), 'old-cwd'),
+  process.cwd(),
+  10000,
+);
+if (cwdResult.results.length !== 1 || cwdResult.results[0].succeeded !== true) {
+  throw new Error('CwdChanged hook should succeed: ' + JSON.stringify(cwdResult));
+}
+if (!cwdResult.watchPaths.includes(cwdWatchPath)) {
+  throw new Error('CwdChanged hook should return watch path: ' + JSON.stringify(cwdResult.watchPaths));
+}
+if (!cwdResult.systemMessages.includes(cwdSystemMessage)) {
+  throw new Error('CwdChanged hook should return system message: ' + JSON.stringify(cwdResult.systemMessages));
+}
+
+const fileResult = await executeFileChangedHooks(changedFile, 'change', 10000);
+if (fileResult.results.length !== 1 || fileResult.results[0].succeeded !== true) {
+  throw new Error('FileChanged hook should succeed: ' + JSON.stringify(fileResult));
+}
+if (!fileResult.watchPaths.includes(fileWatchPath)) {
+  throw new Error('FileChanged hook should return watch path: ' + JSON.stringify(fileResult.watchPaths));
+}
+if (!fileResult.systemMessages.includes(fileSystemMessage)) {
+  throw new Error('FileChanged hook should return system message: ' + JSON.stringify(fileResult.systemMessages));
+}
+
+const skippedFile = join(process.cwd(), 'build-src', 'test-artifacts', 'ignored-env-file-2741.env');
+const skippedResult = await executeFileChangedHooks(skippedFile, 'change', 10000);
+if (skippedResult.results.length !== 0) {
+  throw new Error('FileChanged matcher should skip other basenames: ' + JSON.stringify(skippedResult));
+}
+
+console.log('environment watch hooks OK');`,
+  )
+  assert.equal(output, 'environment watch hooks OK')
+})
+
 await test('verify bundled skill assets are real text', async () => {
   const output = await buildAndRunSnippet(
     'verify-skill-assets-test',

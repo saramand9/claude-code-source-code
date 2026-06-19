@@ -2535,3 +2535,37 @@ Expected new output:
 ```text
 ok - ConfigChange hooks cannot block policy settings
 ```
+
+## 2026-06-19 environment watch hook build-safety coverage
+
+This round covers environment-change hooks outside the normal tool execution
+pipeline. `CwdChanged` and `FileChanged` hooks can return dynamic watch paths
+and system messages; those outputs drive the file-change watcher and user
+notifications, so they need direct regression coverage.
+
+- `scripts/test-build-safety.mjs`
+  - Creates a temporary `settings.json` with `CwdChanged` and `FileChanged`
+    command hooks.
+  - Each hook returns JSON with `systemMessage` and
+    `hookSpecificOutput.watchPaths`.
+  - Asserts `executeCwdChangedHooks()` reports the hook result, watch path, and
+    system message.
+  - Asserts `executeFileChangedHooks()` does the same for a matching basename.
+  - Asserts `FileChanged` matcher filtering skips unrelated basenames.
+
+Risk boundary update: environment hook watch-path aggregation now has direct
+build-safety coverage. Remaining hook gaps are mainly full watcher integration
+E2E, interactive PermissionRequest UI, and larger mixed-tool/concurrency cases.
+
+Verification:
+
+```text
+node --check scripts\test-build-safety.mjs
+npm run test:build-safety
+```
+
+Expected new output:
+
+```text
+ok - environment hooks collect watch paths and system messages
+```
