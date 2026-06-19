@@ -282,13 +282,14 @@ console.log('vertex SDK OK');`,
 await test('agent SDK session metadata APIs read local JSONL metadata', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-session-metadata-test',
-    `import { mkdir, writeFile } from 'node:fs/promises';
+    `import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
 const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
 const {
   getSessionInfo,
   getSessionMessages,
+  forkSession,
   listSessions,
   renameSession,
   tagSession,
@@ -476,6 +477,53 @@ try {
 }
 if (!emptyTitleError || !String(emptyTitleError.message).includes('empty')) {
   throw new Error('renameSession should reject empty titles');
+}
+const forked = await forkSession(sessionId, {
+  dir: projectDir,
+  upToMessageId: user2,
+  title: 'Forked SDK session',
+});
+if (!forked?.sessionId || forked.sessionId === sessionId) {
+  throw new Error('forkSession returned an invalid session id: ' + JSON.stringify(forked));
+}
+const forkInfo = await getSessionInfo(forked.sessionId, { dir: projectDir });
+if (forkInfo?.customTitle !== 'Forked SDK session') {
+  throw new Error('forkSession did not append fork title: ' + JSON.stringify(forkInfo));
+}
+const forkMessages = await getSessionMessages(forked.sessionId, {
+  dir: projectDir,
+  includeSystemMessages: true,
+});
+if (JSON.stringify(forkMessages.map(message => message.type)) !== JSON.stringify(['user', 'assistant', 'system', 'user'])) {
+  throw new Error('forkSession produced wrong message prefix: ' + JSON.stringify(forkMessages));
+}
+const originalIds = new Set([user1, assistant1, status, user2, assistant2, sideUser]);
+if (forkMessages.some(message => originalIds.has(message.uuid))) {
+  throw new Error('forkSession did not rewrite message UUIDs: ' + JSON.stringify(forkMessages));
+}
+if (forkMessages.some(message => message.session_id !== forked.sessionId)) {
+  throw new Error('forkSession did not rewrite session_id: ' + JSON.stringify(forkMessages));
+}
+const forkRaw = (
+  await readFile(join(projectStorageDir, forked.sessionId + '.jsonl'), 'utf8')
+)
+  .trim()
+  .split('\\n')
+  .map(line => JSON.parse(line));
+const forkChain = forkRaw.filter(entry =>
+  ['user', 'assistant', 'system'].includes(entry.type),
+);
+for (let i = 0; i < forkChain.length; i += 1) {
+  const expectedParent = i === 0 ? null : forkChain[i - 1].uuid;
+  if (forkChain[i].parentUuid !== expectedParent) {
+    throw new Error('forkSession did not rewrite parentUuid chain: ' + JSON.stringify(forkChain));
+  }
+}
+if (forkChain.at(-1)?.forkedFrom?.messageUuid !== user2) {
+  throw new Error('forkSession did not stop at requested message: ' + JSON.stringify(forkChain));
+}
+if (forkChain.some(entry => entry.forkedFrom?.messageUuid === assistant2)) {
+  throw new Error('forkSession included messages after upToMessageId: ' + JSON.stringify(forkChain));
 }
 console.log('agent SDK session metadata OK');`,
   )

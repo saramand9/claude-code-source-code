@@ -41,6 +41,7 @@ import type {
   SDKUserMessage,
 } from './sdk/coreTypes.js'
 import {
+  forkSessionImpl,
   getSessionMessagesImpl,
   getSessionInfoImpl,
   listSessionsImpl,
@@ -273,10 +274,10 @@ export async function tagSession(
  * @returns `{ sessionId }` — UUID of the new forked session
  */
 export async function forkSession(
-  _sessionId: string,
-  _options?: ForkSessionOptions,
+  sessionId: string,
+  options?: ForkSessionOptions,
 ): Promise<ForkSessionResult> {
-  throw new Error('forkSession is not implemented in the SDK')
+  return forkSessionImpl(sessionId, options)
 }
 
 // ============================================================================

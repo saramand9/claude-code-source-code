@@ -8,9 +8,15 @@
  */
 
 import type { Dirent } from 'fs'
-import type { UUID } from 'crypto'
-import { appendFile, readdir, stat } from 'fs/promises'
-import { basename, join } from 'path'
+import { randomUUID, type UUID } from 'crypto'
+import {
+  appendFile,
+  mkdir,
+  readdir,
+  stat,
+  writeFile,
+} from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import type { SDKMessage } from '../entrypoints/sdk/coreTypes.js'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import type { LiteSessionFile } from './sessionStoragePortable.js'
@@ -82,6 +88,16 @@ export type GetSessionMessagesOptions = {
 
 export type SessionMutationOptions = {
   dir?: string
+}
+
+export type ForkSessionOptions = {
+  dir?: string
+  upToMessageId?: string
+  title?: string
+}
+
+export type ForkSessionResult = {
+  sessionId: string
 }
 
 type TranscriptEntry = Record<string, unknown> & {
@@ -561,6 +577,55 @@ async function appendSessionMetadataEntry(
   })
 }
 
+function getEntryMessageId(entry: TranscriptEntry): string | undefined {
+  const messageId = entry.message?.id
+  return typeof messageId === 'string' ? messageId : undefined
+}
+
+function resolveForkCutIndex(
+  chain: TranscriptEntry[],
+  upToMessageId: string | undefined,
+): number {
+  if (!upToMessageId) return chain.length - 1
+  const index = chain.findIndex(
+    entry =>
+      entry.uuid === upToMessageId || getEntryMessageId(entry) === upToMessageId,
+  )
+  if (index < 0) {
+    throw new Error(`Message not found in session: ${upToMessageId}`)
+  }
+  return index
+}
+
+function toForkedEntry(
+  entry: TranscriptEntry,
+  forkSessionId: UUID,
+  originalSessionId: UUID,
+  parentUuid: UUID | null,
+): Record<string, unknown> {
+  const {
+    order,
+    session_id,
+    sessionId,
+    logicalParentUuid,
+    parentUuid: _parentUuid,
+    isSidechain,
+    ...rest
+  } = entry
+
+  return {
+    ...rest,
+    uuid: randomUUID(),
+    parentUuid,
+    sessionId: forkSessionId,
+    isSidechain: false,
+    forkedFrom: {
+      sessionId: originalSessionId,
+      messageUuid: entry.uuid,
+    },
+  }
+}
+
 type Candidate = {
   sessionId: string
   filePath: string
@@ -947,4 +1012,76 @@ export async function tagSessionImpl(
     tag: tag ?? '',
     sessionId: uuid,
   }))
+}
+
+export async function forkSessionImpl(
+  sessionId: string,
+  options?: ForkSessionOptions,
+): Promise<ForkSessionResult> {
+  const uuid = validateUuid(sessionId)
+  if (!uuid) throw new Error(`Invalid session id: ${sessionId}`)
+
+  const resolved = await resolveSessionFilePath(uuid, options?.dir)
+  if (!resolved) throw new Error(`Session not found: ${sessionId}`)
+
+  let postBoundaryBuf: Buffer
+  try {
+    postBoundaryBuf = (
+      await readTranscriptForLoad(resolved.filePath, resolved.fileSize)
+    ).postBoundaryBuf
+  } catch {
+    throw new Error(`Unable to read session: ${sessionId}`)
+  }
+
+  const messages = new Map<UUID, TranscriptEntry>()
+  parseJsonlRecords(postBoundaryBuf).forEach((record, index) => {
+    const message = normalizeTranscriptEntry(record, uuid, index)
+    if (message && !message.isSidechain) messages.set(message.uuid, message)
+  })
+
+  const leaf = findLatestUserAssistantLeaf(messages)
+  if (!leaf) throw new Error(`No messages to fork: ${sessionId}`)
+
+  const chain = buildConversationChain(messages, leaf)
+  const cutIndex = resolveForkCutIndex(chain, options?.upToMessageId)
+  const selected = chain.slice(0, cutIndex + 1)
+  if (selected.length === 0) throw new Error(`No messages to fork: ${sessionId}`)
+
+  const forkSessionId = randomUUID()
+  const lines: string[] = []
+  let parentUuid: UUID | null = null
+  for (const entry of selected) {
+    const forked = toForkedEntry(entry, forkSessionId, uuid, parentUuid)
+    const forkedUuid = validateUuid(forked.uuid)
+    if (!forkedUuid) throw new Error('Failed to generate fork message UUID')
+    lines.push(JSON.stringify(forked))
+    parentUuid = forkedUuid
+  }
+
+  const title = options?.title
+  if (title !== undefined) {
+    if (title.trim().length === 0) {
+      throw new Error('Session title cannot be empty')
+    }
+    lines.push(
+      JSON.stringify({
+        type: 'custom-title',
+        customTitle: title,
+        sessionId: forkSessionId,
+      }),
+    )
+  }
+
+  const targetDir = dirname(resolved.filePath)
+  await mkdir(targetDir, { recursive: true, mode: 0o700 })
+  await writeFile(
+    join(targetDir, `${forkSessionId}.jsonl`),
+    lines.join('\n') + '\n',
+    {
+      encoding: 'utf8',
+      mode: 0o600,
+    },
+  )
+
+  return { sessionId: forkSessionId }
 }
