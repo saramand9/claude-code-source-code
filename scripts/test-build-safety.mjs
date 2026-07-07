@@ -1831,6 +1831,155 @@ await test('context collapse build gate is preserved but runtime-gated', async (
   )
 })
 
+await test('quick search and history picker build gates are preserved', async () => {
+  const promptInputSource = await readFile(
+    join(BUILD, 'src/components/PromptInput/PromptInput.tsx'),
+    'utf8',
+  )
+  const historyHookSource = await readFile(
+    join(BUILD, 'src/hooks/useHistorySearch.ts'),
+    'utf8',
+  )
+  const bindingsSource = await readFile(
+    join(BUILD, 'src/keybindings/defaultBindings.ts'),
+    'utf8',
+  )
+
+  assert.match(
+    promptInputSource,
+    /const quickSearchActive = true\s+\?\s+!isModalOverlayActive\s+:\s+false/,
+    'QUICK_SEARCH should keep global shortcut activation bundled',
+  )
+  assert.match(
+    promptInputSource,
+    /useKeybinding\('app:quickOpen'[\s\S]*?if \(true\) \{\s+setShowQuickOpen\(true\)/,
+    'quick open keybinding should open its dialog after build',
+  )
+  assert.match(
+    promptInputSource,
+    /useKeybinding\('app:globalSearch'[\s\S]*?if \(true\) \{\s+setShowGlobalSearch\(true\)/,
+    'global search keybinding should open its dialog after build',
+  )
+  assert.match(
+    promptInputSource,
+    /if \(true\) \{\s+const insertWithSpacing/,
+    'QUICK_SEARCH render branch should stay reachable',
+  )
+  assert.match(
+    promptInputSource,
+    /return <QuickOpenDialog/,
+    'QuickOpenDialog should stay referenced in PromptInput',
+  )
+  assert.match(
+    promptInputSource,
+    /return <GlobalSearchDialog/,
+    'GlobalSearchDialog should stay referenced in PromptInput',
+  )
+  assert.match(
+    promptInputSource,
+    /if \(true && showHistoryPicker\) \{/,
+    'HISTORY_PICKER render branch should stay reachable',
+  )
+  assert.match(
+    historyHookSource,
+    /isActive: true\s+\?\s+false\s+:\s+!isSearching/,
+    'legacy inline ctrl+r search must stay disabled when HistorySearchDialog owns ctrl+r',
+  )
+  assert.match(
+    bindingsSource,
+    /'ctrl\+shift\+p': 'app:quickOpen'/,
+    'ctrl+shift+p quick-open binding should be present',
+  )
+  assert.match(
+    bindingsSource,
+    /'ctrl\+shift\+f': 'app:globalSearch'/,
+    'ctrl+shift+f global-search binding should be present',
+  )
+  assert.match(
+    bindingsSource,
+    /'ctrl\+r': 'history:search'/,
+    'ctrl+r history-search binding should remain present',
+  )
+})
+
+await test('quick search components and ripgrep parser are loadable', async () => {
+  const output = await buildAndRunSnippet(
+    'interactive-search-components-test',
+    `const globalSearch = await import('./src/components/GlobalSearchDialog.tsx');
+const quickOpen = await import('./src/components/QuickOpenDialog.tsx');
+const historyDialog = await import('./src/components/HistorySearchDialog.tsx');
+
+if (typeof globalSearch.GlobalSearchDialog !== 'function') throw new Error('GlobalSearchDialog missing');
+if (typeof globalSearch.parseRipgrepLine !== 'function') throw new Error('parseRipgrepLine missing');
+if (typeof quickOpen.QuickOpenDialog !== 'function') throw new Error('QuickOpenDialog missing');
+if (typeof historyDialog.HistorySearchDialog !== 'function') throw new Error('HistorySearchDialog missing');
+
+const win = globalSearch.parseRipgrepLine('C:\\\\repo\\\\src\\\\file.ts:42:needle:inside');
+if (!win || win.file !== 'C:\\\\repo\\\\src\\\\file.ts' || win.line !== 42 || win.text !== 'needle:inside') {
+  throw new Error('windows path parse failed: ' + JSON.stringify(win));
+}
+const rel = globalSearch.parseRipgrepLine('src/file.ts:7:hello');
+if (!rel || rel.file !== 'src/file.ts' || rel.line !== 7 || rel.text !== 'hello') {
+  throw new Error('relative path parse failed: ' + JSON.stringify(rel));
+}
+if (globalSearch.parseRipgrepLine('src/file.ts:not-a-line:hello') !== null) {
+  throw new Error('invalid line number should be rejected');
+}
+console.log('interactive search components OK');`,
+  )
+  assert.equal(output, 'interactive search components OK')
+})
+
+await test('history picker reads current-project history newest-first', async () => {
+  const output = await buildAndRunSnippet(
+    'history-picker-reader-test',
+    `import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const configDir = join(process.cwd(), 'build-src', 'test-artifacts', 'history-picker-config');
+await rm(configDir, { recursive: true, force: true });
+await mkdir(configDir, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = configDir;
+
+const state = await import('./src/bootstrap/state.ts');
+const history = await import('./src/history.ts');
+history.clearPendingHistoryEntries();
+
+const project = state.getProjectRoot();
+const rows = [
+  { display: 'duplicate prompt', timestamp: 1000, project, sessionId: 'old', pastedContents: {} },
+  { display: 'beta prompt', timestamp: 2000, project, sessionId: 'old', pastedContents: {} },
+  {
+    display: 'duplicate prompt',
+    timestamp: 3000,
+    project,
+    sessionId: 'new',
+    pastedContents: {
+      1: { id: 1, type: 'text', content: 'paste body', mediaType: 'text/plain', filename: 'paste.txt' },
+    },
+  },
+  { display: 'foreign prompt', timestamp: 4000, project: project + '-other', sessionId: 'other', pastedContents: {} },
+];
+await writeFile(join(configDir, 'history.jsonl'), rows.map(row => JSON.stringify(row)).join('\\n') + '\\n', 'utf8');
+
+const seen = [];
+for await (const entry of history.getTimestampedHistory()) seen.push(entry);
+if (seen.length !== 2) throw new Error('unexpected history count: ' + JSON.stringify(seen.map(entry => entry.display)));
+if (seen[0].display !== 'duplicate prompt' || seen[0].timestamp !== 3000) {
+  throw new Error('newest duplicate was not selected first: ' + JSON.stringify(seen.map(entry => ({ display: entry.display, timestamp: entry.timestamp }))));
+}
+if (seen[1].display !== 'beta prompt' || seen[1].timestamp !== 2000) {
+  throw new Error('current-project history order failed: ' + JSON.stringify(seen.map(entry => ({ display: entry.display, timestamp: entry.timestamp }))));
+}
+const resolved = await seen[0].resolve();
+if (resolved.pastedContents[1]?.content !== 'paste body') {
+  throw new Error('pasted content resolve failed: ' + JSON.stringify(resolved));
+}
+console.log('history picker reader OK');`,
+  )
+  assert.equal(output, 'history picker reader OK')
+})
+
 await test('reactive compact runtime is loadable and guarded', async () => {
   const output = await buildAndRunSnippet(
     'reactive-compact-runtime-test',

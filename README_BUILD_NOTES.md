@@ -25,7 +25,7 @@
 2. **混合**：处理 Bun 编译期能力
 
    - **mock/stub/降级**：默认将 `feature('...')` 在构建副本中替换为 `false`，等价于关闭内部 feature gate。
-   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，Reactive Compact 是 prompt-too-long 后置恢复的外部实现，MCP_SKILLS 是 `skill://` 文本资源到 prompt command 的外部实现，EXPERIMENTAL_SKILL_SEARCH 是本地 keyword skill discovery 和 DiscoverSkills 工具外部实现，它们都不等同于官方完整内部实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
+   - **混合**：当前例外保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS`、`EXPERIMENTAL_SKILL_SEARCH`、`HISTORY_PICKER` 和 `QUICK_SEARCH`；ContextCollapse 是保守外部版，History Snip 已推进为高可用外部版，Reactive Compact 是 prompt-too-long 后置恢复的外部实现，MCP_SKILLS 是 `skill://` 文本资源到 prompt command 的外部实现，EXPERIMENTAL_SKILL_SEARCH 是本地 keyword skill discovery 和 DiscoverSkills 工具外部实现，HISTORY_PICKER / QUICK_SEARCH 是本地交互搜索 UI 恢复，它们都不等同于官方完整内部实现，`DUMP_SYSTEM_PROMPT` 是显式 CLI 快速路径恢复。
    - **尝试修复/真实适配**：将 `MACRO.VERSION`、`MACRO.PACKAGE_URL`、`MACRO.ISSUES_EXPLAINER_URL` 等宏替换为字符串常量。
    - **尝试修复/真实适配**：移除或替换 `bun:bundle` 相关导入，让 Node/esbuild 可以继续解析源码。
 
@@ -67,7 +67,7 @@
 | 文件或功能 | 标注 | 说明 |
 | --- | --- | --- |
 | `scripts/build.mjs` 构建流程 | 尝试修复/真实适配 | 建立 Node/esbuild 构建路径，复制源码到 `build-src/` 后转换并输出 `dist/cli.js`。 |
-| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 与 `EXPERIMENTAL_SKILL_SEARCH`，其它内部 gate 仍按外部构建关闭。 |
+| `scripts/build.mjs` 的 `feature(...)` 替换 | 混合 | 默认关闭 gated 代码；当前选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS`、`EXPERIMENTAL_SKILL_SEARCH`、`HISTORY_PICKER` 与 `QUICK_SEARCH`，其它内部 gate 仍按外部构建关闭。 |
 | `scripts/audit-features.mjs` / `npm run audit:features` | 尝试修复/真实适配 | 统计 `src/` 中所有 `feature('...')` 调用、默认保留项、环境保留项和当前 stub manifest，作为后续 feature 修复清单。 |
 | `scripts/build.mjs` 的 `MACRO.*` 替换 | 尝试修复/真实适配 | 用确定字符串替代 Bun 编译期 define。 |
 | `scripts/build.mjs` 自动生成缺失模块 | mock/stub/降级 | 生成 fail-fast stub，并写入 `build-src/stub-manifest.json`；不恢复内部功能。 |
@@ -126,12 +126,14 @@
 - `@ant/claude-for-chrome-mcp` 不再由构建脚本生成 fail-fast private stub；当前 alias 到源码里的外部保守 shim，至少能完成 MCP 初始化、列出空工具集并给出明确不可用错误。
 - `MCP_SKILLS` 默认保留，`skill://` 文本资源会被读取、解析 frontmatter，并作为 `loadedFrom: 'mcp'` 的 prompt command 进入 MCP commands 列表。
 - `EXPERIMENTAL_SKILL_SEARCH` 默认保留，支持本地 prompt skill 与 MCP skill 的 keyword 检索、turn-zero 预发现 attachment 和 `DiscoverSkills` 只读工具。
+- `HISTORY_PICKER` 默认保留，`Ctrl+R` 改为打开历史 prompt 选择器，并继续复用当前项目历史、去重和 pasted content resolve 逻辑。
+- `QUICK_SEARCH` 默认保留，`Ctrl+Shift+P` / `Cmd+Shift+P` 打开文件 quick open，`Ctrl+Shift+F` / `Cmd+Shift+F` 打开 ripgrep 全局搜索。
 
 ## mock/stub/降级
 
 这些部分不是完整官方实现：
 
-- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH`。
+- `feature('...')` 默认替换为 `false`，等价于关闭内部 feature gate；当前只选择性保留 `CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS`、`EXPERIMENTAL_SKILL_SEARCH`、`HISTORY_PICKER` 和 `QUICK_SEARCH`。
 - `stubs/bun-ffi.ts` 只是空 stub，不提供真实 FFI。
 - 当前 `build-src/stub-manifest.json` 为 0 项；`@ant/claude-for-chrome-mcp` 不再由构建脚本生成 private-package-stub，而是 alias 到源码里的外部保守 shim。该 shim 只提供空 browser tools 和可连接的空 MCP server，不恢复真实 Chrome browser tools。
 - 当前 manifest 不再包含 `@ant/claude-for-chrome-mcp` private-package-stub、`snipCompact` / `snipProjection`、`VerifyPlanExecutionTool`、bundled verify skill 文档资产、`utils/protectedNamespace`、`utils/ultraplan/prompt.txt`、`components/AntModelSwitchCallout`、`components/UndercoverAutoCallout`、`ink/devtools`、`tools/TungstenTool`、`tools/REPLTool`、`tools/SuggestBackgroundPRTool` 和 `commands/agents-platform`。
@@ -178,10 +180,12 @@ feature('DUMP_SYSTEM_PROMPT') -> true
 feature('HISTORY_SNIP') -> true
 feature('MCP_SKILLS') -> true
 feature('EXPERIMENTAL_SKILL_SEARCH') -> true
+feature('HISTORY_PICKER') -> true
+feature('QUICK_SEARCH') -> true
 feature('REACTIVE_COMPACT') -> true
 ```
 
-这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS` 和 `EXPERIMENTAL_SKILL_SEARCH` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，Reactive Compact 由 `DISABLE_COMPACT` / `DISABLE_AUTO_COMPACT` / `DISABLE_REACTIVE_COMPACT` / `CLAUDE_CODE_DISABLE_REACTIVE_COMPACT` 控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行，`MCP_SKILLS` 只在已连接 MCP server 暴露 `skill://` text resources 时生效，`EXPERIMENTAL_SKILL_SEARCH` 可被 `CLAUDE_CODE_DISABLE_SKILL_SEARCH` / `DISABLE_SKILL_SEARCH` 关闭，或由 `CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH` 显式控制。其它 gated 内部能力默认关闭。
+这能让外部主路径继续构建。注意：`CONTEXT_COLLAPSE`、`HISTORY_SNIP`、`REACTIVE_COMPACT`、`DUMP_SYSTEM_PROMPT`、`MCP_SKILLS`、`EXPERIMENTAL_SKILL_SEARCH`、`HISTORY_PICKER` 和 `QUICK_SEARCH` 只是被保留进 bundle；ContextCollapse 仍由 `CLAUDE_CONTEXT_COLLAPSE` / `CLAUDE_CODE_CONTEXT_COLLAPSE` 和已恢复状态共同控制，History Snip 由 `DISABLE_COMPACT` / `DISABLE_SNIP` / `CLAUDE_CODE_DISABLE_SNIP` 共同控制，Reactive Compact 由 `DISABLE_COMPACT` / `DISABLE_AUTO_COMPACT` / `DISABLE_REACTIVE_COMPACT` / `CLAUDE_CODE_DISABLE_REACTIVE_COMPACT` 控制，`DUMP_SYSTEM_PROMPT` 只在显式传入 `--dump-system-prompt` 时执行，`MCP_SKILLS` 只在已连接 MCP server 暴露 `skill://` text resources 时生效，`EXPERIMENTAL_SKILL_SEARCH` 可被 `CLAUDE_CODE_DISABLE_SKILL_SEARCH` / `DISABLE_SKILL_SEARCH` 关闭，或由 `CLAUDE_CODE_EXPERIMENTAL_SKILL_SEARCH` 显式控制；`HISTORY_PICKER` / `QUICK_SEARCH` 依赖终端快捷键、历史文件、ripgrep 和外部编辑器等本地环境。其它 gated 内部能力默认关闭。
 
 ## 实际风险说明
 
@@ -5977,4 +5981,48 @@ Expected new output:
 
 ```text
 ok - PermissionRequest command hooks decide Bash headless prompts
+```
+
+## 2026-07-07 HISTORY_PICKER / QUICK_SEARCH 本地交互搜索恢复
+
+本轮按“最快且相对重要”的 feature 修复顺序，优先恢复个人使用频率较高的历史 prompt 选择和本地搜索入口。源码里 `HistorySearchDialog`、`QuickOpenDialog`、`GlobalSearchDialog` 已经存在，之前主要问题是 `feature('HISTORY_PICKER')` / `feature('QUICK_SEARCH')` 在 Node/esbuild 外部构建中默认被折叠为 `false`，导致 `dist/cli.js` 里对应 UI 分支和快捷键路径不可达。
+
+### 本轮真实修复
+
+- `scripts/feature-gate-policy.mjs` 默认保留 `HISTORY_PICKER` 与 `QUICK_SEARCH`，构建时不再把这两个 gate 折叠为 `false`。
+- `Ctrl+R` 现在走 `HistorySearchDialog` 历史选择器；旧的 inline `useHistorySearch` 在 `HISTORY_PICKER` 启用时仍保持禁用，避免两个 Ctrl+R handler 互相抢事件。
+- `Ctrl+Shift+P` / `Cmd+Shift+P` 打开文件 quick open；`Ctrl+Shift+F` / `Cmd+Shift+F` 打开全局搜索。
+- `scripts/test-build-safety.mjs` 新增 gate 级断言，确认构建副本里 `PromptInput` 的 quick search / history picker 分支可达，默认快捷键仍与 schema 对齐。
+- `scripts/test-build-safety.mjs` 新增运行时片段，确认 `QuickOpenDialog`、`GlobalSearchDialog`、`HistorySearchDialog` 可加载，并覆盖 Windows drive-letter ripgrep 输出解析。
+- `scripts/test-build-safety.mjs` 新增历史读取片段，使用临时 `CLAUDE_CONFIG_DIR` 写入 `history.jsonl`，验证当前项目过滤、新旧重复 prompt 去重、新到旧排序，以及 pasted content resolve。
+
+### 本轮 mock/stub/风险说明
+
+- 这不是恢复官方所有搜索相关内部能力；只接入当前源码里已经存在的本地 TUI 搜索组件。
+- `GlobalSearchDialog` 依赖 `ripgrep`。当前已有系统 `rg` fallback 与专项测试，但用户机器没有可执行 `rg` 时，全局搜索能力仍会降级或失败。
+- `QuickOpenDialog` 的 Enter 默认尝试用外部编辑器打开文件；如果 `$EDITOR`、VS Code 或系统 editor 配置不可用，打开文件可能失败，但插入路径/mention 的 Tab 路径仍应可用。
+- 终端是否能上报 `Ctrl+Shift+P` / `Ctrl+Shift+F` 取决于终端和平台；构建只保证 keybinding 注册和 handler 可达，不能保证所有终端都发送相同按键序列。
+- 历史选择器只读取当前 `getProjectRoot()` 对应项目的 `history.jsonl`，不会跨项目搜索历史；这是现有历史模型的边界，不是全文历史数据库。
+
+### 本轮验证
+
+计划并执行以下验证：
+
+```text
+npm run check
+npm run build
+node --check scripts\test-build-safety.mjs
+node --check dist\cli.js
+npm run audit:features
+npm run test:build-safety
+npm run test:cli-e2e
+git diff --check
+```
+
+预期新增输出：
+
+```text
+ok - quick search and history picker build gates are preserved
+ok - quick search components and ripgrep parser are loadable
+ok - history picker reads current-project history newest-first
 ```
