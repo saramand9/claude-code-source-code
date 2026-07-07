@@ -14,6 +14,7 @@ import type { MarketplaceSource } from './schemas.js'
  *   - Self-hosted: user@192.168.10.123:path/to/repo
  * - HTTP/HTTPS URLs
  * - GitHub shorthand (owner/repo)
+ * - NPM packages (npm:<package>, @scope/package, or package-name)
  * - Local file paths (.json files)
  * - Local directory paths
  *
@@ -25,6 +26,11 @@ export async function parseMarketplaceInput(
 ): Promise<MarketplaceSource | { error: string } | null> {
   const trimmed = input.trim()
   const fs = getFsImplementation()
+
+  const explicitNpmMatch = trimmed.match(/^npm:(?:\/\/)?(.+)$/)
+  if (explicitNpmMatch?.[1]) {
+    return parseNpmMarketplaceSource(explicitNpmMatch[1], true)
+  }
 
   // Handle git SSH URLs with any valid username (not just 'git')
   // Supports: user@host:path, user@host:path.git, and with #ref suffix
@@ -140,6 +146,15 @@ export async function parseMarketplaceInput(
     }
   }
 
+  // Handle scoped NPM packages before GitHub shorthand, since @scope/package
+  // contains a slash but is not a GitHub owner/repo reference.
+  if (trimmed.startsWith('@')) {
+    const npmSource = parseNpmMarketplaceSource(trimmed, false)
+    if (npmSource) {
+      return npmSource
+    }
+  }
+
   // Handle GitHub shorthand (owner/repo, owner/repo#ref, or owner/repo@ref)
   // Accept both # and @ as ref separators — the display formatter uses @, so users
   // naturally type @ when copying from error messages or managed settings.
@@ -155,8 +170,41 @@ export async function parseMarketplaceInput(
     return ref ? { source: 'github', repo, ref } : { source: 'github', repo }
   }
 
-  // NPM packages not yet implemented
-  // Returning null for unrecognized input
+  const npmSource = parseNpmMarketplaceSource(trimmed, false)
+  if (npmSource) {
+    return npmSource
+  }
 
   return null
+}
+
+function parseNpmMarketplaceSource(
+  packageName: string,
+  explicit: boolean,
+): MarketplaceSource | { error: string } | null {
+  const trimmedPackageName = packageName.trim()
+  if (!trimmedPackageName) {
+    return explicit ? { error: 'NPM package name cannot be empty' } : null
+  }
+  if (trimmedPackageName.includes('..') || trimmedPackageName.includes('//')) {
+    return explicit
+      ? {
+          error:
+            'NPM package name cannot contain path traversal patterns or double slashes',
+        }
+      : null
+  }
+
+  const scopedPackageRegex = /^@[a-z0-9][a-z0-9-._]*\/[a-z0-9][a-z0-9-._]*$/
+  const regularPackageRegex = /^[a-z0-9][a-z0-9-._]*$/
+  if (
+    scopedPackageRegex.test(trimmedPackageName) ||
+    regularPackageRegex.test(trimmedPackageName)
+  ) {
+    return { source: 'npm', package: trimmedPackageName }
+  }
+
+  return explicit
+    ? { error: `Invalid npm package name format: ${trimmedPackageName}` }
+    : null
 }

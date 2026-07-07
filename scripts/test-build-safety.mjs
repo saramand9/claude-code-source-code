@@ -337,6 +337,437 @@ console.log('agent SDK MCP builders OK');`,
   assert.equal(output, 'agent SDK MCP builders OK')
 })
 
+await test('agent SDK query drives stream-json CLI subprocess', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-query-test',
+    `import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const fakeCli = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-cli.mjs');
+const capture = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-cli-capture.json');
+const capture2 = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-cli-capture-2.json');
+const fakeCliSource = [
+  "import { createInterface } from 'node:readline';",
+  "import { writeFileSync } from 'node:fs';",
+  "const capturePath = process.argv[2];",
+  "const sdkArgs = process.argv.slice(3);",
+  "const lines = [];",
+  "const responses = [];",
+  "let sentMcp = false;",
+  "function emit(value) { process.stdout.write(JSON.stringify(value) + '\\\\n'); }",
+  "function parsedLines() { return lines.map(line => JSON.parse(line)); }",
+  "function finish() {",
+  "  const parsed = parsedLines();",
+  "  const user = parsed.find(message => message.type === 'user');",
+  "  writeFileSync(capturePath, JSON.stringify({ argv: sdkArgs, messages: parsed, responses }, null, 2));",
+  "  emit({ type: 'system', subtype: 'init', session_id: 'session-test', uuid: 'sys-test' });",
+  "  emit({ type: 'result', subtype: 'success', duration_ms: 1, duration_api_ms: 0, is_error: false, num_turns: 1, result: String(user?.message?.content ?? '') + ':done', stop_reason: null, total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], uuid: 'result-test', session_id: 'session-test' });",
+  "}",
+  "const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });",
+  "rl.on('line', line => {",
+  "  lines.push(line);",
+  "  const message = JSON.parse(line);",
+  "  if (message.type === 'control_response') {",
+  "    responses.push(message);",
+  "    if (message.response?.request_id === 'mcp-1') { finish(); process.exit(0); }",
+  "    return;",
+  "  }",
+  "  if (!sentMcp && parsedLines().some(item => item.type === 'control_request') && parsedLines().some(item => item.type === 'user')) {",
+  "    sentMcp = true;",
+  "    emit({ type: 'control_request', request_id: 'mcp-1', request: { subtype: 'mcp_message', server_name: 'local-sdk', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'echo', arguments: { text: 'from mcp' } } } } });",
+  "  }",
+  "});",
+  "rl.on('close', () => { if (!sentMcp) finish(); });",
+].join('\\n');
+await writeFile(fakeCli, fakeCliSource, 'utf8');
+const { createSdkMcpServer, query, tool, unstable_v2_prompt } = await import('./src/entrypoints/agentSdkTypes.ts');
+const { z } = await import('zod/v4');
+const echo = tool('echo', 'Echo text', { text: z.string() }, async args => ({
+  content: [{ type: 'text', text: args.text }],
+}));
+const server = createSdkMcpServer({
+  name: 'local-sdk',
+  version: '1.0.0',
+  tools: [echo],
+});
+const messages = [];
+for await (const message of query({
+  prompt: 'hello sdk',
+  options: {
+    executable: process.execPath,
+    executableArgs: [fakeCli, capture],
+    cwd: process.cwd(),
+    model: 'sonnet',
+    maxTurns: 2,
+    allowedTools: ['Read'],
+    disallowedTools: ['Write'],
+    systemPrompt: 'system from sdk',
+    appendSystemPrompt: 'append from sdk',
+    includePartialMessages: true,
+    jsonSchema: { type: 'object' },
+    mcpServers: {
+      local: server,
+      external: { type: 'stdio', command: 'node', args: ['server.mjs'] },
+    },
+  },
+})) {
+  messages.push(message);
+}
+if (messages.map(message => message.type).join(',') !== 'system,result') {
+  throw new Error('query yielded wrong messages: ' + JSON.stringify(messages));
+}
+if (messages[1]?.result !== 'hello sdk:done') {
+  throw new Error('query result not yielded: ' + JSON.stringify(messages));
+}
+const captured = JSON.parse(await readFile(capture, 'utf8'));
+for (const expectedArg of ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--model', 'sonnet', '--max-turns', '2', '--allowedTools', 'Read', '--disallowedTools', 'Write', '--include-partial-messages']) {
+  if (!captured.argv.includes(expectedArg)) {
+    throw new Error('missing CLI arg ' + expectedArg + ': ' + JSON.stringify(captured.argv));
+  }
+}
+const mcpConfigIndex = captured.argv.indexOf('--mcp-config');
+if (mcpConfigIndex === -1) throw new Error('missing --mcp-config: ' + JSON.stringify(captured.argv));
+const mcpConfig = JSON.parse(captured.argv[mcpConfigIndex + 1]);
+if (mcpConfig.mcpServers.external.command !== 'node') {
+  throw new Error('external MCP config was not passed through: ' + JSON.stringify(mcpConfig));
+}
+const init = captured.messages.find(message => message.type === 'control_request' && message.request?.subtype === 'initialize');
+if (!init) throw new Error('missing initialize message: ' + JSON.stringify(captured.messages));
+if (JSON.stringify(init.request.sdkMcpServers) !== JSON.stringify(['local-sdk'])) {
+  throw new Error('SDK MCP server names not initialized: ' + JSON.stringify(init));
+}
+if (init.request.systemPrompt !== 'system from sdk' || init.request.appendSystemPrompt !== 'append from sdk') {
+  throw new Error('initialize prompts missing: ' + JSON.stringify(init));
+}
+const user = captured.messages.find(message => message.type === 'user');
+if (user?.message?.content !== 'hello sdk') {
+  throw new Error('user prompt missing: ' + JSON.stringify(captured.messages));
+}
+const mcpResponse = captured.responses.find(message => message.response?.request_id === 'mcp-1');
+const mcpText = mcpResponse?.response?.response?.mcp_response?.result?.content?.[0]?.text;
+if (mcpText !== 'from mcp') {
+  throw new Error('SDK MCP response missing: ' + JSON.stringify(captured.responses));
+}
+const promptResult = await unstable_v2_prompt('prompt helper', {
+  executable: process.execPath,
+  executableArgs: [fakeCli, capture2],
+  cwd: process.cwd(),
+});
+if (promptResult.result !== 'prompt helper:done') {
+  throw new Error('unstable_v2_prompt returned wrong result: ' + JSON.stringify(promptResult));
+}
+console.log('agent SDK query OK');`,
+  )
+  assert.equal(output, 'agent SDK query OK')
+})
+
+await test('agent SDK v2 sessions keep one stream-json subprocess alive', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-v2-session-test',
+    `import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const fakeCli = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-session-cli.mjs');
+const capture = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-session-capture.json');
+const resumeCapture = join(process.cwd(), 'build-src', 'test-artifacts', 'fake-sdk-session-resume-capture.json');
+const fakeCliSource = [
+  "import { createInterface } from 'node:readline';",
+  "import { writeFileSync } from 'node:fs';",
+  "const capturePath = process.argv[2];",
+  "const sdkArgs = process.argv.slice(3);",
+  "const messages = [];",
+  "let turn = 0;",
+  "function emit(value) { process.stdout.write(JSON.stringify(value) + '\\\\n'); }",
+  "const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });",
+  "rl.on('line', line => {",
+  "  const message = JSON.parse(line);",
+  "  messages.push(message);",
+  "  if (message.type === 'user') {",
+  "    turn += 1;",
+  "    const content = String(message.message?.content ?? '');",
+  "    emit({ type: 'result', subtype: 'success', duration_ms: 1, duration_api_ms: 0, is_error: false, num_turns: turn, result: content + ':turn' + turn, stop_reason: null, total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], uuid: 'result-' + turn, session_id: 'session-live' });",
+  "  }",
+  "});",
+  "rl.on('close', () => {",
+  "  writeFileSync(capturePath, JSON.stringify({ argv: sdkArgs, messages, turn }, null, 2));",
+  "  process.exit(0);",
+  "});",
+].join('\\n');
+await writeFile(fakeCli, fakeCliSource, 'utf8');
+const {
+  unstable_v2_createSession,
+  unstable_v2_resumeSession,
+} = await import('./src/entrypoints/agentSdkTypes.ts');
+
+const session = unstable_v2_createSession({
+  executable: process.execPath,
+  executableArgs: [fakeCli, capture],
+  cwd: process.cwd(),
+  model: 'sonnet',
+});
+const first = await session.prompt('one');
+const second = await session.prompt({
+  type: 'user',
+  session_id: '',
+  message: { role: 'user', content: 'two' },
+  parent_tool_use_id: null,
+});
+if (first.result !== 'one:turn1') {
+  throw new Error('first session prompt returned wrong result: ' + JSON.stringify(first));
+}
+if (second.result !== 'two:turn2') {
+  throw new Error('second session prompt returned wrong result: ' + JSON.stringify(second));
+}
+if (session.id !== 'session-live') {
+  throw new Error('session id was not updated from stream messages: ' + session.id);
+}
+const iterator = session[Symbol.asyncIterator]();
+const yielded = [await iterator.next(), await iterator.next()];
+if (yielded.some(item => item.done)) {
+  throw new Error('session iterator ended before buffered messages: ' + JSON.stringify(yielded));
+}
+if (yielded.map(item => item.value.result).join(',') !== 'one:turn1,two:turn2') {
+  throw new Error('session iterator yielded wrong messages: ' + JSON.stringify(yielded));
+}
+session.close();
+const done = await Promise.race([
+  iterator.next(),
+  new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('timed out waiting for session close')), 5000),
+  ),
+]);
+if (!done.done) {
+  throw new Error('session iterator should finish after close: ' + JSON.stringify(done));
+}
+const captured = JSON.parse(await readFile(capture, 'utf8'));
+if (captured.turn !== 2) {
+  throw new Error('session should reuse one subprocess for two prompts: ' + JSON.stringify(captured));
+}
+const initCount = captured.messages.filter(message => message.type === 'control_request' && message.request?.subtype === 'initialize').length;
+if (initCount !== 1) {
+  throw new Error('session should initialize only once: ' + JSON.stringify(captured.messages));
+}
+
+const resumed = unstable_v2_resumeSession('resume-session-123', {
+  executable: process.execPath,
+  executableArgs: [fakeCli, resumeCapture],
+  cwd: process.cwd(),
+});
+if (resumed.id !== 'resume-session-123') {
+  throw new Error('resumed session should expose initial id: ' + resumed.id);
+}
+const resumedIterator = resumed[Symbol.asyncIterator]();
+const resumedResult = await resumed.prompt('three');
+if (resumedResult.result !== 'three:turn1') {
+  throw new Error('resumed prompt returned wrong result: ' + JSON.stringify(resumedResult));
+}
+const resumedYield = await resumedIterator.next();
+if (resumedYield.done || resumedYield.value.result !== 'three:turn1') {
+  throw new Error('resumed iterator yielded wrong result: ' + JSON.stringify(resumedYield));
+}
+resumed.close();
+await resumedIterator.next();
+const resumedCaptured = JSON.parse(await readFile(resumeCapture, 'utf8'));
+const resumeIndex = resumedCaptured.argv.indexOf('--resume');
+if (resumeIndex === -1 || resumedCaptured.argv[resumeIndex + 1] !== 'resume-session-123') {
+  throw new Error('resumeSession did not pass --resume session id: ' + JSON.stringify(resumedCaptured.argv));
+}
+let emptyResumeError = null;
+try {
+  unstable_v2_resumeSession('   ', {});
+} catch (error) {
+  emptyResumeError = error;
+}
+if (!emptyResumeError || !String(emptyResumeError.message).includes('session ID')) {
+  throw new Error('resumeSession should reject empty ids');
+}
+
+console.log('agent SDK v2 session OK');`,
+  )
+  assert.equal(output, 'agent SDK v2 session OK')
+})
+
+await test('agent SDK remote control handle wraps bridge core', async () => {
+  const output = await buildAndRunSnippet(
+    'agent-sdk-remote-control-test',
+    `const { connectRemoteControl } = await import('./src/entrypoints/agentSdkTypes.ts');
+
+const calls = [];
+const stateEvents = [];
+let capturedParams;
+
+const fakeBridge = {
+  bridgeSessionId: 'session_test_123',
+  environmentId: 'env_test_123',
+  writeSdkMessages(messages) {
+    calls.push(['writeSdkMessages', messages]);
+  },
+  sendControlRequest(request) {
+    calls.push(['sendControlRequest', request]);
+  },
+  sendControlResponse(response) {
+    calls.push(['sendControlResponse', response]);
+  },
+  sendControlCancelRequest(requestId) {
+    calls.push(['sendControlCancelRequest', requestId]);
+  },
+  sendResult() {
+    calls.push(['sendResult']);
+  },
+  async teardown() {
+    calls.push(['teardown']);
+  },
+};
+
+const handle = await connectRemoteControl({
+  dir: process.cwd(),
+  name: 'SDK RC',
+  workerType: 'sdk_worker',
+  branch: 'main',
+  gitRepoUrl: 'https://example.test/repo.git',
+  getAccessToken: () => 'token',
+  baseUrl: 'https://api.example.test',
+  orgUUID: 'org-test',
+  model: 'sonnet-test',
+  deps: {
+    getRemoteSessionUrl: (sessionId, ingressUrl) => 'remote:' + sessionId + ':' + ingressUrl,
+    createSession: async opts => {
+      calls.push(['createSession', opts.environmentId, opts.title, opts.gitRepoUrl, opts.branch]);
+      return 'session_test_123';
+    },
+    archiveSession: async sessionId => {
+      calls.push(['archiveSession', sessionId]);
+    },
+    initBridgeCore: async params => {
+      capturedParams = params;
+      const sessionId = await params.createSession({
+        environmentId: 'env_test_123',
+        title: params.title,
+        gitRepoUrl: params.gitRepoUrl,
+        branch: params.branch,
+        signal: new AbortController().signal,
+      });
+      if (sessionId !== 'session_test_123') {
+        throw new Error('bad session id: ' + sessionId);
+      }
+      if (params.dir !== process.cwd()) throw new Error('dir not forwarded');
+      if (params.workerType !== 'sdk_worker') throw new Error('workerType not forwarded');
+      if (params.branch !== 'main') throw new Error('branch not forwarded');
+      if (params.gitRepoUrl !== 'https://example.test/repo.git') throw new Error('gitRepoUrl not forwarded');
+      if (params.title !== 'SDK RC') throw new Error('title not forwarded');
+      if (params.baseUrl !== 'https://api.example.test') throw new Error('baseUrl not forwarded');
+      if (params.sessionIngressUrl !== 'https://api.example.test') throw new Error('ingress not forwarded');
+      params.onInboundMessage?.({
+        type: 'user',
+        uuid: 'user-1',
+        session_id: 'session_test_123',
+        message: { role: 'user', content: 'hello from remote' },
+        parent_tool_use_id: null,
+      });
+      params.onPermissionResponse?.({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: 'perm-1',
+          response: { behavior: 'allow' },
+        },
+      });
+      params.onInterrupt?.();
+      params.onSetModel?.('opus-test');
+      params.onSetMaxThinkingTokens?.(2048);
+      const permissionVerdict = params.onSetPermissionMode?.('acceptEdits');
+      if (!permissionVerdict?.ok) throw new Error('permission mode verdict was not ok');
+      return fakeBridge;
+    },
+  },
+});
+
+if (!handle) throw new Error('expected remote control handle');
+if (handle.sessionUrl !== 'remote:session_test_123:https://api.example.test') {
+  throw new Error('sessionUrl mismatch: ' + handle.sessionUrl);
+}
+if (handle.environmentId !== 'env_test_123') throw new Error('environmentId mismatch');
+if (handle.bridgeSessionId !== 'session_test_123') throw new Error('bridgeSessionId mismatch');
+
+handle.onStateChange((state, detail) => stateEvents.push([state, detail]));
+capturedParams.onStateChange?.('connected', 'ws-ready');
+if (JSON.stringify(stateEvents) !== JSON.stringify([['connected', 'ws-ready']])) {
+  throw new Error('state callback not forwarded: ' + JSON.stringify(stateEvents));
+}
+
+const inboundIterator = handle.inboundPrompts();
+const permissionIterator = handle.permissionResponses();
+const controlIterator = handle.controlRequests();
+
+const inbound = await inboundIterator.next();
+if (inbound.done || inbound.value.uuid !== 'user-1' || inbound.value.content !== 'hello from remote') {
+  throw new Error('inbound prompt mismatch: ' + JSON.stringify(inbound));
+}
+
+const permission = await permissionIterator.next();
+if (permission.done || permission.value.response?.request_id !== 'perm-1') {
+  throw new Error('permission response mismatch: ' + JSON.stringify(permission));
+}
+
+const controlSubtypes = [];
+for (let index = 0; index < 4; index += 1) {
+  const next = await controlIterator.next();
+  if (next.done) throw new Error('control iterator ended early');
+  controlSubtypes.push(next.value.request?.subtype);
+}
+if (controlSubtypes.join(',') !== 'interrupt,set_model,set_max_thinking_tokens,set_permission_mode') {
+  throw new Error('control requests mismatch: ' + JSON.stringify(controlSubtypes));
+}
+
+handle.write({ type: 'result', subtype: 'success', result: 'ok', session_id: 'session_test_123' });
+handle.sendControlRequest({ type: 'control_request', request_id: 'out-1', request: { subtype: 'interrupt' } });
+handle.sendControlResponse({ type: 'control_response', response: { subtype: 'success', request_id: 'out-1' } });
+handle.sendControlCancelRequest('out-1');
+handle.sendResult();
+await handle.teardown();
+
+if (!calls.some(call => call[0] === 'createSession' && call[1] === 'env_test_123')) {
+  throw new Error('createSession was not called: ' + JSON.stringify(calls));
+}
+if (!calls.some(call => call[0] === 'writeSdkMessages' && call[1]?.[0]?.result === 'ok')) {
+  throw new Error('write did not delegate: ' + JSON.stringify(calls));
+}
+if (!calls.some(call => call[0] === 'sendControlRequest' && call[1]?.request_id === 'out-1')) {
+  throw new Error('sendControlRequest did not delegate: ' + JSON.stringify(calls));
+}
+if (!calls.some(call => call[0] === 'sendControlCancelRequest' && call[1] === 'out-1')) {
+  throw new Error('sendControlCancelRequest did not delegate: ' + JSON.stringify(calls));
+}
+if (!calls.some(call => call[0] === 'sendResult')) throw new Error('sendResult did not delegate');
+if (!calls.some(call => call[0] === 'teardown')) throw new Error('teardown did not delegate');
+
+const inboundDone = await inboundIterator.next();
+const permissionDone = await permissionIterator.next();
+const controlDone = await controlIterator.next();
+if (!inboundDone.done || !permissionDone.done || !controlDone.done) {
+  throw new Error('queues did not close after teardown');
+}
+
+let initializedWithoutToken = false;
+const tokenless = await connectRemoteControl({
+  dir: process.cwd(),
+  getAccessToken: () => undefined,
+  baseUrl: 'https://api.example.test',
+  orgUUID: 'org-test',
+  model: 'sonnet-test',
+  deps: {
+    initBridgeCore: async () => {
+      initializedWithoutToken = true;
+      return fakeBridge;
+    },
+  },
+});
+if (tokenless !== null) throw new Error('tokenless connection should return null');
+if (initializedWithoutToken) throw new Error('bridge initialized without token');
+
+console.log('agent SDK remote control OK');`,
+  )
+  assert.equal(output, 'agent SDK remote control OK')
+})
+
 await test('agent SDK missed task notification preserves confirmation guard', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-missed-task-test',
@@ -412,10 +843,13 @@ console.log('agent SDK missed task notification OK');`,
 await test('agent SDK session metadata APIs read local JSONL metadata', async () => {
   const output = await buildAndRunSnippet(
     'agent-sdk-session-metadata-test',
-    `import { mkdir, readFile, writeFile } from 'node:fs/promises';
+    `import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
+const configDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-config';
+process.env.CLAUDE_CONFIG_DIR = configDir;
 const projectDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/sdk-list-sessions-project';
+await rm(configDir, { recursive: true, force: true });
+await rm(projectDir, { recursive: true, force: true });
 const {
   getSessionInfo,
   getSessionMessages,
@@ -743,15 +1177,17 @@ await test('ant-only callout components are loadable and conservative', async ()
   const output = await buildAndRunSnippet(
     'ant-callout-test',
     `import React from 'react';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { PassThrough, Writable } from 'node:stream';
 import { AntModelSwitchCallout, shouldShowModelSwitchCallout } from './src/components/AntModelSwitchCallout.tsx';
 import { UndercoverAutoCallout } from './src/components/UndercoverAutoCallout.tsx';
 const initialEnv = { ...process.env };
 process.env.USER_TYPE = 'ant';
-process.env.CLAUDE_CONFIG_DIR = '${TEST_DIR.replace(/\\/g, '\\\\')}/callout-config';
+const calloutConfigDir = '${TEST_DIR.replace(/\\/g, '\\\\')}/callout-config';
+process.env.CLAUDE_CONFIG_DIR = calloutConfigDir;
 delete process.env.CLAUDE_CODE_ENABLE_MODEL_SWITCH_CALLOUT;
 delete process.env.CLAUDE_CODE_MODEL_SWITCH_TARGET;
+await rm(calloutConfigDir, { recursive: true, force: true });
 await mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
 const { enableConfigs } = await import('./src/utils/config.ts');
 enableConfigs();
@@ -13208,18 +13644,47 @@ console.log('skill search runtime OK');`,
   assert.equal(output, 'skill search runtime OK')
 })
 
-await test('Chrome MCP external shim starts empty in-process server', async () => {
+await test('Chrome MCP source shim lists and forwards browser tools', async () => {
   const output = await buildAndRunSnippet(
     'chrome-mcp-shim-test',
     `import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { unlink } from 'node:fs/promises';
 import { createClaudeForChromeMcpServer, BROWSER_TOOLS } from '@ant/claude-for-chrome-mcp';
 import { createLinkedTransportPair } from './src/services/mcp/InProcessTransport.ts';
-const warnings = [];
+
+function frame(data) {
+  const payload = Buffer.from(JSON.stringify(data), 'utf8');
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(payload.length, 0);
+  return Buffer.concat([header, payload]);
+}
+
+function nextFramedMessage(socket) {
+  return new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+    socket.on('data', chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < 4) return;
+      const length = buffer.readUInt32LE(0);
+      if (buffer.length < 4 + length) return;
+      resolve(JSON.parse(buffer.subarray(4, 4 + length).toString('utf8')));
+    });
+    socket.once('error', reject);
+  });
+}
+
+const socketPath = process.platform === 'win32'
+  ? '\\\\\\\\.\\\\pipe\\\\chrome-mcp-shim-test-' + process.pid
+  : join(tmpdir(), 'chrome-mcp-shim-test-' + process.pid + '.sock');
 const server = createClaudeForChromeMcpServer({
   serverName: 'Chrome shim test',
-  logger: { warn(message) { warnings.push(String(message)); } },
+  getSocketPaths: () => [socketPath],
+  onToolCallDisconnected: () => 'fake extension disconnected',
 });
-if (!Array.isArray(BROWSER_TOOLS) || BROWSER_TOOLS.length !== 0) throw new Error('shim should expose zero browser tools');
+if (!Array.isArray(BROWSER_TOOLS) || BROWSER_TOOLS.length < 10) throw new Error('shim should expose browser tools');
 if (typeof server.connect !== 'function') throw new Error('shim server is not connectable');
 const client = new Client({ name: 'chrome-shim-test-client', version: '0.0.0' }, { capabilities: {} });
 const [clientTransport, serverTransport] = createLinkedTransportPair();
@@ -13227,20 +13692,159 @@ await server.connect(serverTransport);
 await client.connect(clientTransport);
 const listed = await client.listTools();
 if (!listed || !Array.isArray(listed.tools)) throw new Error('missing tools list');
-if (listed.tools.length !== 0) throw new Error('shim should list zero tools');
+if (!listed.tools.some(tool => tool.name === 'tabs_context_mcp')) throw new Error('missing tabs_context_mcp');
+if (!listed.tools.some(tool => tool.name === 'javascript_tool')) throw new Error('missing javascript_tool');
 let callError;
 try {
-  await client.callTool({ name: 'browser_snapshot', arguments: {} });
+  await client.callTool({ name: 'tabs_context_mcp', arguments: {} });
 } catch (error) {
   callError = error;
 }
-if (!callError || !String(callError.message).includes('browser_snapshot')) throw new Error('missing explicit tool-call error');
-if (!warnings.some(message => message.includes('private package is unavailable'))) throw new Error('missing shim warning');
+if (!callError || !String(callError.message).includes('fake extension disconnected')) throw new Error('missing disconnected error');
+
+const bridgeServer = createClaudeForChromeMcpServer({
+  serverName: 'Chrome bridge shim test',
+  getSocketPaths: () => [],
+  bridgeConfig: { url: 'ws://localhost:8765' },
+  onToolCallDisconnected: () => 'bridge disconnected',
+});
+const bridgeClient = new Client({ name: 'chrome-bridge-shim-test-client', version: '0.0.0' }, { capabilities: {} });
+const [bridgeClientTransport, bridgeServerTransport] = createLinkedTransportPair();
+await bridgeServer.connect(bridgeServerTransport);
+await bridgeClient.connect(bridgeClientTransport);
+let bridgeError;
+try {
+  await bridgeClient.callTool({ name: 'tabs_context_mcp', arguments: {} });
+} catch (error) {
+  bridgeError = error;
+}
+if (!bridgeError || !String(bridgeError.message).includes('Remote Chrome bridge is configured')) throw new Error('missing bridge unsupported error');
+await bridgeClient.close();
+await bridgeServer.close();
+
+let received;
+const nativeServer = createServer(async socket => {
+  received = await nextFramedMessage(socket);
+  socket.write(frame({
+    content: [{ type: 'text', text: 'ok:' + received.method }],
+    structuredContent: { echoed: received.params },
+  }));
+});
+await new Promise(resolve => nativeServer.listen(socketPath, resolve));
+const result = await client.callTool({
+  name: 'tabs_context_mcp',
+  arguments: { includeScreenshots: false },
+});
+if (received.method !== 'tabs_context_mcp') throw new Error('bad forwarded method: ' + received.method);
+if (received.params.includeScreenshots !== false) throw new Error('bad forwarded params');
+if (result.content?.[0]?.text !== 'ok:tabs_context_mcp') throw new Error('bad tool result: ' + JSON.stringify(result));
+if (result.structuredContent?.echoed?.includeScreenshots !== false) throw new Error('missing structuredContent echo');
 await client.close();
 await server.close();
+await new Promise(resolve => nativeServer.close(resolve));
+if (process.platform !== 'win32') await unlink(socketPath).catch(() => {});
 console.log('chrome mcp shim OK');`,
   )
   assert.equal(output, 'chrome mcp shim OK')
+})
+
+await test('MCP entrypoint validates tool input before calls', async () => {
+  const output = await buildAndRunSnippet(
+    'mcp-entry-input-validation-test',
+    `import { z } from 'zod/v4';
+import { applyMcpPermissionDecision, getMcpToolInputSchema, loadMcpServeToolState, parseMcpToolInput } from './src/entrypoints/mcp.ts';
+
+const inputSchema = z.strictObject({
+  path: z.string(),
+  count: z.number().default(1),
+});
+const jsonSchema = {
+  type: 'object',
+  properties: { custom: { type: 'boolean' } },
+  required: ['custom'],
+};
+const tool = { name: 'FixtureTool', inputSchema, inputJSONSchema: jsonSchema };
+
+if (getMcpToolInputSchema(tool) !== jsonSchema) {
+  throw new Error('MCP entrypoint should prefer inputJSONSchema');
+}
+
+const missing = parseMcpToolInput(tool, {});
+if (missing.ok || !missing.message.includes('path')) {
+  throw new Error('missing input should mention path: ' + JSON.stringify(missing));
+}
+
+const wrongType = parseMcpToolInput(tool, { path: 42 });
+if (wrongType.ok || !wrongType.message.includes('path')) {
+  throw new Error('wrong type should mention path: ' + JSON.stringify(wrongType));
+}
+
+const parsed = parseMcpToolInput(tool, { path: 'src/index.ts' });
+if (!parsed.ok) throw new Error('valid input rejected: ' + JSON.stringify(parsed));
+if (parsed.input.count !== 1) {
+  throw new Error('zod default was not preserved: ' + JSON.stringify(parsed.input));
+}
+
+const emptyTool = { name: 'EmptyTool', inputSchema: z.strictObject({}) };
+if (!parseMcpToolInput(emptyTool, undefined).ok) {
+  throw new Error('undefined MCP arguments should default to an empty object');
+}
+if (parseMcpToolInput(emptyTool, null).ok) {
+  throw new Error('null MCP arguments should be rejected');
+}
+
+const serveState = await loadMcpServeToolState(async onConnectionAttempt => {
+  onConnectionAttempt({
+    client: { name: 'alpha', type: 'connected', config: {} },
+    tools: [{ name: 'mcp__alpha__echo' }, { name: 'mcp__alpha__echo' }],
+    commands: [{ name: 'alpha-cmd' }, { name: 'alpha-cmd' }],
+    resources: [{ server: 'alpha', uri: 'skill://alpha/SKILL.md', name: 'Alpha' }],
+  });
+  onConnectionAttempt({
+    client: { name: 'beta', type: 'failed', config: {} },
+    tools: [],
+    commands: [],
+  });
+});
+if (serveState.clients.length !== 2) {
+  throw new Error('MCP serve state should keep all client statuses: ' + JSON.stringify(serveState.clients));
+}
+if (serveState.tools.length !== 1 || serveState.tools[0].name !== 'mcp__alpha__echo') {
+  throw new Error('MCP serve tools were not captured/deduped: ' + JSON.stringify(serveState.tools));
+}
+if (serveState.commands.length !== 1 || serveState.commands[0].name !== 'alpha-cmd') {
+  throw new Error('MCP serve commands were not captured/deduped: ' + JSON.stringify(serveState.commands));
+}
+if (!serveState.resources.alpha || serveState.resources.alpha.length !== 1) {
+  throw new Error('MCP serve resources were not captured: ' + JSON.stringify(serveState.resources));
+}
+
+const askDecision = applyMcpPermissionDecision('FixtureTool', { path: 'src/index.ts' }, {
+  behavior: 'ask',
+  message: 'approval required',
+});
+if (askDecision.ok || !askDecision.message.includes('approval required')) {
+  throw new Error('MCP serve should reject ask permission decisions: ' + JSON.stringify(askDecision));
+}
+
+const denyDecision = applyMcpPermissionDecision('FixtureTool', { path: 'src/index.ts' }, {
+  behavior: 'deny',
+});
+if (denyDecision.ok || !denyDecision.message.includes('FixtureTool')) {
+  throw new Error('MCP serve should reject deny permission decisions with fallback text: ' + JSON.stringify(denyDecision));
+}
+
+const allowDecision = applyMcpPermissionDecision('FixtureTool', { path: 'old' }, {
+  behavior: 'allow',
+  updatedInput: { path: 'new' },
+});
+if (!allowDecision.ok || allowDecision.input.path !== 'new') {
+  throw new Error('MCP serve should preserve permission-updated input: ' + JSON.stringify(allowDecision));
+}
+
+console.log('mcp entry input validation OK');`,
+  )
+  assert.equal(output, 'mcp entry input validation OK')
 })
 
 await test('MCP skill resources become safe prompt commands', async () => {
@@ -13470,6 +14074,304 @@ console.log('mcp skills OK');`,
     },
   )
   assert.equal(output, 'mcp skills OK')
+})
+
+await test('npm marketplace sources load from npm package cache', async () => {
+  const output = await buildAndRunSnippet(
+    'npm-marketplace-source-test',
+    `import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { addMarketplaceSource, getMarketplaceCacheOnly } from './src/utils/plugins/marketplaceManager.ts';
+import { getNpmPackageSpecCachePath, installFromNpm } from './src/utils/plugins/npmPackageCache.ts';
+import { parseMarketplaceInput } from './src/utils/plugins/parseMarketplaceInput.ts';
+import { isMarketplaceSourceSupportedByZipCache } from './src/utils/plugins/zipCache.ts';
+import { readMarketplaceJson, readZipCacheKnownMarketplaces, syncMarketplacesToZipCache } from './src/utils/plugins/zipCacheAdapters.ts';
+
+const root = join('build-src', 'test-artifacts', 'npm-marketplace-source-cache');
+await rm(root, { recursive: true, force: true });
+process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = root;
+
+const packageRoot = join(root, 'npm-cache', 'node_modules', '@scope', 'marketplace-fixture');
+await mkdir(join(packageRoot, '.claude-plugin'), { recursive: true });
+await writeFile(join(packageRoot, 'package.json'), JSON.stringify({
+  name: '@scope/marketplace-fixture',
+  version: '1.0.0',
+}));
+await writeFile(join(packageRoot, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+  name: 'npm-marketplace-fixture',
+  owner: { name: 'Fixture Owner' },
+  plugins: [
+    {
+      name: 'fixture-plugin',
+      source: './plugins/fixture-plugin',
+      strict: false,
+    },
+  ],
+}));
+
+const manualTarget = join(root, 'manual-copy');
+await mkdir(manualTarget, { recursive: true });
+await writeFile(join(manualTarget, 'stale.txt'), 'remove me');
+await installFromNpm('@scope/marketplace-fixture', manualTarget, { version: '1.0.0' });
+const copied = await readFile(join(manualTarget, '.claude-plugin', 'marketplace.json'), 'utf8');
+if (!copied.includes('npm-marketplace-fixture')) {
+  throw new Error('installFromNpm did not copy cached package content');
+}
+try {
+  await readFile(join(manualTarget, 'stale.txt'), 'utf8');
+  throw new Error('installFromNpm did not clean the target path before copying');
+} catch (error) {
+  if (!String(error?.message ?? error).includes('ENOENT')) throw error;
+}
+
+const spec = 'file:../fixture-plugin.tgz';
+const specCacheRoot = getNpmPackageSpecCachePath(spec);
+await mkdir(join(specCacheRoot, 'node_modules', 'tarball-fixture', '.claude-plugin'), { recursive: true });
+await writeFile(join(specCacheRoot, 'package.json'), JSON.stringify({
+  dependencies: { 'tarball-fixture': spec },
+}));
+await writeFile(join(specCacheRoot, 'node_modules', 'tarball-fixture', 'package.json'), JSON.stringify({
+  name: 'tarball-fixture',
+  version: '1.0.0',
+}));
+await writeFile(join(specCacheRoot, 'node_modules', 'tarball-fixture', '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'tarball-fixture',
+  version: '1.0.0',
+}));
+const specTarget = join(root, 'spec-copy');
+await installFromNpm(spec, specTarget);
+const specCopied = await readFile(join(specTarget, '.claude-plugin', 'plugin.json'), 'utf8');
+if (!specCopied.includes('tarball-fixture')) {
+  throw new Error('installFromNpm did not copy cached npm spec content');
+}
+let specVersionError;
+try {
+  await installFromNpm(spec, join(root, 'bad-spec-copy'), { version: '1.0.0' });
+} catch (error) {
+  specVersionError = error;
+}
+if (!specVersionError || !String(specVersionError.message).includes('version can only be used with registry package names')) {
+  throw new Error('non-registry npm specs should reject separate version: ' + String(specVersionError?.message ?? specVersionError));
+}
+
+const explicitParsed = await parseMarketplaceInput('npm:@scope/marketplace-fixture');
+if (explicitParsed.source !== 'npm' || explicitParsed.package !== '@scope/marketplace-fixture') {
+  throw new Error('explicit npm marketplace input was not parsed: ' + JSON.stringify(explicitParsed));
+}
+const scopedParsed = await parseMarketplaceInput('@scope/marketplace-fixture');
+if (scopedParsed.source !== 'npm' || scopedParsed.package !== '@scope/marketplace-fixture') {
+  throw new Error('scoped npm marketplace input was not parsed: ' + JSON.stringify(scopedParsed));
+}
+const regularParsed = await parseMarketplaceInput('marketplace-fixture');
+if (regularParsed.source !== 'npm' || regularParsed.package !== 'marketplace-fixture') {
+  throw new Error('regular npm marketplace input was not parsed: ' + JSON.stringify(regularParsed));
+}
+const githubParsed = await parseMarketplaceInput('owner/repo');
+if (githubParsed.source !== 'github' || githubParsed.repo !== 'owner/repo') {
+  throw new Error('github shorthand should not be parsed as npm: ' + JSON.stringify(githubParsed));
+}
+const invalidNpm = await parseMarketplaceInput('npm:bad//name');
+if (!invalidNpm.error || !invalidNpm.error.includes('NPM package name')) {
+  throw new Error('invalid explicit npm package should return an error: ' + JSON.stringify(invalidNpm));
+}
+
+const result = await addMarketplaceSource(explicitParsed);
+if (result.name !== 'npm-marketplace-fixture' || result.alreadyMaterialized) {
+  throw new Error('unexpected npm marketplace add result: ' + JSON.stringify(result));
+}
+
+const cached = await getMarketplaceCacheOnly('npm-marketplace-fixture');
+if (!cached || cached.plugins.length !== 1 || cached.plugins[0].name !== 'fixture-plugin') {
+  throw new Error('npm marketplace was not readable from cache: ' + JSON.stringify(cached));
+}
+
+if (!isMarketplaceSourceSupportedByZipCache(explicitParsed)) {
+  throw new Error('npm marketplace source should be supported by zip cache mode');
+}
+process.env.CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE = '1';
+await syncMarketplacesToZipCache();
+const zipKnown = await readZipCacheKnownMarketplaces();
+if (zipKnown['npm-marketplace-fixture']?.source?.source !== 'npm') {
+  throw new Error('npm marketplace was not persisted to zip known marketplaces: ' + JSON.stringify(zipKnown));
+}
+const zipMarketplace = await readMarketplaceJson('npm-marketplace-fixture');
+if (!zipMarketplace || zipMarketplace.plugins[0]?.name !== 'fixture-plugin') {
+  throw new Error('npm marketplace JSON was not persisted to zip cache: ' + JSON.stringify(zipMarketplace));
+}
+
+console.log('npm marketplace source OK');`,
+  )
+  assert.equal(output, 'npm marketplace source OK')
+})
+
+await test('local marketplace sources materialize in zip cache mode', async () => {
+  const output = await buildAndRunSnippet(
+    'local-marketplace-zip-cache-test',
+    `import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { join, resolve } from 'path';
+import { addMarketplaceSource, getPluginByIdCacheOnly, loadKnownMarketplacesConfigSafe, refreshMarketplace } from './src/utils/plugins/marketplaceManager.ts';
+import { isMarketplaceSourceSupportedByZipCache } from './src/utils/plugins/zipCache.ts';
+import { readMarketplaceJson, syncMarketplacesToZipCache } from './src/utils/plugins/zipCacheAdapters.ts';
+
+const root = join('build-src', 'test-artifacts', 'local-marketplace-zip-cache');
+await rm(root, { recursive: true, force: true });
+process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = root;
+process.env.CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE = '1';
+
+async function writeMarketplace(rootDir, name, pluginName) {
+  await mkdir(join(rootDir, '.claude-plugin'), { recursive: true });
+  await mkdir(join(rootDir, 'plugins', pluginName, '.claude-plugin'), { recursive: true });
+  await writeFile(join(rootDir, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+    name,
+    owner: { name: 'Local Owner' },
+    plugins: [
+      {
+        name: pluginName,
+        source: './plugins/' + pluginName,
+        strict: true,
+      },
+    ],
+  }));
+  await writeFile(join(rootDir, 'plugins', pluginName, '.claude-plugin', 'plugin.json'), JSON.stringify({
+    name: pluginName,
+    version: '1.0.0',
+  }));
+}
+
+const directoryRoot = join(root, 'directory-source');
+await writeMarketplace(directoryRoot, 'local-dir-marketplace', 'dir-plugin');
+if (!isMarketplaceSourceSupportedByZipCache({ source: 'directory', path: directoryRoot })) {
+  throw new Error('directory marketplace source should be zip-cache supported');
+}
+await addMarketplaceSource({ source: 'directory', path: directoryRoot });
+
+const directoryPlugin = await getPluginByIdCacheOnly('dir-plugin@local-dir-marketplace');
+if (!directoryPlugin) {
+  throw new Error('local directory marketplace plugin was not readable from cache');
+}
+if (!resolve(directoryPlugin.marketplaceInstallLocation).startsWith(resolve(join(root, 'marketplaces')))) {
+  throw new Error('local directory marketplace was not materialized into cache: ' + directoryPlugin.marketplaceInstallLocation);
+}
+const directoryPluginManifest = await readFile(join(directoryPlugin.marketplaceInstallLocation, 'plugins', 'dir-plugin', '.claude-plugin', 'plugin.json'), 'utf8');
+if (!directoryPluginManifest.includes('dir-plugin')) {
+  throw new Error('local directory marketplace plugin files were not copied');
+}
+await writeFile(join(directoryRoot, 'plugins', 'dir-plugin', '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'dir-plugin',
+  version: '2.0.0',
+}));
+await refreshMarketplace('local-dir-marketplace');
+const refreshedDirectoryPluginManifest = await readFile(join(directoryPlugin.marketplaceInstallLocation, 'plugins', 'dir-plugin', '.claude-plugin', 'plugin.json'), 'utf8');
+if (!refreshedDirectoryPluginManifest.includes('2.0.0')) {
+  throw new Error('local directory marketplace refresh did not update cached files: ' + refreshedDirectoryPluginManifest);
+}
+
+const fileRoot = join(root, 'file-source');
+await writeMarketplace(fileRoot, 'local-file-marketplace', 'file-plugin');
+const fileSource = { source: 'file', path: join(fileRoot, '.claude-plugin', 'marketplace.json') };
+if (!isMarketplaceSourceSupportedByZipCache(fileSource)) {
+  throw new Error('standard file marketplace source should be zip-cache supported');
+}
+if (isMarketplaceSourceSupportedByZipCache({ source: 'file', path: join(fileRoot, 'marketplace.json') })) {
+  throw new Error('non-standard file marketplace source should not be zip-cache supported');
+}
+await addMarketplaceSource(fileSource);
+
+const filePlugin = await getPluginByIdCacheOnly('file-plugin@local-file-marketplace');
+if (!filePlugin) {
+  throw new Error('local file marketplace plugin was not readable from cache');
+}
+if (!resolve(filePlugin.marketplaceInstallLocation).startsWith(resolve(join(root, 'marketplaces')))) {
+  throw new Error('local file marketplace was not materialized into cache: ' + filePlugin.marketplaceInstallLocation);
+}
+await writeFile(join(fileRoot, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+  name: 'local-file-marketplace',
+  owner: { name: 'Updated Local Owner' },
+  plugins: [
+    {
+      name: 'file-plugin',
+      source: './plugins/file-plugin',
+      strict: true,
+    },
+  ],
+}));
+await refreshMarketplace('local-file-marketplace');
+const refreshedFileMarketplace = await readFile(join(filePlugin.marketplaceInstallLocation, '.claude-plugin', 'marketplace.json'), 'utf8');
+if (!refreshedFileMarketplace.includes('Updated Local Owner')) {
+  throw new Error('local file marketplace refresh did not update cached marketplace JSON: ' + refreshedFileMarketplace);
+}
+
+const known = await loadKnownMarketplacesConfigSafe();
+if (known['local-dir-marketplace']?.source?.source !== 'directory') {
+  throw new Error('directory marketplace source was not persisted: ' + JSON.stringify(known));
+}
+if (known['local-file-marketplace']?.source?.source !== 'file') {
+  throw new Error('file marketplace source was not persisted: ' + JSON.stringify(known));
+}
+
+await syncMarketplacesToZipCache();
+const zipDirMarketplace = await readMarketplaceJson('local-dir-marketplace');
+const zipFileMarketplace = await readMarketplaceJson('local-file-marketplace');
+if (zipDirMarketplace?.plugins?.[0]?.name !== 'dir-plugin') {
+  throw new Error('directory marketplace JSON was not synced to zip cache: ' + JSON.stringify(zipDirMarketplace));
+}
+if (zipFileMarketplace?.plugins?.[0]?.name !== 'file-plugin') {
+  throw new Error('file marketplace JSON was not synced to zip cache: ' + JSON.stringify(zipFileMarketplace));
+}
+
+console.log('local marketplace zip cache OK');`,
+  )
+  assert.equal(output, 'local marketplace zip cache OK')
+})
+
+await test('pip plugin sources load from pip package cache', async () => {
+  const output = await buildAndRunSnippet(
+    'pip-plugin-source-test',
+    `import { mkdir, readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { cachePlugin } from './src/utils/plugins/pluginLoader.ts';
+import { getPipPackageCachePath, installFromPip } from './src/utils/plugins/pipPackageCache.ts';
+
+const root = join('build-src', 'test-artifacts', 'pip-plugin-source-cache');
+process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = root;
+
+const source = { source: 'pip', package: 'claude-plugin-fixture', version: '1.0.0' };
+const packageRoot = getPipPackageCachePath(source.package, { version: source.version });
+await mkdir(join(packageRoot, '.claude-plugin'), { recursive: true });
+await mkdir(join(packageRoot, 'commands'), { recursive: true });
+await writeFile(join(packageRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'pip-fixture-plugin',
+  version: '1.0.0',
+}));
+await writeFile(join(packageRoot, 'commands', 'hello.md'), 'hello from pip plugin');
+
+const manualTarget = join(root, 'manual-copy');
+await mkdir(manualTarget, { recursive: true });
+await writeFile(join(manualTarget, 'stale.txt'), 'remove me');
+await installFromPip(source.package, manualTarget, { version: source.version });
+const copiedManifest = await readFile(join(manualTarget, '.claude-plugin', 'plugin.json'), 'utf8');
+if (!copiedManifest.includes('pip-fixture-plugin')) {
+  throw new Error('installFromPip did not copy cached package content');
+}
+try {
+  await readFile(join(manualTarget, 'stale.txt'), 'utf8');
+  throw new Error('installFromPip did not clean the target path before copying');
+} catch (error) {
+  if (!String(error?.message ?? error).includes('ENOENT')) throw error;
+}
+
+const cached = await cachePlugin(source);
+if (cached.manifest.name !== 'pip-fixture-plugin') {
+  throw new Error('pip plugin manifest was not loaded: ' + JSON.stringify(cached.manifest));
+}
+const copiedCommand = await readFile(join(cached.path, 'commands', 'hello.md'), 'utf8');
+if (copiedCommand !== 'hello from pip plugin') {
+  throw new Error('pip plugin files were not cached: ' + copiedCommand);
+}
+
+console.log('pip plugin source OK');`,
+  )
+  assert.equal(output, 'pip plugin source OK')
 })
 
 await test('optional native loader wraps missing modules', async () => {

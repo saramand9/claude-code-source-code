@@ -9,7 +9,7 @@
  * Limitations:
  * - Only headless mode is supported
  * - All settings sources are used (same as normal plugin flow)
- * - Only github, git, and url marketplace sources are supported
+ * - Only github, git, url, npm, directory, standard file, and settings marketplace sources are supported
  * - Only strict:true marketplace entries are supported
  * - Auto-update is non-blocking (background, does not affect current session)
  *
@@ -41,7 +41,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import { logForDebugging } from '../debug.js'
 import { parseZipModes, unzipFile } from '../dxt/zip.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -394,13 +394,21 @@ export function getMarketplaceJsonRelativePath(
  * Supported sources write to `join(cacheDir, name)` — syncMarketplacesToZipCache
  * reads marketplace.json from that installLocation, source-type-agnostic.
  * - github/git/url: clone to temp, rename into cacheDir
+ * - directory: copy the local marketplace root into cacheDir
+ * - file: copy the local marketplace root when the file is .claude-plugin/marketplace.json
  * - settings: write synthetic marketplace.json directly to cacheDir (no fetch)
  *
- * Excluded: file/directory (installLocation is the user's path OUTSIDE cacheDir —
- * nonsensical in ephemeral containers), npm (node_modules bloat on Filestore mount).
+ * Excluded: non-standard file sources, because their marketplace root cannot be
+ * inferred safely for relative plugin sources.
  */
 export function isMarketplaceSourceSupportedByZipCache(
   source: MarketplaceSource,
 ): boolean {
-  return ['github', 'git', 'url', 'settings'].includes(source.source)
+  if (source.source === 'directory') {
+    return true
+  }
+  if (source.source === 'file') {
+    return basename(dirname(resolve(source.path))) === '.claude-plugin'
+  }
+  return ['github', 'git', 'url', 'npm', 'settings'].includes(source.source)
 }

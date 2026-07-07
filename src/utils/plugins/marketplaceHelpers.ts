@@ -43,6 +43,8 @@ export function getMarketplaceSourceDisplay(source: MarketplaceSource): string {
       return source.url
     case 'git':
       return source.url
+    case 'npm':
+      return `npm:${source.package}`
     case 'directory':
       return source.path
     case 'file':

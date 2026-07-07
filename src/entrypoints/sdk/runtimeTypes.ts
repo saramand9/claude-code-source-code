@@ -1,6 +1,11 @@
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod/v4'
-import type { SDKMessage, SDKSessionInfo, SDKUserMessage } from './coreTypes.js'
+import type {
+  SDKMessage,
+  SDKResultMessage,
+  SDKSessionInfo,
+  SDKUserMessage,
+} from './coreTypes.js'
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh'
 export type AnyZodRawShape = z.ZodRawShape
@@ -33,6 +38,7 @@ export type Options = Record<string, unknown>
 export type InternalOptions = Options
 
 export interface Query extends AsyncIterable<SDKMessage> {
+  abort?: () => void
   [key: string]: unknown
 }
 
@@ -42,7 +48,10 @@ export type SDKSessionOptions = Record<string, unknown>
 
 export interface SDKSession extends AsyncIterable<SDKMessage> {
   id?: string
+  prompt?: (message: string | SDKUserMessage) => Promise<SDKResultMessage>
+  send?: (message: string | SDKUserMessage) => void
   abort?: () => void
+  close?: () => void
   [key: string]: unknown
 }
 

@@ -19,10 +19,25 @@
  */
 
 import axios from 'axios'
-import { writeFile } from 'fs/promises'
+import {
+  copyFile,
+  readdir,
+  readlink,
+  realpath,
+  symlink,
+  writeFile,
+} from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
 import memoize from 'lodash-es/memoize.js'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -68,6 +83,7 @@ import {
   OFFICIAL_MARKETPLACE_SOURCE,
 } from './officialMarketplace.js'
 import { fetchOfficialMarketplaceFromGcs } from './officialMarketplaceGcs.js'
+import { installFromNpm } from './npmPackageCache.js'
 import {
   deletePluginDataDir,
   getPluginSeedDirs,
@@ -86,6 +102,7 @@ import {
   PluginMarketplaceSchema,
   validateOfficialNameSource,
 } from './schemas.js'
+import { isPluginZipCacheEnabled } from './zipCache.js'
 
 /**
  * Result of loading and caching a marketplace
@@ -109,6 +126,88 @@ function getKnownMarketplacesFile(): string {
  */
 export function getMarketplacesCacheDir(): string {
   return join(getPluginsDirectory(), 'marketplaces')
+}
+
+async function copyMarketplaceDirectoryForCache(
+  sourceDir: string,
+  targetDir: string,
+): Promise<void> {
+  const fs = getFsImplementation()
+  await fs.mkdir(targetDir)
+
+  const entries = await readdir(sourceDir, { withFileTypes: true })
+  for (const entry of entries) {
+    const sourcePath = join(sourceDir, entry.name)
+    const targetPath = join(targetDir, entry.name)
+
+    if (entry.isDirectory()) {
+      await copyMarketplaceDirectoryForCache(sourcePath, targetPath)
+    } else if (entry.isFile()) {
+      await copyFile(sourcePath, targetPath)
+    } else if (entry.isSymbolicLink()) {
+      const linkTarget = await readlink(sourcePath)
+
+      let resolvedTarget: string
+      try {
+        resolvedTarget = await realpath(sourcePath)
+      } catch {
+        await symlink(linkTarget, targetPath)
+        continue
+      }
+
+      let resolvedSourceDir: string
+      try {
+        resolvedSourceDir = await realpath(sourceDir)
+      } catch {
+        resolvedSourceDir = sourceDir
+      }
+
+      const sourcePrefix = resolvedSourceDir.endsWith(sep)
+        ? resolvedSourceDir
+        : resolvedSourceDir + sep
+      if (
+        resolvedTarget === resolvedSourceDir ||
+        resolvedTarget.startsWith(sourcePrefix)
+      ) {
+        const targetRelativeToSource = relative(resolvedSourceDir, resolvedTarget)
+        const targetInCache = join(targetDir, targetRelativeToSource)
+        await symlink(relative(dirname(targetPath), targetInCache), targetPath)
+      } else {
+        await symlink(resolvedTarget, targetPath)
+      }
+    }
+  }
+}
+
+function getLocalMarketplaceMaterializationPlan(
+  source: Extract<MarketplaceSource, { source: 'file' | 'directory' }>,
+): { root: string; marketplaceRelativePath: string } {
+  if (source.source === 'file') {
+    const absPath = resolve(source.path)
+    if (basename(dirname(absPath)) !== '.claude-plugin') {
+      throw new Error(
+        `Zip cache mode requires file marketplace sources to point to .claude-plugin/marketplace.json: ${absPath}`,
+      )
+    }
+    return {
+      root: dirname(dirname(absPath)),
+      marketplaceRelativePath: join('.claude-plugin', basename(absPath)),
+    }
+  }
+
+  return {
+    root: resolve(source.path),
+    marketplaceRelativePath: join('.claude-plugin', 'marketplace.json'),
+  }
+}
+
+async function materializeLocalMarketplaceForCache(
+  source: Extract<MarketplaceSource, { source: 'file' | 'directory' }>,
+  targetPath: string,
+): Promise<string> {
+  const plan = getLocalMarketplaceMaterializationPlan(source)
+  await copyMarketplaceDirectoryForCache(plan.root, targetPath)
+  return join(targetPath, plan.marketplaceRelativePath)
 }
 
 /**
@@ -1411,7 +1510,7 @@ async function parseFileWithSchema<T>(
  * - URL: Downloads marketplace.json directly
  * - GitHub: Clones repo and looks for .claude-plugin/marketplace.json
  * - Git: Clones repository from git URL
- * - NPM: (Not yet implemented) Would fetch from npm package
+ * - NPM: Installs package and reads .claude-plugin/marketplace.json
  * - File: Reads from local filesystem
  *
  * After loading, validates the marketplace schema and renames the cache
@@ -1436,6 +1535,7 @@ async function loadAndCacheMarketplace(
 ): Promise<LoadedPluginMarketplace> {
   const fs = getFsImplementation()
   const cacheDir = getMarketplacesCacheDir()
+  const materializeLocalSource = isPluginZipCacheEnabled()
 
   // Ensure cache directory exists
   await fs.mkdir(cacheDir)
@@ -1616,8 +1716,15 @@ async function loadAndCacheMarketplace(
       }
 
       case 'npm': {
-        // TODO: Implement npm package support
-        throw new Error('NPM marketplace sources not yet implemented')
+        temporaryCachePath = join(cacheDir, tempName)
+        cleanupNeeded = true
+        safeCallProgress(onProgress, `Installing npm package: ${source.package}`)
+        await installFromNpm(source.package, temporaryCachePath)
+        marketplacePath = join(
+          temporaryCachePath,
+          '.claude-plugin/marketplace.json',
+        )
+        break
       }
 
       case 'file': {
@@ -1627,9 +1734,18 @@ async function loadAndCacheMarketplace(
         // Resolve to absolute so error messages show the actual path checked
         // (legacy known_marketplaces.json entries may have relative paths)
         const absPath = resolve(source.path)
-        marketplacePath = absPath
-        temporaryCachePath = dirname(dirname(absPath))
-        cleanupNeeded = false
+        if (materializeLocalSource) {
+          temporaryCachePath = join(cacheDir, tempName)
+          cleanupNeeded = true
+          marketplacePath = await materializeLocalMarketplaceForCache(
+            source,
+            temporaryCachePath,
+          )
+        } else {
+          marketplacePath = absPath
+          temporaryCachePath = dirname(dirname(absPath))
+          cleanupNeeded = false
+        }
         break
       }
 
@@ -1638,9 +1754,18 @@ async function loadAndCacheMarketplace(
         // Resolve to absolute so error messages show the actual path checked
         // (legacy known_marketplaces.json entries may have relative paths)
         const absPath = resolve(source.path)
-        marketplacePath = join(absPath, '.claude-plugin', 'marketplace.json')
-        temporaryCachePath = absPath
-        cleanupNeeded = false
+        if (materializeLocalSource) {
+          temporaryCachePath = join(cacheDir, tempName)
+          cleanupNeeded = true
+          marketplacePath = await materializeLocalMarketplaceForCache(
+            source,
+            temporaryCachePath,
+          )
+        } else {
+          marketplacePath = join(absPath, '.claude-plugin', 'marketplace.json')
+          temporaryCachePath = absPath
+          cleanupNeeded = false
+        }
         break
       }
 
@@ -1721,7 +1846,7 @@ async function loadAndCacheMarketplace(
     // Don't rename if it's a local file or directory, or already has the right name
     if (
       temporaryCachePath !== finalCachePath &&
-      !isLocalMarketplaceSource(source)
+      (!isLocalMarketplaceSource(source) || materializeLocalSource)
     ) {
       try {
         // Remove the destination if it already exists, then rename
@@ -1752,7 +1877,7 @@ async function loadAndCacheMarketplace(
     if (
       cleanupNeeded &&
       temporaryCachePath! &&
-      !isLocalMarketplaceSource(source)
+      (!isLocalMarketplaceSource(source) || materializeLocalSource)
     ) {
       try {
         await fs.rm(temporaryCachePath!, { recursive: true, force: true })
@@ -2551,11 +2676,50 @@ export async function refreshMarketplace(
         source.headers,
         onProgress,
       )
+    } else if (source.source === 'npm') {
+      safeCallProgress(onProgress, `Refreshing npm package: ${source.package}`)
+      const fs = getFsImplementation()
+      const tempInstallLocation = join(
+        dirname(installLocation),
+        `.${basename(installLocation)}.npm-refresh-${process.pid}-${Date.now()}`,
+      )
+      try {
+        await installFromNpm(source.package, tempInstallLocation, {
+          force: true,
+        })
+        await readCachedMarketplace(tempInstallLocation)
+        await fs.rm(installLocation, { recursive: true, force: true })
+        await fs.rename(tempInstallLocation, installLocation)
+      } catch (error) {
+        await fs
+          .rm(tempInstallLocation, { recursive: true, force: true })
+          .catch(() => {})
+        throw error
+      }
     } else if (isLocalMarketplaceSource(source)) {
-      // Local sources: no remote to update from, but validate the file still exists and is valid
-      safeCallProgress(onProgress, 'Validating local marketplace')
-      // Read and validate to ensure the marketplace file is still valid
-      await readCachedMarketplace(installLocation)
+      if (isPluginZipCacheEnabled()) {
+        safeCallProgress(onProgress, 'Refreshing local marketplace cache')
+        const fs = getFsImplementation()
+        const tempInstallLocation = join(
+          dirname(installLocation),
+          `.${basename(installLocation)}.local-refresh-${process.pid}-${Date.now()}`,
+        )
+        try {
+          await materializeLocalMarketplaceForCache(source, tempInstallLocation)
+          await readCachedMarketplace(tempInstallLocation)
+          await fs.rm(installLocation, { recursive: true, force: true })
+          await fs.rename(tempInstallLocation, installLocation)
+        } catch (error) {
+          await fs
+            .rm(tempInstallLocation, { recursive: true, force: true })
+            .catch(() => {})
+          throw error
+        }
+      } else {
+        // Local sources: no remote to update from, but validate the file still exists and is valid.
+        safeCallProgress(onProgress, 'Validating local marketplace')
+        await readCachedMarketplace(installLocation)
+      }
     } else {
       throw new Error(`Unsupported marketplace source type for refresh`)
     }

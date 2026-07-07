@@ -101,6 +101,8 @@ import {
   getPluginByIdCacheOnly,
   loadKnownMarketplacesConfigSafe,
 } from './marketplaceManager.js'
+import { installFromNpm as installNpmPackageToPath } from './npmPackageCache.js'
+import { installFromPip as installPipPackageToPath } from './pipPackageCache.js'
 import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
@@ -494,33 +496,18 @@ export async function installFromNpm(
   targetPath: string,
   options: { registry?: string; version?: string } = {},
 ): Promise<void> {
-  const npmCachePath = join(getPluginsDirectory(), 'npm-cache')
+  return installNpmPackageToPath(packageName, targetPath, options)
+}
 
-  await getFsImplementation().mkdir(npmCachePath)
-
-  const packageSpec = options.version
-    ? `${packageName}@${options.version}`
-    : packageName
-  const packagePath = join(npmCachePath, 'node_modules', packageName)
-  const needsInstall = !(await pathExists(packagePath))
-
-  if (needsInstall) {
-    logForDebugging(`Installing npm package ${packageSpec} to cache`)
-    const args = ['install', packageSpec, '--prefix', npmCachePath]
-    if (options.registry) {
-      args.push('--registry', options.registry)
-    }
-    const result = await execFileNoThrow('npm', args, { useCwd: false })
-
-    if (result.code !== 0) {
-      throw new Error(`Failed to install npm package: ${result.stderr}`)
-    }
-  }
-
-  await copyDir(packagePath, targetPath)
-  logForDebugging(
-    `Copied npm package ${packageName} from cache to ${targetPath}`,
-  )
+/**
+ * Install a plugin from pip using a global cache (exported for testing)
+ */
+export async function installFromPip(
+  packageName: string,
+  targetPath: string,
+  options: { registry?: string; version?: string } = {},
+): Promise<void> {
+  return installPipPackageToPath(packageName, targetPath, options)
 }
 
 /**
@@ -957,7 +944,11 @@ export async function cachePlugin(
           )
           break
         case 'pip':
-          throw new Error('Python package plugins are not yet supported')
+          await installFromPip(source.package, tempPath, {
+            registry: source.registry,
+            version: source.version,
+          })
+          break
         default:
           throw new Error(`Unsupported plugin source type`)
       }

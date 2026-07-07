@@ -5,32 +5,129 @@ import {
   type CallToolResult,
   ListToolsRequestSchema,
   type ListToolsResult,
-  type Tool,
+  type Tool as McpTool,
 } from '@modelcontextprotocol/sdk/types.js'
+import { randomUUID } from 'crypto'
+import uniqBy from 'lodash-es/uniqBy.js'
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
 import type { Command } from '../commands.js'
 import {
   findToolByName,
   getEmptyToolPermissionContext,
+  type Tool as ClaudeTool,
+  type Tools,
   type ToolUseContext,
 } from '../Tool.js'
-import { getTools } from '../tools.js'
+import {
+  getMcpToolsCommandsAndResources,
+} from '../services/mcp/client.js'
+import type {
+  MCPServerConnection,
+  ServerResource,
+} from '../services/mcp/types.js'
+import { assembleToolPool } from '../tools.js'
 import { createAbortController } from '../utils/abortController.js'
 import { createFileStateCacheWithSizeLimit } from '../utils/fileStateCache.js'
 import { logError } from '../utils/log.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import { getMainLoopModel } from '../utils/model/model.js'
+import type { PermissionDecision } from '../utils/permissions/PermissionResult.js'
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
 import { setCwd } from '../utils/Shell.js'
 import { jsonStringify } from '../utils/slowOperations.js'
-import { getErrorParts } from '../utils/toolErrors.js'
+import { formatZodValidationError, getErrorParts } from '../utils/toolErrors.js'
 import { zodToJsonSchema } from '../utils/zodToJsonSchema.js'
 
-type ToolInput = Tool['inputSchema']
-type ToolOutput = Tool['outputSchema']
+type ToolInput = McpTool['inputSchema']
+type ToolOutput = McpTool['outputSchema']
 
 const MCP_COMMANDS: Command[] = [review]
+
+type McpServeToolState = {
+  clients: MCPServerConnection[]
+  tools: Tools
+  commands: Command[]
+  resources: Record<string, ServerResource[]>
+}
+
+type McpConnectionToolUpdate = {
+  client: MCPServerConnection
+  tools: ClaudeTool[]
+  commands: Command[]
+  resources?: ServerResource[]
+}
+
+type McpServeConnectionLoader = (
+  onConnectionAttempt: (params: McpConnectionToolUpdate) => void,
+) => Promise<void>
+
+type McpSchemaTool = Pick<
+  ClaudeTool,
+  'inputJSONSchema' | 'inputSchema' | 'name'
+>
+type McpCallableTool = Pick<ClaudeTool, 'inputSchema' | 'name'>
+
+export function getMcpToolInputSchema(tool: McpSchemaTool): ToolInput {
+  return (
+    tool.inputJSONSchema ?? zodToJsonSchema(tool.inputSchema)
+  ) as ToolInput
+}
+
+export function parseMcpToolInput(
+  tool: McpCallableTool,
+  args: unknown,
+): { ok: true; input: Record<string, unknown> } | { ok: false; message: string } {
+  const rawInput = args === undefined ? {} : args
+  const parsedInput = tool.inputSchema.safeParse(rawInput)
+  if (!parsedInput.success) {
+    return {
+      ok: false,
+      message: formatZodValidationError(tool.name, parsedInput.error),
+    }
+  }
+  return { ok: true, input: parsedInput.data }
+}
+
+export function applyMcpPermissionDecision(
+  toolName: string,
+  input: Record<string, unknown>,
+  decision: PermissionDecision<Record<string, unknown>>,
+): { ok: true; input: Record<string, unknown> } | { ok: false; message: string } {
+  if (decision.behavior === 'allow') {
+    return { ok: true, input: decision.updatedInput ?? input }
+  }
+  return {
+    ok: false,
+    message: decision.message || `Permission to use ${toolName} was not granted.`,
+  }
+}
+
+export async function loadMcpServeToolState(
+  loadConnections: McpServeConnectionLoader = onConnectionAttempt =>
+    getMcpToolsCommandsAndResources(onConnectionAttempt),
+): Promise<McpServeToolState> {
+  const clients: MCPServerConnection[] = []
+  const tools: ClaudeTool[] = []
+  const commands: Command[] = []
+  const resources: Record<string, ServerResource[]> = {}
+
+  await loadConnections(({ client, tools: newTools, commands: newCommands, resources: newResources }) => {
+    clients.push(client)
+    tools.push(...newTools)
+    commands.push(...newCommands)
+    if (newResources && newResources.length > 0) {
+      resources[client.name] = newResources
+    }
+  })
+
+  return {
+    clients,
+    tools: uniqBy(tools, 'name'),
+    commands: uniqBy(commands, 'name'),
+    resources,
+  }
+}
 
 export async function startMCPServer(
   cwd: string,
@@ -44,6 +141,22 @@ export async function startMCPServer(
     READ_FILE_STATE_CACHE_SIZE,
   )
   setCwd(cwd)
+  const toolPermissionContext = getEmptyToolPermissionContext()
+  const mcpServeState = await loadMcpServeToolState()
+  let appState = {
+    ...getDefaultAppState(),
+    mcp: {
+      ...getDefaultAppState().mcp,
+      clients: mcpServeState.clients,
+      tools: [...mcpServeState.tools],
+      commands: mcpServeState.commands,
+      resources: mcpServeState.resources,
+    },
+    toolPermissionContext,
+  }
+  const getCurrentTools = () =>
+    assembleToolPool(toolPermissionContext, appState.mcp.tools)
+
   const server = new Server(
     {
       name: 'claude/tengu',
@@ -59,9 +172,7 @@ export async function startMCPServer(
   server.setRequestHandler(
     ListToolsRequestSchema,
     async (): Promise<ListToolsResult> => {
-      // TODO: Also re-expose any MCP tools
-      const toolPermissionContext = getEmptyToolPermissionContext()
-      const tools = getTools(toolPermissionContext)
+      const tools = getCurrentTools()
       return {
         tools: await Promise.all(
           tools.map(async tool => {
@@ -87,7 +198,7 @@ export async function startMCPServer(
                 tools,
                 agents: [],
               }),
-              inputSchema: zodToJsonSchema(tool.inputSchema) as ToolInput,
+              inputSchema: getMcpToolInputSchema(tool),
               outputSchema,
             }
           }),
@@ -99,9 +210,7 @@ export async function startMCPServer(
   server.setRequestHandler(
     CallToolRequestSchema,
     async ({ params: { name, arguments: args } }): Promise<CallToolResult> => {
-      const toolPermissionContext = getEmptyToolPermissionContext()
-      // TODO: Also re-expose any MCP tools
-      const tools = getTools(toolPermissionContext)
+      const tools = getCurrentTools()
       const tool = findToolByName(tools, name)
       if (!tool) {
         throw new Error(`Tool ${name} not found`)
@@ -112,19 +221,21 @@ export async function startMCPServer(
       const toolUseContext: ToolUseContext = {
         abortController: createAbortController(),
         options: {
-          commands: MCP_COMMANDS,
+          commands: [...MCP_COMMANDS, ...appState.mcp.commands],
           tools,
           mainLoopModel: getMainLoopModel(),
           thinkingConfig: { type: 'disabled' },
-          mcpClients: [],
-          mcpResources: {},
+          mcpClients: appState.mcp.clients,
+          mcpResources: appState.mcp.resources,
           isNonInteractiveSession: true,
           debug,
           verbose,
           agentDefinitions: { activeAgents: [], allAgents: [] },
         },
-        getAppState: () => getDefaultAppState(),
-        setAppState: () => {},
+        getAppState: () => appState,
+        setAppState: update => {
+          appState = update(appState)
+        },
         messages: [],
         readFileState: readFileStateCache,
         setInProgressToolUseIDs: () => {},
@@ -133,13 +244,17 @@ export async function startMCPServer(
         updateAttributionState: () => {},
       }
 
-      // TODO: validate input types with zod
       try {
         if (!tool.isEnabled()) {
           throw new Error(`Tool ${name} is not enabled`)
         }
+        const parsedInput = parseMcpToolInput(tool, args)
+        if (parsedInput.ok === false) {
+          throw new Error(parsedInput.message)
+        }
+        const input = parsedInput.input as never
         const validationResult = await tool.validateInput?.(
-          (args as never) ?? {},
+          input,
           toolUseContext,
         )
         if (validationResult && validationResult.result === false) {
@@ -147,13 +262,30 @@ export async function startMCPServer(
             `Tool ${name} input is invalid: ${validationResult.message}`,
           )
         }
+        const assistantMessage = createAssistantMessage({
+          content: [],
+        })
+        const permissionDecision = await hasPermissionsToUseTool(
+          tool,
+          input,
+          toolUseContext,
+          assistantMessage,
+          `mcp-${randomUUID()}`,
+        )
+        const permissionResult = applyMcpPermissionDecision(
+          tool.name,
+          input,
+          permissionDecision,
+        )
+        if (permissionResult.ok === false) {
+          throw new Error(permissionResult.message)
+        }
+        const permittedInput = permissionResult.input as never
         const finalResult = await tool.call(
-          (args ?? {}) as never,
+          permittedInput,
           toolUseContext,
           hasPermissionsToUseTool,
-          createAssistantMessage({
-            content: [],
-          }),
+          assistantMessage,
         )
 
         return {
