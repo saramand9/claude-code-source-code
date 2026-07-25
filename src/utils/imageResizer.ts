@@ -17,6 +17,7 @@ import {
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { formatFileSize } from './format.js'
+import { ImageResizeError } from './imageErrors.js'
 import { logError } from './log.js'
 
 type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
@@ -31,15 +32,7 @@ const ERROR_TYPE_TIMEOUT = 6
 const ERROR_TYPE_VIPS = 7
 const ERROR_TYPE_PERMISSION = 8
 
-/**
- * Error thrown when image resizing fails and the image exceeds the API limit.
- */
-export class ImageResizeError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'ImageResizeError'
-  }
-}
+export { ImageResizeError } from './imageErrors.js'
 
 /**
  * Classifies image processing errors for analytics.

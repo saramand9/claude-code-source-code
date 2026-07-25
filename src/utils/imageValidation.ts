@@ -1,38 +1,8 @@
 import { API_IMAGE_MAX_BASE64_SIZE } from '../constants/apiLimits.js'
 import { logEvent } from '../services/analytics/index.js'
-import { formatFileSize } from './format.js'
+import { ImageSizeError, type OversizedImage } from './imageErrors.js'
 
-/**
- * Information about an oversized image.
- */
-export type OversizedImage = {
-  index: number
-  size: number
-}
-
-/**
- * Error thrown when one or more images exceed the API size limit.
- */
-export class ImageSizeError extends Error {
-  constructor(oversizedImages: OversizedImage[], maxSize: number) {
-    let message: string
-    const firstImage = oversizedImages[0]
-    if (oversizedImages.length === 1 && firstImage) {
-      message =
-        `Image base64 size (${formatFileSize(firstImage.size)}) exceeds API limit (${formatFileSize(maxSize)}). ` +
-        `Please resize the image before sending.`
-    } else {
-      message =
-        `${oversizedImages.length} images exceed the API limit (${formatFileSize(maxSize)}): ` +
-        oversizedImages
-          .map(img => `Image ${img.index}: ${formatFileSize(img.size)}`)
-          .join(', ') +
-        `. Please resize these images before sending.`
-    }
-    super(message)
-    this.name = 'ImageSizeError'
-  }
-}
+export { ImageSizeError, type OversizedImage } from './imageErrors.js'
 
 /**
  * Type guard to check if a block is a base64 image block

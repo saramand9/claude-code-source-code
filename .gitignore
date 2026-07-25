@@ -1,4 +1,5 @@
 node_modules/
 build-src/
 dist/
+dist-core/
 .npm-cache/

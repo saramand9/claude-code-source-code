@@ -1,22 +1,14 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { randomUUID } from 'crypto'
 import type {
   ToolResultBlockParam,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
-import { FallbackTriggeredError } from './services/api/withRetry.js'
-import {
-  calculateTokenWarningState,
-  isAutoCompactEnabled,
-  type AutoCompactTrackingState,
-} from './services/compact/autoCompact.js'
-import {
-  buildPostCompactMessages,
-  type CompactionResult,
-} from './services/compact/compact.js'
+import { FallbackTriggeredError } from './services/api/fallbackError.js'
+import type { AutoCompactTrackingState } from './services/compact/autoCompact.js'
+import type { CompactionResult } from './services/compact/compact.js'
 
-type Terminal = {
+export type QueryTerminal = {
   reason:
     | 'blocking_limit'
     | 'image_error'
@@ -31,6 +23,13 @@ type Terminal = {
   error?: unknown
   turnCount?: number
 }
+
+export type QueryEvent =
+  | StreamEvent
+  | RequestStartEvent
+  | Message
+  | TombstoneMessage
+  | ToolUseSummaryMessage
 
 type Continue =
   | { reason: 'collapse_drain_retry'; committed: number }
@@ -69,7 +68,7 @@ type ContextCollapseModule = {
   isContextCollapseEnabled(): boolean
   isWithheldPromptTooLong(
     message: Message | StreamEvent,
-    isPromptTooLong: typeof isPromptTooLongMessage,
+    isPromptTooLong: QueryDeps['isPromptTooLongMessage'],
     querySource: QuerySource,
   ): boolean
   recoverFromOverflow(
@@ -85,7 +84,7 @@ type SkillPrefetchModule = {
     toolUseContext: ToolUseContext,
   ): unknown
   collectSkillDiscoveryPrefetch(prefetch: unknown): Promise<
-    Parameters<typeof createAttachmentMessage>[0][]
+    Parameters<QueryDeps['createAttachmentMessage']>[0][]
   >
 }
 
@@ -118,12 +117,8 @@ const contextCollapse = feature('CONTEXT_COLLAPSE')
   ? (require('./services/contextCollapse/index.js') as ContextCollapseModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
-import {
-  logEvent,
-  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-} from 'src/services/analytics/index.js'
-import { ImageSizeError } from './utils/imageValidation.js'
-import { ImageResizeError } from './utils/imageResizer.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
+import { ImageResizeError, ImageSizeError } from './utils/imageErrors.js'
 import { findToolByName, type ToolUseContext } from './Tool.js'
 import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.js'
 import type {
@@ -136,12 +131,6 @@ import type {
   UserMessage,
   TombstoneMessage,
 } from './types/message.js'
-import { logError } from './utils/log.js'
-import {
-  PROMPT_TOO_LONG_ERROR_MESSAGE,
-  isPromptTooLongMessage,
-} from './services/api/errors.js'
-import { logAntError, logForDebugging } from './utils/debug.js'
 import {
   createUserMessage,
   createUserInterruptionMessage,
@@ -153,14 +142,10 @@ import {
   createMicrocompactBoundaryMessage,
   stripSignatureBlocks,
 } from './utils/messages.js'
-import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
-import { prependUserContext, appendSystemContext } from './utils/api.js'
 import {
-  createAttachmentMessage,
-  filterDuplicateMemoryAttachments,
-  getAttachmentMessages,
-  startRelevantMemoryPrefetch,
-} from './utils/attachments.js'
+  prependUserContext,
+  appendSystemContext,
+} from './core/runtime/context.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (require('./services/skillSearch/prefetch.js') as SkillPrefetchModule)
@@ -169,44 +154,13 @@ const jobClassifier = feature('TEMPLATES')
   ? (require('./jobs/classifier.js') as JobClassifierModule)
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
-import {
-  remove as removeFromQueue,
-  getCommandsByMaxPriority,
-  isSlashCommand,
-} from './utils/messageQueueManager.js'
-import { notifyCommandLifecycle } from './utils/commandLifecycle.js'
-import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
-import {
-  getRuntimeMainLoopModel,
-  renderModelName,
-} from './utils/model/model.js'
-import {
-  doesMostRecentAssistantMessageExceed200k,
-  finalContextTokensFromLastResponse,
-  tokenCountWithEstimation,
-} from './utils/tokens.js'
-import { ESCALATED_MAX_TOKENS } from './utils/context.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from './services/analytics/growthbook.js'
 import { SLEEP_TOOL_NAME } from './tools/SleepTool/prompt.js'
-import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.js'
-import { executeStopFailureHooks } from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
-import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
-import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
-import { applyToolResultBudget } from './utils/toolResultStorage.js'
-import { recordContentReplacement } from './utils/sessionStorage.js'
 import { detectTextualToolCallLeakInAssistantMessages } from './utils/textualToolCallLeak.js'
-import { handleStopHooks } from './query/stopHooks.js'
-import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import { feature } from 'bun:bundle'
-import {
-  getCurrentTurnTokenBudget,
-  getTurnOutputTokens,
-  incrementBudgetContinuationCount,
-} from './bootstrap/state.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
 
@@ -219,10 +173,13 @@ const taskSummaryModule = feature('BG_SESSIONS')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-function createTombstoneMessage(message: Message): TombstoneMessage {
+function createTombstoneMessage(
+  message: Message,
+  uuid: QueryDeps['uuid'],
+): TombstoneMessage {
   return {
     type: 'tombstone',
-    uuid: randomUUID() as TombstoneMessage['uuid'],
+    uuid: uuid() as TombstoneMessage['uuid'],
     timestamp: new Date().toISOString(),
     message,
   }
@@ -270,6 +227,7 @@ function* yieldMissingToolResultBlocks(
  * rules, ye will be punished with an entire day of debugging and hair pulling.
  */
 const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
+const ESCALATED_MAX_TOKENS = 64_000
 
 /**
  * Is this a max_output_tokens error message? If so, the streaming loop should
@@ -326,22 +284,19 @@ type State = {
 
 export async function* query(
   params: QueryParams,
-): AsyncGenerator<
-  | StreamEvent
-  | RequestStartEvent
-  | Message
-  | TombstoneMessage
-  | ToolUseSummaryMessage,
-  Terminal
-> {
+): AsyncGenerator<QueryEvent, QueryTerminal> {
   const consumedCommandUuids: string[] = []
-  const terminal = yield* queryLoop(params, consumedCommandUuids)
+  const deps = params.deps ?? productionDeps()
+  const terminal = yield* queryLoop(
+    { ...params, deps },
+    consumedCommandUuids,
+  )
   // Only reached if queryLoop returned normally. Skipped on throw (error
   // propagates through yield*) and on .return() (Return completion closes
   // both generators). This gives the same asymmetric started-without-completed
   // signal as print.ts's drainCommandQueue when the turn fails.
   for (const uuid of consumedCommandUuids) {
-    notifyCommandLifecycle(uuid, 'completed')
+    deps.notifyCommandLifecycle(uuid, 'completed')
   }
   return terminal
 }
@@ -350,12 +305,8 @@ async function* queryLoop(
   params: QueryParams,
   consumedCommandUuids: string[],
 ): AsyncGenerator<
-  | StreamEvent
-  | RequestStartEvent
-  | Message
-  | TombstoneMessage
-  | ToolUseSummaryMessage,
-  Terminal
+  QueryEvent,
+  QueryTerminal
 > {
   // Immutable params — never reassigned during the query loop.
   const {
@@ -400,13 +351,13 @@ async function* queryLoop(
 
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
   // for what's included and why feature() gates are intentionally excluded.
-  const config = buildQueryConfig()
+  const config = deps.buildConfig()
 
   // Fired once per user turn — the prompt is invariant across loop iterations,
   // so per-iteration firing would ask sideQuery the same question N times.
   // Consume point polls settledAt (never blocks). `using` disposes on all
   // generator exit paths — see MemoryPrefetch for dispose/telemetry semantics.
-  using pendingMemoryPrefetch = startRelevantMemoryPrefetch(
+  using pendingMemoryPrefetch = deps.startRelevantMemoryPrefetch(
     state.messages,
     state.toolUseContext,
   )
@@ -444,11 +395,11 @@ async function* queryLoop(
 
     yield { type: 'stream_request_start' }
 
-    queryCheckpoint('query_fn_entry')
+    deps.queryCheckpoint('query_fn_entry')
 
     // Record query start for headless latency tracking (skip for subagents)
     if (!toolUseContext.agentId) {
-      headlessProfilerCheckpoint('query_started')
+      deps.headlessProfilerCheckpoint('query_started')
     }
 
     // Initialize or increment query chain tracking
@@ -484,15 +435,15 @@ async function* queryLoop(
     const persistReplacements =
       querySource.startsWith('agent:') ||
       querySource.startsWith('repl_main_thread')
-    messagesForQuery = await applyToolResultBudget(
+    messagesForQuery = await deps.applyToolResultBudget(
       messagesForQuery,
       toolUseContext.contentReplacementState,
       persistReplacements
         ? records =>
-            void recordContentReplacement(
+            void deps.recordContentReplacement(
               records,
               toolUseContext.agentId,
-            ).catch(logError)
+            ).catch(deps.logError)
         : undefined,
       new Set(
         toolUseContext.options.tools
@@ -507,18 +458,18 @@ async function* queryLoop(
     // from the protected-tail assistant, which survives snip unchanged).
     let snipTokensFreed = 0
     if (feature('HISTORY_SNIP')) {
-      queryCheckpoint('query_snip_start')
+      deps.queryCheckpoint('query_snip_start')
       const snipResult = snipModule!.snipCompactIfNeeded(messagesForQuery)
       messagesForQuery = snipResult.messages
       snipTokensFreed = snipResult.tokensFreed
       if (snipResult.boundaryMessage) {
         yield snipResult.boundaryMessage
       }
-      queryCheckpoint('query_snip_end')
+      deps.queryCheckpoint('query_snip_end')
     }
 
     // Apply microcompact before autocompact
-    queryCheckpoint('query_microcompact_start')
+    deps.queryCheckpoint('query_microcompact_start')
     const microcompactResult = await deps.microcompact(
       messagesForQuery,
       toolUseContext,
@@ -531,7 +482,7 @@ async function* queryLoop(
     const pendingCacheEdits = feature('CACHED_MICROCOMPACT')
       ? microcompactResult.compactionInfo?.pendingCacheEdits
       : undefined
-    queryCheckpoint('query_microcompact_end')
+    deps.queryCheckpoint('query_microcompact_end')
 
     // Project the collapsed context view and maybe commit more collapses.
     // Runs BEFORE autocompact so that if collapse gets us under the
@@ -558,7 +509,7 @@ async function* queryLoop(
       appendSystemContext(systemPrompt, systemContext),
     )
 
-    queryCheckpoint('query_autocompact_start')
+    deps.queryCheckpoint('query_autocompact_start')
     const { compactionResult, consecutiveFailures } = await deps.autocompact(
       messagesForQuery,
       toolUseContext,
@@ -573,7 +524,7 @@ async function* queryLoop(
       tracking,
       snipTokensFreed,
     )
-    queryCheckpoint('query_autocompact_end')
+    deps.queryCheckpoint('query_autocompact_end')
 
     if (compactionResult) {
       const {
@@ -583,7 +534,7 @@ async function* queryLoop(
         compactionUsage,
       } = compactionResult
 
-      logEvent('tengu_auto_compact_succeeded', {
+      deps.logEvent('tengu_auto_compact_succeeded', {
         originalMessageCount: messages.length,
         compactedMessageCount:
           compactionResult.summaryMessages.length +
@@ -615,7 +566,7 @@ async function* queryLoop(
       // loops); see #304930.
       if (params.taskBudget) {
         const preCompactContext =
-          finalContextTokensFromLastResponse(messagesForQuery)
+          deps.finalContextTokensFromLastResponse(messagesForQuery)
         taskBudgetRemaining = Math.max(
           0,
           (taskBudgetRemaining ?? params.taskBudget.total) - preCompactContext,
@@ -633,7 +584,8 @@ async function* queryLoop(
         consecutiveFailures: 0,
       }
 
-      const postCompactMessages = buildPostCompactMessages(compactionResult)
+      const postCompactMessages =
+        deps.buildPostCompactMessages(compactionResult)
 
       for (const message of postCompactMessages) {
         yield message
@@ -665,7 +617,7 @@ async function* queryLoop(
     const toolUseBlocks: ToolUseBlock[] = []
     let needsFollowUp = false
 
-    queryCheckpoint('query_setup_start')
+    deps.queryCheckpoint('query_setup_start')
     const useStreamingToolExecution = config.gates.streamingToolExecution
     let streamingToolExecutor = useStreamingToolExecution
       ? new StreamingToolExecutor(
@@ -677,15 +629,15 @@ async function* queryLoop(
 
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
-    let currentModel = getRuntimeMainLoopModel({
+    let currentModel = deps.getRuntimeMainLoopModel({
       permissionMode,
       mainLoopModel: toolUseContext.options.mainLoopModel,
       exceeds200kTokens:
         permissionMode === 'plan' &&
-        doesMostRecentAssistantMessageExceed200k(messagesForQuery),
+        deps.doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
 
-    queryCheckpoint('query_setup_end')
+    deps.queryCheckpoint('query_setup_end')
 
     // Create fetch wrapper once per query session to avoid memory retention.
     // Each call to createDumpPromptsFetch creates a closure that captures the request body.
@@ -694,7 +646,9 @@ async function* queryLoop(
     // Note: agentId is effectively constant during a query() call - it only changes
     // between queries (e.g., /clear command or session resume).
     const dumpPromptsFetch = config.gates.isAnt
-      ? createDumpPromptsFetch(toolUseContext.agentId ?? config.sessionId)
+      ? deps.createDumpPromptsFetch(
+          toolUseContext.agentId ?? config.sessionId,
+        )
       : undefined
 
     // Block if we've hit the hard blocking limit (only applies when auto-compact is OFF)
@@ -724,7 +678,7 @@ async function* queryLoop(
     if (feature('CONTEXT_COLLAPSE')) {
       collapseOwnsIt =
         (contextCollapse?.isContextCollapseEnabled() ?? false) &&
-        isAutoCompactEnabled()
+        deps.isAutoCompactEnabled()
     }
     // Hoist media-recovery gate once per turn. Withholding (inside the
     // stream loop) and recovery (after) must agree; CACHED_MAY_BE_STALE can
@@ -738,17 +692,18 @@ async function* queryLoop(
       querySource !== 'compact' &&
       querySource !== 'session_memory' &&
       !(
-        reactiveCompact?.isReactiveCompactEnabled() && isAutoCompactEnabled()
+        reactiveCompact?.isReactiveCompactEnabled() &&
+        deps.isAutoCompactEnabled()
       ) &&
       !collapseOwnsIt
     ) {
-      const { isAtBlockingLimit } = calculateTokenWarningState(
-        tokenCountWithEstimation(messagesForQuery) - snipTokensFreed,
+      const { isAtBlockingLimit } = deps.calculateTokenWarningState(
+        deps.tokenCountWithEstimation(messagesForQuery) - snipTokensFreed,
         toolUseContext.options.mainLoopModel,
       )
       if (isAtBlockingLimit) {
         yield createAssistantAPIErrorMessage({
-          content: PROMPT_TOO_LONG_ERROR_MESSAGE,
+          content: deps.promptTooLongErrorMessage,
           error: 'invalid_request',
         })
         return { reason: 'blocking_limit' }
@@ -757,13 +712,13 @@ async function* queryLoop(
 
     let attemptWithFallback = true
 
-    queryCheckpoint('query_api_loop_start')
+    deps.queryCheckpoint('query_api_loop_start')
     try {
       while (attemptWithFallback) {
         attemptWithFallback = false
         try {
           let streamingFallbackOccured = false
-          queryCheckpoint('query_api_streaming_start')
+          deps.queryCheckpoint('query_api_streaming_start')
           for await (const message of deps.callModel({
             messages: prependUserContext(messagesForQuery, userContext),
             systemPrompt: fullSystemPrompt,
@@ -822,9 +777,9 @@ async function* queryLoop(
               // These partial messages (especially thinking blocks) have invalid signatures
               // that would cause "thinking blocks cannot be modified" API errors.
               for (const msg of assistantMessages) {
-                yield createTombstoneMessage(msg)
+                yield createTombstoneMessage(msg, deps.uuid)
               }
-              logEvent('tengu_orphaned_messages_tombstoned', {
+              deps.logEvent('tengu_orphaned_messages_tombstoned', {
                 orphanedMessageCount: assistantMessages.length,
                 queryChainId: queryChainIdForAnalytics,
                 queryDepth: queryTracking.depth,
@@ -909,7 +864,7 @@ async function* queryLoop(
               if (
                 contextCollapse?.isWithheldPromptTooLong(
                   message,
-                  isPromptTooLongMessage,
+                  deps.isPromptTooLongMessage,
                   querySource,
                 )
               ) {
@@ -969,7 +924,7 @@ async function* queryLoop(
               }
             }
           }
-          queryCheckpoint('query_api_streaming_end')
+          deps.queryCheckpoint('query_api_streaming_end')
 
           // Yield deferred microcompact boundary message using actual API-reported
           // token deletion count instead of client-side estimates.
@@ -1032,12 +987,12 @@ async function* queryLoop(
             // Thinking signatures are model-bound: replaying a protected-thinking
             // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
             // Strip before retry so the fallback model gets clean history.
-            if (process.env.USER_TYPE === 'ant') {
+            if (config.gates.isAnt) {
               messagesForQuery = stripSignatureBlocks(messagesForQuery)
             }
 
             // Log the fallback event
-            logEvent('tengu_model_fallback_triggered', {
+            deps.logEvent('tengu_model_fallback_triggered', {
               original_model:
                 innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               fallback_model:
@@ -1051,7 +1006,7 @@ async function* queryLoop(
             // Yield system message about fallback — use 'warning' level so
             // users see the notification without needing verbose mode
             yield createSystemMessage(
-              `Switched to ${renderModelName(innerError.fallbackModel)} due to high demand for ${renderModelName(innerError.originalModel)}`,
+              `Switched to ${deps.renderModelName(innerError.fallbackModel)} due to high demand for ${deps.renderModelName(innerError.originalModel)}`,
               'warning',
             )
 
@@ -1061,10 +1016,10 @@ async function* queryLoop(
         }
       }
     } catch (error) {
-      logError(error)
+      deps.logError(error)
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      logEvent('tengu_query_error', {
+      deps.logEvent('tengu_query_error', {
         assistantMessages: assistantMessages.length,
         toolUses: assistantMessages.flatMap(_ =>
           _.message.content.filter(content => content.type === 'tool_use'),
@@ -1100,7 +1055,7 @@ async function* queryLoop(
       })
 
       // To help track down bugs, log loudly for ants
-      logAntError('Query error', error)
+      deps.logAntError('Query error', error)
       return { reason: 'model_error', error }
     }
 
@@ -1110,7 +1065,7 @@ async function* queryLoop(
         toolUseContext.options.tools,
       )
       if (textualToolCallLeak) {
-        logEvent('tengu_textual_tool_call_leak_detected', {
+        deps.logEvent('tengu_textual_tool_call_leak_detected', {
           toolName:
             textualToolCallLeak.toolName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           callCount: textualToolCallLeak.callCount,
@@ -1133,7 +1088,7 @@ async function* queryLoop(
 
     // Execute post-sampling hooks after model response is complete
     if (assistantMessages.length > 0) {
-      void executePostSamplingHooks(
+      void deps.executePostSamplingHooks(
         [...messagesForQuery, ...assistantMessages],
         systemPrompt,
         userContext,
@@ -1205,7 +1160,7 @@ async function* queryLoop(
       const isWithheld413 =
         lastMessage?.type === 'assistant' &&
         lastMessage.isApiErrorMessage &&
-        isPromptTooLongMessage(lastMessage)
+        deps.isPromptTooLongMessage(lastMessage)
       // Media-size rejections (image/PDF/many-image) are recoverable via
       // reactive compact's strip-retry. Unlike PTL, media errors skip the
       // collapse drain — collapse doesn't strip images. mediaRecoveryEnabled
@@ -1273,7 +1228,7 @@ async function* queryLoop(
           // 413-failed attempt's input).
           if (params.taskBudget) {
             const preCompactContext =
-              finalContextTokensFromLastResponse(messagesForQuery)
+              deps.finalContextTokensFromLastResponse(messagesForQuery)
             taskBudgetRemaining = Math.max(
               0,
               (taskBudgetRemaining ?? params.taskBudget.total) -
@@ -1281,7 +1236,7 @@ async function* queryLoop(
             )
           }
 
-          const postCompactMessages = buildPostCompactMessages(compacted)
+          const postCompactMessages = deps.buildPostCompactMessages(compacted)
           for (const msg of postCompactMessages) {
             yield msg
           }
@@ -1307,7 +1262,7 @@ async function* queryLoop(
         // on prompt-too-long creates a death spiral: error → hook blocking
         // → retry → error → … (the hook injects more tokens each cycle).
         yield lastMessage
-        void executeStopFailureHooks(lastMessage, toolUseContext)
+        void deps.executeStopFailureHooks(lastMessage, toolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
       } else if (
         feature('CONTEXT_COLLAPSE') &&
@@ -1318,7 +1273,7 @@ async function* queryLoop(
         // couldn't recover (staged queue empty/stale). Surface. Same
         // early-return rationale — don't fall through to stop hooks.
         yield lastMessage
-        void executeStopFailureHooks(lastMessage, toolUseContext)
+        void deps.executeStopFailureHooks(lastMessage, toolUseContext)
         return { reason: 'prompt_too_long' }
       }
 
@@ -1332,16 +1287,12 @@ async function* queryLoop(
         // override check), then falls through to multi-turn recovery if
         // 64k also hits the cap.
         // 3P default: false (not validated on Bedrock/Vertex)
-        const capEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-          'tengu_otk_slot_v1',
-          false,
-        )
+        const capEnabled = config.gates.maxOutputTokensEscalationEnabled
         if (
           capEnabled &&
-          maxOutputTokensOverride === undefined &&
-          !process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+          maxOutputTokensOverride === undefined
         ) {
-          logEvent('tengu_max_tokens_escalate', {
+          deps.logEvent('tengu_max_tokens_escalate', {
             escalatedTo: ESCALATED_MAX_TOKENS,
           })
           const next: State = {
@@ -1400,11 +1351,11 @@ async function* queryLoop(
       // real response — hooks evaluating it create a death spiral:
       // error → hook blocking → retry → error → …
       if (lastMessage?.isApiErrorMessage) {
-        void executeStopFailureHooks(lastMessage, toolUseContext)
+        void deps.executeStopFailureHooks(lastMessage, toolUseContext)
         return { reason: 'completed' }
       }
 
-      const stopHookResult = yield* handleStopHooks(
+      const stopHookResult = yield* deps.handleStopHooks(
         messagesForQuery,
         assistantMessages,
         systemPrompt,
@@ -1449,13 +1400,13 @@ async function* queryLoop(
         const decision = checkTokenBudget(
           budgetTracker!,
           toolUseContext.agentId,
-          getCurrentTurnTokenBudget(),
-          getTurnOutputTokens(),
+          deps.getCurrentTurnTokenBudget(),
+          deps.getTurnOutputTokens(),
         )
 
         if (decision.action === 'continue') {
-          incrementBudgetContinuationCount()
-          logForDebugging(
+          deps.incrementBudgetContinuationCount()
+          deps.logForDebugging(
             `Token budget continuation #${decision.continuationCount}: ${decision.pct}% (${decision.turnTokens.toLocaleString()} / ${decision.budget.toLocaleString()})`,
           )
           state = {
@@ -1482,11 +1433,11 @@ async function* queryLoop(
 
         if (decision.completionEvent) {
           if (decision.completionEvent.diminishingReturns) {
-            logForDebugging(
+            deps.logForDebugging(
               `Token budget early stop: diminishing returns at ${decision.completionEvent.pct}%`,
             )
           }
-          logEvent('tengu_token_budget_completed', {
+          deps.logEvent('tengu_token_budget_completed', {
             ...decision.completionEvent,
             queryChainId: queryChainIdForAnalytics,
             queryDepth: queryTracking.depth,
@@ -1500,17 +1451,17 @@ async function* queryLoop(
     let shouldPreventContinuation = false
     let updatedToolUseContext = toolUseContext
 
-    queryCheckpoint('query_tool_execution_start')
+    deps.queryCheckpoint('query_tool_execution_start')
 
 
     if (streamingToolExecutor) {
-      logEvent('tengu_streaming_tool_execution_used', {
+      deps.logEvent('tengu_streaming_tool_execution_used', {
         tool_count: toolUseBlocks.length,
         queryChainId: queryChainIdForAnalytics,
         queryDepth: queryTracking.depth,
       })
     } else {
-      logEvent('tengu_streaming_tool_execution_not_used', {
+      deps.logEvent('tengu_streaming_tool_execution_not_used', {
         tool_count: toolUseBlocks.length,
         queryChainId: queryChainIdForAnalytics,
         queryDepth: queryTracking.depth,
@@ -1546,7 +1497,7 @@ async function* queryLoop(
         }
       }
     }
-    queryCheckpoint('query_tool_execution_end')
+    deps.queryCheckpoint('query_tool_execution_end')
 
     // Generate tool use summary after tool batch completes — passed to next recursive call
     let nextPendingToolUseSummary:
@@ -1606,7 +1557,7 @@ async function* queryLoop(
       })
 
       // Fire off summary generation without blocking the next API call
-      nextPendingToolUseSummary = generateToolUseSummary({
+      nextPendingToolUseSummary = deps.generateToolUseSummary({
         tools: toolInfoForSummary,
         signal: toolUseContext.abortController.signal,
         isNonInteractiveSession: toolUseContext.options.isNonInteractiveSession,
@@ -1646,7 +1597,7 @@ async function* queryLoop(
       // Check maxTurns before returning when aborted
       const nextTurnCountOnAbort = turnCount + 1
       if (maxTurns && nextTurnCountOnAbort > maxTurns) {
-        yield createAttachmentMessage({
+        yield deps.createAttachmentMessage({
           type: 'max_turns_reached',
           maxTurns,
           turnCount: nextTurnCountOnAbort,
@@ -1662,7 +1613,7 @@ async function* queryLoop(
 
     if (tracking?.compacted) {
       tracking.turnCounter++
-      logEvent('tengu_post_autocompact_turn', {
+      deps.logEvent('tengu_post_autocompact_turn', {
         turnId:
           tracking.turnId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         turnCounter: tracking.turnCounter,
@@ -1676,7 +1627,7 @@ async function* queryLoop(
     // will error if we interleave tool_result messages with regular user messages.
 
     // Instrumentation: Track message count before attachments
-    logEvent('tengu_query_before_attachments', {
+    deps.logEvent('tengu_query_before_attachments', {
       messagesForQueryCount: messagesForQuery.length,
       assistantMessagesCount: assistantMessages.length,
       toolResultsCount: toolResults.length,
@@ -1707,17 +1658,17 @@ async function* queryLoop(
     const isMainThread =
       querySource.startsWith('repl_main_thread') || querySource === 'sdk'
     const currentAgentId = toolUseContext.agentId
-    const queuedCommandsSnapshot = getCommandsByMaxPriority(
+    const queuedCommandsSnapshot = deps.getCommandsByMaxPriority(
       sleepRan ? 'later' : 'next',
     ).filter(cmd => {
-      if (isSlashCommand(cmd)) return false
+      if (deps.isSlashCommand(cmd)) return false
       if (isMainThread) return cmd.agentId === undefined
       // Subagents only drain task-notifications addressed to them — never
       // user prompts, even if someone stamps an agentId on one.
       return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
     })
 
-    for await (const attachment of getAttachmentMessages(
+    for await (const attachment of deps.getAttachmentMessages(
       null,
       updatedToolUseContext,
       null,
@@ -1741,12 +1692,12 @@ async function* queryLoop(
       pendingMemoryPrefetch.settledAt !== null &&
       pendingMemoryPrefetch.consumedOnIteration === -1
     ) {
-      const memoryAttachments = filterDuplicateMemoryAttachments(
+      const memoryAttachments = deps.filterDuplicateMemoryAttachments(
         await pendingMemoryPrefetch.promise,
         toolUseContext.readFileState,
       )
       for (const memAttachment of memoryAttachments) {
-        const msg = createAttachmentMessage(memAttachment)
+        const msg = deps.createAttachmentMessage(memAttachment)
         yield msg
         toolResults.push(msg)
       }
@@ -1761,7 +1712,7 @@ async function* queryLoop(
       const skillAttachments =
         await skillPrefetch.collectSkillDiscoveryPrefetch(pendingSkillPrefetch)
       for (const att of skillAttachments) {
-        const msg = createAttachmentMessage(att)
+        const msg = deps.createAttachmentMessage(att)
         yield msg
         toolResults.push(msg)
       }
@@ -1776,10 +1727,10 @@ async function* queryLoop(
       for (const cmd of consumedCommands) {
         if (cmd.uuid) {
           consumedCommandUuids.push(cmd.uuid)
-          notifyCommandLifecycle(cmd.uuid, 'started')
+          deps.notifyCommandLifecycle(cmd.uuid, 'started')
         }
       }
-      removeFromQueue(consumedCommands)
+      deps.removeFromQueue(consumedCommands)
     }
 
     // Instrumentation: Track file change attachments after they're added
@@ -1789,7 +1740,7 @@ async function* queryLoop(
         tr.type === 'attachment' && tr.attachment.type === 'edited_text_file',
     )
 
-    logEvent('tengu_query_after_attachments', {
+    deps.logEvent('tengu_query_after_attachments', {
       totalToolResultsCount: toolResults.length,
       fileChangeAttachmentCount,
       queryChainId: queryChainIdForAnalytics,
@@ -1843,7 +1794,7 @@ async function* queryLoop(
 
     // Check if we've reached the max turns limit
     if (maxTurns && nextTurnCount > maxTurns) {
-      yield createAttachmentMessage({
+      yield deps.createAttachmentMessage({
         type: 'max_turns_reached',
         maxTurns,
         turnCount: nextTurnCount,
@@ -1851,7 +1802,7 @@ async function* queryLoop(
       return { reason: 'max_turns', turnCount: nextTurnCount }
     }
 
-    queryCheckpoint('query_recursive_call')
+    deps.queryCheckpoint('query_recursive_call')
     const next: State = {
       messages: [...messagesForQuery, ...assistantMessages, ...toolResults],
       toolUseContext: toolUseContextWithQueryTracking,

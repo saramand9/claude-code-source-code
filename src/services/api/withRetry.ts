@@ -46,6 +46,9 @@ import {
 } from '../rateLimitMocking.js'
 import { REPEATED_529_ERROR_MESSAGE } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
+import { FallbackTriggeredError } from './fallbackError.js'
+
+export { FallbackTriggeredError } from './fallbackError.js'
 
 const abortError = () => new APIUserAbortError()
 
@@ -154,16 +157,6 @@ export class CannotRetryError extends Error {
     if (originalError instanceof Error && originalError.stack) {
       this.stack = originalError.stack
     }
-  }
-}
-
-export class FallbackTriggeredError extends Error {
-  constructor(
-    public readonly originalModel: string,
-    public readonly fallbackModel: string,
-  ) {
-    super(`Model fallback triggered: ${originalModel} -> ${fallbackModel}`)
-    this.name = 'FallbackTriggeredError'
   }
 }
 

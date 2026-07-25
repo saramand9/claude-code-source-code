@@ -7,8 +7,13 @@
   "scripts": {
     "prepare-src": "node scripts/prepare-src.mjs",
     "build": "node scripts/build.mjs",
+    "build:core": "node scripts/build-core.mjs",
     "audit:features": "node scripts/audit-features.mjs",
     "check": "tsc --noEmit",
+    "test:core-boundary": "node scripts/test-core-boundary.mjs",
+    "test:core-smoke": "node scripts/test-core-smoke.mjs",
+    "test:core-session": "node scripts/test-core-session.mjs",
+    "test:core": "npm run build:core && npm run test:core-boundary && npm run test:core-smoke && npm run test:core-session",
     "test:build-safety": "node scripts/test-build-safety.mjs",
     "test:cli-e2e": "node scripts/test-cli-resume-e2e.mjs",
     "start": "node dist/cli.js"

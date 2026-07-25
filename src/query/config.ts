@@ -23,6 +23,7 @@ export type QueryConfig = {
     emitToolUseSummaries: boolean
     isAnt: boolean
     fastModeEnabled: boolean
+    maxOutputTokensEscalationEnabled: boolean
   }
 }
 
@@ -41,6 +42,9 @@ export function buildQueryConfig(): QueryConfig {
       // (axios, settings, auth, model, oauth, config) into test shards that
       // didn't previously load it — changes init order and breaks unrelated tests.
       fastModeEnabled: !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FAST_MODE),
+      maxOutputTokensEscalationEnabled:
+        checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_otk_slot_v1') &&
+        !process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
     },
   }
 }
